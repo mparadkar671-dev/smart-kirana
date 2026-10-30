@@ -224,15 +224,11 @@ export class KiranaDatabase extends Dexie {
   }
 
   /**
-   * Fetch current shop profile
+   * Fetch current shop profile (pure read-only for liveQuery)
    */
   async getShopProfile(): Promise<ShopProfile> {
     const profile = await this.shop_profile.get(DEFAULT_SHOP_PROFILE.id);
-    if (!profile) {
-      await this.shop_profile.add(DEFAULT_SHOP_PROFILE);
-      return DEFAULT_SHOP_PROFILE;
-    }
-    return profile;
+    return profile || DEFAULT_SHOP_PROFILE;
   }
 
   /**
