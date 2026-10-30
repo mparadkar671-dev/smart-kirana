@@ -37,7 +37,7 @@ export const Shell: React.FC<ShellProps> = ({
   children,
 }) => {
   const { theme, toggleTheme } = useTheme();
-  const { user, isAuthenticated, signOut } = useAuth();
+  const { user, isAuthenticated, isOfflineGuest, signOut } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
 
@@ -124,6 +124,25 @@ export const Shell: React.FC<ShellProps> = ({
                 className="p-1 text-slate-400 hover:text-red-400 transition"
               >
                 <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : isOfflineGuest ? (
+            <div className="p-2.5 bg-slate-800/80 rounded-xl border border-amber-500/30 flex items-center justify-between">
+              <div className="flex items-center gap-2 overflow-hidden">
+                <div className="w-7 h-7 rounded-lg bg-amber-600/30 flex items-center justify-center text-amber-400 text-xs font-bold shrink-0">
+                  <UserIcon className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="overflow-hidden">
+                  <div className="text-[11px] font-semibold text-white truncate">Offline Counter</div>
+                  <div className="text-[9px] text-amber-400 font-medium">Local Database Mode</div>
+                </div>
+              </div>
+              <button
+                onClick={() => signOut()}
+                title="Exit to Login / Sign Up"
+                className="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-[10px] font-bold text-slate-200 rounded-lg transition"
+              >
+                Sign In
               </button>
             </div>
           ) : (

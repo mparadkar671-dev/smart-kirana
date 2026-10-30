@@ -81,6 +81,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await authService.signOut();
     setUser(null);
     setSession(null);
+    localStorage.removeItem('kirana_guest_mode');
+    setIsOfflineGuest(false);
   };
 
   const resetPassword = async (email: string) => {
@@ -114,3 +116,4 @@ export const useAuth = () => {
   }
   return context;
 };
+

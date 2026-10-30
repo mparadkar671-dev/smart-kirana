@@ -148,14 +148,14 @@ export const KhataView: React.FC<KhataViewProps> = ({
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs transition-colors">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <BookOpen className="w-6 h-6 text-blue-700" />
-            Customer Khata & Udhari Register
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <BookOpen className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            Customer Khata &amp; Udhari Register
           </h1>
-          <p className="text-xs text-slate-500">
-            Automated WhatsApp statements & passbook reconciliation | Zero accounting discrepancy
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Automated WhatsApp statements &amp; passbook reconciliation | Zero accounting discrepancy
           </p>
         </div>
       </div>
@@ -163,49 +163,49 @@ export const KhataView: React.FC<KhataViewProps> = ({
       {/* Top KPI Bar (REQ-10) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="khata-kpi-bar">
         {/* Total Market Udhari to Collect (Crimson Red #dc2626) */}
-        <div className="bg-red-50/70 border border-red-200 rounded-2xl p-5 flex items-center justify-between">
+        <div className="bg-red-50/70 dark:bg-red-950/30 border border-red-200 dark:border-red-800/60 rounded-2xl p-5 flex items-center justify-between transition-colors">
           <div className="space-y-1">
-            <span className="text-xs font-bold text-red-800 uppercase tracking-wide">
+            <span className="text-xs font-bold text-red-800 dark:text-red-400 uppercase tracking-wide">
               Total Market Udhari to Collect
             </span>
-            <p className="text-2xl font-extrabold text-[#dc2626]" data-testid="total-market-udhari">
+            <p className="text-2xl font-extrabold text-[#dc2626] dark:text-red-400" data-testid="total-market-udhari">
               {formatINR(totalMarketUdhari)}
             </p>
-            <p className="text-[11px] text-red-600 font-medium">Pending from customers</p>
+            <p className="text-[11px] text-red-600 dark:text-red-400 font-medium">Pending from customers</p>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-red-500/10 flex items-center justify-center text-red-600 shrink-0">
+          <div className="w-12 h-12 rounded-2xl bg-red-500/10 dark:bg-red-500/20 flex items-center justify-center text-red-600 dark:text-red-400 shrink-0">
             <BookOpen className="w-6 h-6" />
           </div>
         </div>
 
         {/* Overdue > 15 Days Count */}
-        <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-5 flex items-center justify-between">
+        <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-2xl p-5 flex items-center justify-between transition-colors">
           <div className="space-y-1">
-            <span className="text-xs font-bold text-amber-800 uppercase tracking-wide">
+            <span className="text-xs font-bold text-amber-800 dark:text-amber-400 uppercase tracking-wide">
               Overdue &gt; 15 Days
             </span>
-            <p className="text-2xl font-extrabold text-amber-900" data-testid="overdue-count">
+            <p className="text-2xl font-extrabold text-amber-900 dark:text-amber-200" data-testid="overdue-count">
               {overdueCount} Customers
             </p>
-            <p className="text-[11px] text-amber-700 font-medium">Actionable WhatsApp reminders needed</p>
+            <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium">Actionable WhatsApp reminders needed</p>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-600 shrink-0">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 dark:bg-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
             <Clock className="w-6 h-6" />
           </div>
         </div>
 
         {/* Today's Jama Recovered (Emerald Green #16a34a) */}
-        <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-5 flex items-center justify-between">
+        <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-2xl p-5 flex items-center justify-between transition-colors">
           <div className="space-y-1">
-            <span className="text-xs font-bold text-emerald-800 uppercase tracking-wide">
+            <span className="text-xs font-bold text-emerald-800 dark:text-emerald-400 uppercase tracking-wide">
               Today&apos;s Jama Recovered
             </span>
-            <p className="text-2xl font-extrabold text-[#16a34a]" data-testid="today-jama-recovered">
+            <p className="text-2xl font-extrabold text-[#16a34a] dark:text-emerald-400" data-testid="today-jama-recovered">
               {formatINR(todayJamaRecovered)}
             </p>
-            <p className="text-[11px] text-emerald-600 font-medium">Cash & UPI settled today</p>
+            <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Cash &amp; UPI settled today</p>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-600 shrink-0">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
             <CheckCircle className="w-6 h-6" />
           </div>
         </div>
@@ -223,7 +223,7 @@ export const KhataView: React.FC<KhataViewProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search customer by Name or 10-digit Mobile..."
-              className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-2xs"
+              className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-2xs"
             />
           </div>
 
@@ -244,8 +244,8 @@ export const KhataView: React.FC<KhataViewProps> = ({
                 onClick={() => setAgingFilter(btn.id)}
                 className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
                   agingFilter === btn.id
-                    ? 'bg-blue-800 text-white shadow-xs'
-                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                    ? 'bg-blue-700 dark:bg-blue-600 text-white shadow-xs'
+                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
                 {btn.label}
@@ -255,10 +255,10 @@ export const KhataView: React.FC<KhataViewProps> = ({
         </div>
 
         {/* Customer Khata Table */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden transition-colors">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm" data-testid="customers-table">
-              <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 font-semibold uppercase">
+              <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">
                 <tr>
                   <th className="p-3">Customer Name</th>
                   <th className="p-3">Phone</th>
@@ -268,10 +268,10 @@ export const KhataView: React.FC<KhataViewProps> = ({
                   <th className="p-3 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredAndSortedCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-xs text-slate-500">
+                    <td colSpan={6} className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
                       No customers match your search or filter.
                     </td>
                   </tr>
@@ -284,35 +284,35 @@ export const KhataView: React.FC<KhataViewProps> = ({
                       <tr
                         key={cust.id}
                         data-testid={`customer-row-${cust.id}`}
-                        className="hover:bg-slate-50/60 transition group"
+                        className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition group"
                       >
                         {/* Name */}
                         <td className="p-3">
-                          <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                          <div className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                             <span>{cust.name}</span>
                             {isExceeded && (
                               <span
                                 title="Credit Limit Exceeded"
-                                className="px-1.5 py-0.2 bg-red-100 text-red-700 text-[10px] font-bold rounded"
+                                className="px-1.5 py-0.2 bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 text-[10px] font-bold rounded"
                               >
                                 Over Limit
                               </span>
                             )}
                           </div>
                           {cust.address_landmark && (
-                            <span className="text-[11px] text-slate-400 block">
+                            <span className="text-[11px] text-slate-400 dark:text-slate-500 block">
                               {cust.address_landmark}
                             </span>
                           )}
                         </td>
 
                         {/* Phone */}
-                        <td className="p-3 font-mono text-xs text-slate-600">
+                        <td className="p-3 font-mono text-xs text-slate-600 dark:text-slate-400">
                           {cust.phone}
                         </td>
 
                         {/* Credit Limit */}
-                        <td className="p-3 text-right text-xs text-slate-500">
+                        <td className="p-3 text-right text-xs text-slate-500 dark:text-slate-400">
                           {formatINR(cust.credit_limit)}
                         </td>
 
@@ -321,8 +321,8 @@ export const KhataView: React.FC<KhataViewProps> = ({
                           <span
                             className={`font-extrabold text-sm ${
                               cust.current_udhari_balance > 0
-                                ? 'text-[#dc2626]'
-                                : 'text-[#16a34a]'
+                                ? 'text-[#dc2626] dark:text-red-400'
+                                : 'text-[#16a34a] dark:text-emerald-400'
                             }`}
                           >
                             {formatINR(cust.current_udhari_balance)}
@@ -335,16 +335,16 @@ export const KhataView: React.FC<KhataViewProps> = ({
                             <span
                               className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold ${
                                 aging > 15
-                                  ? 'bg-red-100 text-red-800'
+                                  ? 'bg-red-100 dark:bg-red-950 text-red-800 dark:text-red-300'
                                   : aging > 7
-                                  ? 'bg-amber-100 text-amber-800'
-                                  : 'bg-emerald-100 text-emerald-800'
+                                  ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
+                                  : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
                               }`}
                             >
                               {aging}d
                             </span>
                           ) : (
-                            <span className="text-slate-300">-</span>
+                            <span className="text-slate-300 dark:text-slate-600">-</span>
                           )}
                         </td>
 
@@ -355,7 +355,7 @@ export const KhataView: React.FC<KhataViewProps> = ({
                             <button
                               type="button"
                               onClick={() => handleOpenPassbook(cust)}
-                              className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-lg text-xs font-semibold transition"
+                              className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 rounded-lg text-xs font-semibold transition"
                             >
                               Passbook
                             </button>
@@ -367,7 +367,7 @@ export const KhataView: React.FC<KhataViewProps> = ({
                               disabled={cust.current_udhari_balance <= 0}
                               onClick={() => handleDirectWhatsApp(cust)}
                               title="Send 1-Click WhatsApp Reminder"
-                              className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 disabled:opacity-30 transition"
+                              className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 disabled:opacity-30 transition"
                             >
                               <MessageSquare className="w-4 h-4" />
                             </button>

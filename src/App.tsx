@@ -9,10 +9,12 @@ import { GallaView } from './components/galla/GallaView';
 import { ReportsView } from './components/reports/ReportsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { ThemeProvider } from './context/ThemeContext';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthPage } from './components/auth/AuthPage';
 import { Sparkles, PlusCircle } from 'lucide-react';
 
 const MainApp: React.FC = () => {
+  const { user, isOfflineGuest, isLoading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>('pos');
   const [isDbReady, setIsDbReady] = useState(false);
 
@@ -52,14 +54,19 @@ const MainApp: React.FC = () => {
   const customers = useLiveQuery(() => db.customers.toArray(), [], []);
   const shopProfile = useLiveQuery(() => db.getShopProfile(), []);
 
-  if (!isDbReady) {
+  if (!isDbReady || authLoading) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
-        <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
         <h2 className="text-lg font-bold">Initializing Smart Kirana POS...</h2>
         <p className="text-sm text-slate-400">Loading offline IndexedDB database &amp; inventory master</p>
       </div>
     );
+  }
+
+  // Standard Gateway: Start with Login & Registration Page unless already authenticated or in offline guest mode
+  if (!user && !isOfflineGuest) {
+    return <AuthPage />;
   }
 
   const isStoreFreshEmpty = products && products.length === 0;

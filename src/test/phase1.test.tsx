@@ -174,6 +174,10 @@ describe('Phase 1 Verification Gate - Math Precision & Accounting Invariants (RE
 });
 
 describe('Phase 1 Verification Gate - Layout Shell & Viewport Responsiveness (REQ-01)', () => {
+  beforeEach(() => {
+    localStorage.setItem('kirana_guest_mode', 'true');
+  });
+
   it('Renders desktop sidebar (1440x900) and mobile navigation bar (390x844)', async () => {
     const { container } = render(<App />);
 

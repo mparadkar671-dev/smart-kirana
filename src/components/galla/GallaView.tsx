@@ -93,13 +93,13 @@ export const GallaView: React.FC = () => {
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs transition-colors">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <Wallet className="w-6 h-6 text-blue-700" />
-            Daily Galla (Physical Cash Drawer) & Expenses
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Wallet className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            Daily Galla (Physical Cash Drawer) &amp; Expenses
           </h1>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Reconcile morning cash, cash sales, Udhari Jama, and evening physical count
           </p>
         </div>
@@ -118,12 +118,12 @@ export const GallaView: React.FC = () => {
       {/* Cash Drawer Flow Cards (REQ-13 & REQ-22) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5" data-testid="galla-flow-grid">
         {/* 1. Opening Cash */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-2">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs space-y-2 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase">1. Opening Cash</span>
-            <Clock className="w-4 h-4 text-slate-400" />
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">1. Opening Cash</span>
+            <Clock className="w-4 h-4 text-slate-400 dark:text-slate-500" />
           </div>
-          <div className="text-xl font-bold text-slate-800" data-testid="galla-opening-cash">
+          <div className="text-xl font-bold text-slate-800 dark:text-slate-100" data-testid="galla-opening-cash">
             {formatINR(session.opening_cash)}
           </div>
           <div className="flex gap-1 pt-1">
@@ -133,14 +133,14 @@ export const GallaView: React.FC = () => {
               data-testid="opening-cash-input"
               value={openingCashInput}
               onChange={(e) => setOpeningCashInput(e.target.value)}
-              className="w-full px-2 py-1 text-xs border border-slate-200 rounded-lg"
+              className="w-full px-2 py-1 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white"
               placeholder="Opening ₹"
             />
             <button
               type="button"
               data-testid="save-opening-cash-btn"
               onClick={handleUpdateOpeningCash}
-              className="px-2 py-1 bg-slate-800 hover:bg-slate-900 text-white text-[10px] font-bold rounded-lg"
+              className="px-2 py-1 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white text-[10px] font-bold rounded-lg transition"
             >
               Set
             </button>
@@ -148,57 +148,57 @@ export const GallaView: React.FC = () => {
         </div>
 
         {/* 2. Cash Sales Today */}
-        <div className="bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200 shadow-2xs space-y-1">
+        <div className="bg-emerald-50/70 dark:bg-emerald-950/30 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 shadow-2xs space-y-1 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-emerald-800 uppercase">+ 2. Cash Sales</span>
-            <CheckCircle className="w-4 h-4 text-emerald-600" />
+            <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400 uppercase">+ 2. Cash Sales</span>
+            <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <div className="text-xl font-extrabold text-[#16a34a]" data-testid="galla-cash-sales">
+          <div className="text-xl font-extrabold text-[#16a34a] dark:text-emerald-400" data-testid="galla-cash-sales">
             {formatINR(session.cash_sales_total)}
           </div>
-          <p className="text-[10px] text-emerald-700">From counter POS cash bills</p>
+          <p className="text-[10px] text-emerald-700 dark:text-emerald-500">From counter POS cash bills</p>
         </div>
 
         {/* 3. Cash Udhari Recovered */}
-        <div className="bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200 shadow-2xs space-y-1">
+        <div className="bg-emerald-50/70 dark:bg-emerald-950/30 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 shadow-2xs space-y-1 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-emerald-800 uppercase">+ 3. Cash Jama</span>
-            <CheckCircle className="w-4 h-4 text-emerald-600" />
+            <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400 uppercase">+ 3. Cash Jama</span>
+            <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <div className="text-xl font-extrabold text-[#16a34a]" data-testid="galla-cash-recovered">
+          <div className="text-xl font-extrabold text-[#16a34a] dark:text-emerald-400" data-testid="galla-cash-recovered">
             {formatINR(session.cash_udhari_recovered)}
           </div>
-          <p className="text-[10px] text-emerald-700">Khata customer cash settlements</p>
+          <p className="text-[10px] text-emerald-700 dark:text-emerald-500">Khata customer cash settlements</p>
         </div>
 
         {/* 4. Cash Expenses Out */}
-        <div className="bg-red-50/70 p-4 rounded-2xl border border-red-200 shadow-2xs space-y-1">
+        <div className="bg-red-50/70 dark:bg-red-950/30 p-4 rounded-2xl border border-red-200 dark:border-red-800/60 shadow-2xs space-y-1 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-red-800 uppercase">- 4. Cash Expenses</span>
-            <TrendingDown className="w-4 h-4 text-red-600" />
+            <span className="text-[11px] font-bold text-red-800 dark:text-red-400 uppercase">- 4. Cash Expenses</span>
+            <TrendingDown className="w-4 h-4 text-red-600 dark:text-red-400" />
           </div>
-          <div className="text-xl font-extrabold text-[#dc2626]" data-testid="galla-cash-expenses">
+          <div className="text-xl font-extrabold text-[#dc2626] dark:text-red-400" data-testid="galla-cash-expenses">
             {formatINR(session.cash_expenses_out)}
           </div>
-          <p className="text-[10px] text-red-700">Paid directly from drawer cash</p>
+          <p className="text-[10px] text-red-700 dark:text-red-400">Paid directly from drawer cash</p>
         </div>
       </div>
 
       {/* Reconciliation Card (Expected vs Counted vs Discrepancy) */}
-      <div className="bg-white rounded-2xl border-2 border-blue-900/10 p-5 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-100">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border-2 border-blue-900/10 dark:border-blue-500/20 p-5 shadow-xs space-y-4 transition-colors">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
           <div>
-            <h2 className="text-base font-bold text-slate-900">
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">
               Evening Drawer Reconciliation (Surplus / Shortage Audit)
             </h2>
-            <p className="text-xs text-slate-500 font-mono">
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
               Expected = Opening ({session.opening_cash}) + Cash Sales ({session.cash_sales_total}) + Jama ({session.cash_udhari_recovered}) - Expenses ({session.cash_expenses_out})
             </p>
           </div>
 
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-right">
-            <span className="text-[11px] font-bold text-blue-800 uppercase">Expected in Drawer</span>
-            <div className="text-2xl font-extrabold text-blue-950" data-testid="expected-closing-cash">
+          <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl text-right">
+            <span className="text-[11px] font-bold text-blue-800 dark:text-blue-400 uppercase">Expected in Drawer</span>
+            <div className="text-2xl font-extrabold text-blue-950 dark:text-blue-200" data-testid="expected-closing-cash">
               {formatINR(session.expected_closing_cash)}
             </div>
           </div>
@@ -207,7 +207,7 @@ export const GallaView: React.FC = () => {
         {/* Counted Cash Form */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
           <div className="space-y-1.5">
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
               Actual Physical Cash Counted in Drawer (Evening)
             </label>
             <div className="flex gap-2">
@@ -221,14 +221,14 @@ export const GallaView: React.FC = () => {
                   value={countedCashInput}
                   onChange={(e) => setCountedCashInput(e.target.value)}
                   placeholder="Enter counted physical cash..."
-                  className="w-full pl-8 pr-3.5 py-2.5 border border-slate-300 rounded-xl text-base font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full pl-8 pr-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-base font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 />
               </div>
               <button
                 type="button"
                 data-testid="reconcile-btn"
                 onClick={handleReconcileEvening}
-                className="px-4 py-2.5 bg-blue-800 hover:bg-blue-900 text-white rounded-xl text-xs font-bold transition shadow-xs"
+                className="px-4 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
               >
                 Reconcile
               </button>
@@ -241,10 +241,10 @@ export const GallaView: React.FC = () => {
               data-testid="galla-discrepancy-card"
               className={`p-4 rounded-xl border flex items-center justify-between ${
                 discrepancy === 0
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
                   : discrepancy > 0
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                  : 'bg-red-50 border-red-300 text-red-900'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+                  : 'bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-700 text-red-900 dark:text-red-200'
               }`}
             >
               <div>
@@ -262,7 +262,7 @@ export const GallaView: React.FC = () => {
               <div
                 data-testid="discrepancy-amount"
                 className={`text-xl font-extrabold ${
-                  discrepancy >= 0 ? 'text-[#16a34a]' : 'text-[#dc2626]'
+                  discrepancy >= 0 ? 'text-[#16a34a] dark:text-emerald-400' : 'text-[#dc2626] dark:text-red-400'
                 }`}
               >
                 {discrepancy > 0 ? `+${formatINR(discrepancy)}` : formatINR(discrepancy)}
@@ -273,17 +273,17 @@ export const GallaView: React.FC = () => {
       </div>
 
       {/* Today's Recorded Expenses Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-slate-200 flex justify-between items-center">
-          <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-            <TrendingDown className="w-4 h-4 text-red-600" />
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden transition-colors">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+          <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+            <TrendingDown className="w-4 h-4 text-red-600 dark:text-red-400" />
             Today&apos;s Expenses &amp; Drawings Log ({expenses.length})
           </h3>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs" data-testid="expenses-table">
-            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+            <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
               <tr>
                 <th className="p-3">Time</th>
                 <th className="p-3">Description</th>
@@ -292,40 +292,40 @@ export const GallaView: React.FC = () => {
                 <th className="p-3 text-right">Amount</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {expenses.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="p-6 text-center text-slate-400">
+                  <td colSpan={5} className="p-6 text-center text-slate-400 dark:text-slate-500">
                     No expenses recorded today yet.
                   </td>
                 </tr>
               ) : (
                 expenses.map((e) => (
-                  <tr key={e.id} className="hover:bg-slate-50/50">
-                    <td className="p-3 font-mono text-slate-500">
+                  <tr key={e.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                    <td className="p-3 font-mono text-slate-500 dark:text-slate-400">
                       {new Date(e.created_at).toLocaleTimeString('en-IN', {
                         hour: '2-digit',
                         minute: '2-digit',
                       })}
                     </td>
-                    <td className="p-3 font-medium text-slate-800">{e.description}</td>
-                    <td className="p-3 text-slate-600 font-mono text-[10px]">
+                    <td className="p-3 font-medium text-slate-800 dark:text-slate-200">{e.description}</td>
+                    <td className="p-3 text-slate-600 dark:text-slate-400 font-mono text-[10px]">
                       {e.category.replace(/_/g, ' ')}
                     </td>
-                    <td className="p-3 text-slate-600">
+                    <td className="p-3 text-slate-600 dark:text-slate-400">
                       <span
                         className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                           e.paid_via === 'CASH_GALLA'
-                            ? 'bg-amber-100 text-amber-800'
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
                             : e.paid_via === 'UPI_BANK'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-purple-100 text-purple-800'
+                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                            : 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
                         }`}
                       >
                         {e.paid_via.replace(/_/g, ' ')}
                       </span>
                     </td>
-                    <td className="p-3 text-right font-bold text-red-600">
+                    <td className="p-3 text-right font-bold text-red-600 dark:text-red-400">
                       -{formatINR(e.amount)}
                     </td>
                   </tr>
@@ -339,13 +339,13 @@ export const GallaView: React.FC = () => {
       {/* Record Expense Modal */}
       {isExpenseModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-red-50/80">
-              <h2 className="text-base font-bold text-slate-900">Record Shop Expense / Drawing</h2>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-red-50/80 dark:bg-red-950/40">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Record Shop Expense / Drawing</h2>
               <button
                 type="button"
                 onClick={() => setIsExpenseModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-700"
+                className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
               >
                 &times;
               </button>
@@ -353,23 +353,23 @@ export const GallaView: React.FC = () => {
 
             <form onSubmit={handleRecordExpense} className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1">
                   Category *
                 </label>
                 <select
                   value={expCategory}
                   onChange={(e) => setExpCategory(e.target.value as ExpenseCategory)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs bg-white"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                 >
-                  <option value="SHOP_EXPENSE_TRANSPORT_BAGS">Transport, Polybags & Supplies (Shop Expense)</option>
-                  <option value="SHOP_EXPENSE_RENT_ELEC">Electricity, Rent & Tea (Shop Expense)</option>
+                  <option value="SHOP_EXPENSE_TRANSPORT_BAGS">Transport, Polybags &amp; Supplies (Shop Expense)</option>
+                  <option value="SHOP_EXPENSE_RENT_ELEC">Electricity, Rent &amp; Tea (Shop Expense)</option>
                   <option value="OWNER_CASH_DRAWING">Owner Cash Drawing (Personal Household Use)</option>
                   <option value="HOME_SELF_USE_GOODS">Home Grocery Consumption</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1">
                   Amount (₹) *
                 </label>
                 <input
@@ -380,13 +380,13 @@ export const GallaView: React.FC = () => {
                   data-testid="expense-amount-input"
                   value={expAmount || ''}
                   onChange={(e) => setExpAmount(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm font-bold"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-900 dark:text-white"
                   placeholder="0.00"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1">
                   Paid Via *
                 </label>
                 <div className="grid grid-cols-2 gap-2">
@@ -395,8 +395,8 @@ export const GallaView: React.FC = () => {
                     onClick={() => setExpPaidVia('CASH_GALLA')}
                     className={`py-2 px-1 rounded-xl border text-xs font-bold transition ${
                       expPaidVia === 'CASH_GALLA'
-                        ? 'border-amber-600 bg-amber-50 text-amber-900'
-                        : 'border-slate-200 text-slate-700'
+                        ? 'border-amber-600 bg-amber-50 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
                     }`}
                   >
                     Cash Drawer (Galla)
@@ -406,8 +406,8 @@ export const GallaView: React.FC = () => {
                     onClick={() => setExpPaidVia('UPI_BANK')}
                     className={`py-2 px-1 rounded-xl border text-xs font-bold transition ${
                       expPaidVia === 'UPI_BANK'
-                        ? 'border-blue-600 bg-blue-50 text-blue-900'
-                        : 'border-slate-200 text-slate-700'
+                        ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/50 text-blue-900 dark:text-blue-200'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
                     }`}
                   >
                     Online UPI / Bank
@@ -416,7 +416,7 @@ export const GallaView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1">
                   Description / Remarks *
                 </label>
                 <input
@@ -426,7 +426,7 @@ export const GallaView: React.FC = () => {
                   value={expDesc}
                   onChange={(e) => setExpDesc(e.target.value)}
                   placeholder="e.g. Polybags bundle purchased, Tea & snacks for counter"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white"
                 />
               </div>
 
@@ -434,14 +434,14 @@ export const GallaView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsExpenseModalOpen(false)}
-                  className="px-4 py-2 border border-slate-300 rounded-xl text-xs"
+                  className="px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   data-testid="confirm-expense-btn"
-                  className="px-5 py-2 bg-red-600 text-white font-bold rounded-xl text-xs"
+                  className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs transition"
                 >
                   Save Expense
                 </button>

@@ -93,13 +93,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs transition-colors">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <Package className="w-6 h-6 text-blue-700" />
-            Inventory Master & Stock Ledger
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Package className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            Inventory Master &amp; Stock Ledger
           </h1>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Total {products.length} Products | Double-check append-only ledger active
           </p>
         </div>
@@ -107,7 +107,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         <div className="flex items-center gap-2.5 w-full sm:w-auto">
           <button
             onClick={handleOpenAdd}
-            className="flex-1 sm:flex-initial px-4 py-2.5 bg-blue-800 hover:bg-blue-900 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+            className="flex-1 sm:flex-initial px-4 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
           >
             <Plus className="w-4 h-4" />
             <span>Add Product</span>
@@ -116,13 +116,13 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       </div>
 
       {/* Tabs Switcher */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-1">
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-1">
         <button
           onClick={() => setActiveTab('all')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
             activeTab === 'all'
-              ? 'bg-blue-800 text-white shadow-sm'
-              : 'text-slate-600 hover:bg-slate-200/60'
+              ? 'bg-blue-700 dark:bg-blue-600 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
           <Layers className="w-4 h-4" />
@@ -133,12 +133,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           onClick={() => setActiveTab('restock')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
             activeTab === 'restock'
-              ? 'bg-blue-800 text-white shadow-sm'
-              : 'text-slate-600 hover:bg-slate-200/60'
+              ? 'bg-blue-700 dark:bg-blue-600 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
           <AlertTriangle className={`w-4 h-4 ${totalAlerts > 0 ? 'text-amber-500' : ''}`} />
-          <span>Wholesaler Restock & Alerts</span>
+          <span>Wholesaler Restock &amp; Alerts</span>
           {totalAlerts > 0 && (
             <span
               data-testid="restock-alert-pill"
@@ -162,14 +162,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search products by Name, Short Code (e.g. PG5), Barcode..."
-                className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-2xs"
+                className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-2xs"
               />
             </div>
 
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-2xs"
+              className="px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-2xs"
             >
               <option value="ALL">All Categories ({categories.length})</option>
               {categories.map((c) => (
@@ -181,12 +181,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
 
           {/* Products Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm" data-testid="products-table">
-                <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 font-semibold uppercase">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">
                   <tr>
-                    <th className="p-3">Product Name & Code</th>
+                    <th className="p-3">Product Name &amp; Code</th>
                     <th className="p-3">Category</th>
                     <th className="p-3">Unit</th>
                     <th className="p-3 text-right">Cost Price</th>
@@ -197,33 +197,33 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <th className="p-3 text-center">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {filteredProducts.map((p) => {
                     const margin = calculateProfitMarginPercent(p.purchase_price, p.selling_price);
                     const isLow = p.current_stock <= p.low_stock_threshold;
 
                     return (
-                      <tr key={p.id} className="hover:bg-slate-50/60 transition group">
+                      <tr key={p.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition group">
                         {/* Name + Code */}
                         <td className="p-3">
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-slate-900">{p.name}</span>
+                            <span className="font-semibold text-slate-900 dark:text-slate-100">{p.name}</span>
                             {p.is_quick_tap && (
                               <span
                                 title="Top-24 Pareto Fast-Tap Grid"
-                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-orange-100 text-orange-800 text-[10px] font-bold rounded-md"
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-300 text-[10px] font-bold rounded-md"
                               >
-                                <Sparkles className="w-2.5 h-2.5 text-orange-600" />
+                                <Sparkles className="w-2.5 h-2.5 text-orange-600 dark:text-orange-400" />
                                 24
                               </span>
                             )}
                           </div>
                           <div className="flex items-center gap-2 mt-0.5">
-                            <span className="font-mono text-[10px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                            <span className="font-mono text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded">
                               {p.short_code}
                             </span>
                             {p.barcode && (
-                              <span className="font-mono text-[10px] text-slate-400">
+                              <span className="font-mono text-[10px] text-slate-400 dark:text-slate-500">
                                 {p.barcode}
                               </span>
                             )}
@@ -231,18 +231,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         </td>
 
                         {/* Category */}
-                        <td className="p-3 text-xs text-slate-600">{p.category}</td>
+                        <td className="p-3 text-xs text-slate-600 dark:text-slate-400">{p.category}</td>
 
                         {/* Unit */}
-                        <td className="p-3 text-xs font-medium text-slate-500">{p.unit_type}</td>
+                        <td className="p-3 text-xs font-medium text-slate-500 dark:text-slate-400">{p.unit_type}</td>
 
                         {/* Cost Price */}
-                        <td className="p-3 text-right text-xs text-slate-600">
+                        <td className="p-3 text-right text-xs text-slate-600 dark:text-slate-400">
                           {formatINR(p.purchase_price)}
                         </td>
 
                         {/* Selling Price */}
-                        <td className="p-3 text-right font-bold text-slate-900">
+                        <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
                           {formatINR(p.selling_price)}
                         </td>
 
@@ -251,10 +251,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <span
                             className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-bold ${
                               margin >= 15
-                                ? 'bg-emerald-100 text-emerald-800'
+                                ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
                                 : margin >= 5
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-red-100 text-red-800'
+                                ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
+                                : 'bg-red-100 dark:bg-red-950 text-red-800 dark:text-red-300'
                             }`}
                           >
                             {margin.toFixed(1)}%
@@ -265,16 +265,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         <td className="p-3 text-right">
                           <span
                             className={`font-bold text-sm ${
-                              isLow ? 'text-red-600' : 'text-blue-900'
+                              isLow ? 'text-red-600 dark:text-red-400' : 'text-blue-900 dark:text-blue-300'
                             }`}
                           >
                             {p.current_stock}
                           </span>
-                          <span className="text-[10px] text-slate-400 ml-1">
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500 ml-1">
                             {p.unit_type === 'KG_LOOSE' ? 'kg' : p.unit_type === 'LTR' ? 'L' : ''}
                           </span>
                           {isLow && (
-                            <span className="block text-[10px] font-bold text-red-600">
+                            <span className="block text-[10px] font-bold text-red-600 dark:text-red-400">
                               Low Stock (&le;{p.low_stock_threshold})
                             </span>
                           )}
@@ -286,14 +286,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             <button
                               onClick={() => handleOpenStockIn(p)}
                               title="Quick Restock (Stock In ++)"
-                              className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition"
+                              className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 transition"
                             >
                               <PlusCircle className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleOpenStockOut(p)}
                               title="Stock Out (-- Damage / Home Use)"
-                              className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition"
+                              className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 transition"
                             >
                               <MinusCircle className="w-4 h-4" />
                             </button>
@@ -306,14 +306,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             <button
                               onClick={() => handleOpenEdit(p)}
                               title="Edit Product"
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-blue-700 hover:bg-slate-100 transition"
+                              className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-blue-700 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                             <button
                               onClick={() => handleDelete(p)}
                               title="Delete Product"
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-700 hover:bg-slate-100 transition"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-700 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>

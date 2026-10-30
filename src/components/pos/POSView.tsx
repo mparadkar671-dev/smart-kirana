@@ -405,13 +405,13 @@ export const POSView: React.FC<POSViewProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col lg:flex-row h-full overflow-hidden">
+    <div className="flex-1 flex flex-col lg:flex-row h-full overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
       {/* LEFT PANE: Search Bar & Fast-Tap 24 Grid */}
-      <div className="flex-1 flex flex-col p-3 sm:p-5 overflow-y-auto space-y-4 border-b lg:border-b-0 lg:border-r border-slate-200">
+      <div className="flex-1 flex flex-col p-3 sm:p-5 overflow-y-auto space-y-4 border-b lg:border-b-0 lg:border-r border-slate-200 dark:border-slate-800">
         {/* Success Banner */}
         {successBanner && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-semibold flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-xl text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+            <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span>{successBanner}</span>
           </div>
         )}
@@ -432,10 +432,10 @@ export const POSView: React.FC<POSViewProps> = ({
                 }
               }}
               placeholder="Search by Barcode, Short Code (e.g. PG5, TS1), or Name... [F2 / /]"
-              className="w-full pl-10 pr-20 py-3 bg-white border-2 border-slate-200 focus:border-blue-700 rounded-xl text-sm font-medium focus:outline-none shadow-xs"
+              className="w-full pl-10 pr-20 py-3 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder-slate-400 focus:border-blue-700 dark:focus:border-emerald-500 rounded-xl text-sm font-medium focus:outline-hidden shadow-xs transition"
             />
             <div className="absolute right-3 flex items-center gap-1.5 text-xs text-slate-400">
-              <kbd className="hidden sm:inline px-1.5 py-0.5 bg-slate-100 rounded text-[10px] font-mono">
+              <kbd className="hidden sm:inline px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded text-[10px] font-mono">
                 F2
               </kbd>
               <Barcode className="w-4 h-4 text-slate-400" />
@@ -446,25 +446,25 @@ export const POSView: React.FC<POSViewProps> = ({
           {searchResults.length > 0 && (
             <div
               data-testid="search-results-dropdown"
-              className="absolute left-0 right-0 top-full mt-1.5 bg-white rounded-xl shadow-xl border border-slate-200 divide-y divide-slate-100 z-30 overflow-hidden"
+              className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 z-30 overflow-hidden"
             >
               {searchResults.map((prod) => (
                 <button
                   key={prod.id}
                   type="button"
                   onClick={() => addItemToCart(prod)}
-                  className="w-full p-3 text-left hover:bg-blue-50/60 flex items-center justify-between transition"
+                  className="w-full p-3 text-left hover:bg-blue-50/60 dark:hover:bg-slate-800/80 flex items-center justify-between transition"
                 >
                   <div>
-                    <span className="font-semibold text-slate-900 text-sm">
+                    <span className="font-semibold text-slate-900 dark:text-white text-sm">
                       {prod.name}
                     </span>
-                    <span className="ml-2 font-mono text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                    <span className="ml-2 font-mono text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">
                       {prod.short_code}
                     </span>
                   </div>
                   <div className="text-right">
-                    <span className="font-bold text-slate-900 text-sm">
+                    <span className="font-bold text-slate-900 dark:text-white text-sm">
                       {formatINR(prod.selling_price)}
                     </span>
                     <span className="text-[10px] text-slate-400 block">
@@ -480,7 +480,7 @@ export const POSView: React.FC<POSViewProps> = ({
         {/* Top-24 Fast-Tap Visual Grid (REQ-07 / Section 5.1 Pareto Principle) */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-orange-500" />
               <span>Top-24 Fast-Tap Counter Grid (1-Tap Billing)</span>
             </h2>
@@ -497,24 +497,24 @@ export const POSView: React.FC<POSViewProps> = ({
                 type="button"
                 data-testid={`fast-tap-${prod.short_code}`}
                 onClick={() => addItemToCart(prod)}
-                className="p-3 bg-white border border-slate-200 hover:border-orange-500 rounded-xl shadow-2xs hover:shadow-xs transition text-left flex flex-col justify-between group active:scale-[0.98]"
+                className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-orange-500 dark:hover:border-orange-500 rounded-xl shadow-2xs hover:shadow-xs transition text-left flex flex-col justify-between group active:scale-[0.98]"
               >
                 <div>
                   <div className="flex items-start justify-between mb-1">
-                    <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded group-hover:bg-orange-100 group-hover:text-orange-800 transition">
+                    <span className="text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded group-hover:bg-orange-100 dark:group-hover:bg-orange-950 group-hover:text-orange-800 dark:group-hover:text-orange-300 transition">
                       {prod.short_code}
                     </span>
                     <span className="text-[10px] text-slate-400">
                       {prod.unit_type}
                     </span>
                   </div>
-                  <h3 className="text-xs font-bold text-slate-800 line-clamp-2 leading-tight">
+                  <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 line-clamp-2 leading-tight">
                     {prod.name}
                   </h3>
                 </div>
 
-                <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-blue-900">
+                <div className="mt-2 pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-blue-900 dark:text-emerald-400">
                     {formatINR(prod.selling_price)}
                   </span>
                   <span className="text-[10px] font-medium text-slate-400">
@@ -528,9 +528,9 @@ export const POSView: React.FC<POSViewProps> = ({
       </div>
 
       {/* RIGHT PANE: Multi-Cart Tabs, Active Cart, Bargain Chip & Checkout */}
-      <div className="w-full lg:w-[420px] xl:w-[460px] bg-white flex flex-col h-full border-t lg:border-t-0 border-slate-200 shadow-md">
+      <div className="w-full lg:w-[420px] xl:w-[460px] bg-white dark:bg-slate-900 flex flex-col h-full border-t lg:border-t-0 border-slate-200 dark:border-slate-800 shadow-md">
         {/* Multi-Cart Tabs (Hold Bill: Cart 1, Cart 2, Cart 3 - REQ-07) */}
-        <div className="p-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             {carts.map((cart) => {
               const isActive = cart.id === activeCartId;
@@ -544,7 +544,7 @@ export const POSView: React.FC<POSViewProps> = ({
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
                     isActive
                       ? 'bg-blue-800 text-white shadow-xs'
-                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                      : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                   }`}
                 >
                   <span>{cart.name}</span>
@@ -552,7 +552,7 @@ export const POSView: React.FC<POSViewProps> = ({
                     className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
                       isActive
                         ? 'bg-orange-500 text-white'
-                        : 'bg-slate-200 text-slate-700'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
                     }`}
                   >
                     {itemCount}
@@ -573,10 +573,10 @@ export const POSView: React.FC<POSViewProps> = ({
           className="flex-1 overflow-y-auto p-3 space-y-2 min-h-[220px]"
         >
           {activeCart.items.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 space-y-2">
-              <ShoppingCart className="w-10 h-10 text-slate-300 stroke-1" />
+            <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 dark:text-slate-500 space-y-2">
+              <ShoppingCart className="w-10 h-10 text-slate-300 dark:text-slate-600 stroke-1" />
               <p className="text-xs font-semibold">Active Cart is Empty</p>
-              <p className="text-[11px] text-slate-400 max-w-[200px]">
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 max-w-[200px]">
                 Tap any Fast-Tap item or search above to begin billing
               </p>
             </div>
@@ -585,16 +585,16 @@ export const POSView: React.FC<POSViewProps> = ({
               <div
                 key={item.id}
                 data-testid={`cart-row-${item.product.id}`}
-                className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2"
+                className="p-2.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between gap-2"
               >
                 <div className="flex-1 min-w-0">
-                  <h4 className="text-xs font-bold text-slate-800 truncate">
+                  <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
                     {item.product.name}
                   </h4>
-                  <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2">
                     <span>{formatINR(item.unit_selling_price)}</span>
                     <span>&times;</span>
-                    <span className="font-semibold text-slate-700">
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">
                       {item.qty}{' '}
                       {item.product.unit_type === 'KG_LOOSE'
                         ? 'kg'
@@ -610,24 +610,24 @@ export const POSView: React.FC<POSViewProps> = ({
                   <button
                     type="button"
                     onClick={() => adjustItemQty(item.id, -1)}
-                    className="w-8 h-8 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-sm transition"
+                    className="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 flex items-center justify-center font-bold text-sm transition"
                   >
                     <Minus className="w-3.5 h-3.5" />
                   </button>
-                  <span className="w-9 text-center text-xs font-bold text-slate-900">
+                  <span className="w-9 text-center text-xs font-bold text-slate-900 dark:text-white">
                     {item.qty}
                   </span>
                   <button
                     type="button"
                     onClick={() => adjustItemQty(item.id, 1)}
-                    className="w-8 h-8 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-sm transition"
+                    className="w-8 h-8 rounded-lg bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 flex items-center justify-center font-bold text-sm transition"
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
                 <div className="text-right min-w-[65px]">
-                  <span className="text-xs font-extrabold text-slate-900">
+                  <span className="text-xs font-extrabold text-slate-900 dark:text-emerald-400">
                     {formatINR(item.line_total)}
                   </span>
                   <button
@@ -644,11 +644,11 @@ export const POSView: React.FC<POSViewProps> = ({
         </div>
 
         {/* Bill Summary, Bargain Chip & Checkout Footer */}
-        <div className="p-4 border-t border-slate-200 bg-white space-y-3">
+        <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-3">
           {/* Bargain Round-Off Chip (REQ-09 / AT-04 / Section 5.1) */}
           {suggestedRoundoff > 0 && roundoffRupees === 0 && (
-            <div className="flex items-center justify-between bg-amber-50 border border-amber-200 p-2 rounded-xl text-xs">
-              <span className="text-amber-800 font-semibold">1-Click Bargain Round-Off:</span>
+            <div className="flex items-center justify-between bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 p-2 rounded-xl text-xs">
+              <span className="text-amber-800 dark:text-amber-300 font-semibold">1-Click Bargain Round-Off:</span>
               <button
                 type="button"
                 data-testid="bargain-roundoff-btn"
@@ -662,23 +662,23 @@ export const POSView: React.FC<POSViewProps> = ({
 
           {/* Subtotal, Roundoff, Grand Total */}
           <div className="space-y-1 text-xs">
-            <div className="flex justify-between text-slate-500">
+            <div className="flex justify-between text-slate-500 dark:text-slate-400">
               <span>Subtotal:</span>
-              <span className="font-semibold text-slate-700">{formatINR(subtotalRupees)}</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-300">{formatINR(subtotalRupees)}</span>
             </div>
 
             {roundoffRupees > 0 && (
-              <div className="flex justify-between text-emerald-600 font-semibold">
+              <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-semibold">
                 <span>Bargain Discount:</span>
                 <span>-{formatINR(roundoffRupees)}</span>
               </div>
             )}
 
-            <div className="flex justify-between items-baseline pt-1 border-t border-slate-100">
-              <span className="text-sm font-bold text-slate-900">Grand Total:</span>
+            <div className="flex justify-between items-baseline pt-1 border-t border-slate-100 dark:border-slate-800">
+              <span className="text-sm font-bold text-slate-900 dark:text-slate-100">Grand Total:</span>
               <span
                 data-testid="pos-grand-total"
-                className="text-2xl font-extrabold text-blue-900"
+                className="text-2xl font-extrabold text-blue-900 dark:text-emerald-400"
               >
                 {formatINR(grandTotalRupees)}
               </span>
