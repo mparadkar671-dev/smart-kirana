@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../db/db';
 import { ShopProfile } from '../../types';
 import { BackupService } from '../../services/backupService';
+import { createCustomSupabaseClient } from '../../lib/supabase';
 import {
   Store,
   QrCode,
@@ -30,8 +31,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // Supabase Settings (REQ-16)
-  const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('kirana_supabase_url') || '');
-  const [supabaseKey, setSupabaseKey] = useState(() => localStorage.getItem('kirana_supabase_key') || '');
+  const [supabaseUrl, setSupabaseUrl] = useState(
+    () => localStorage.getItem('kirana_supabase_url') || import.meta.env.VITE_SUPABASE_URL || ''
+  );
+  const [supabaseKey, setSupabaseKey] = useState(
+    () =>
+      localStorage.getItem('kirana_supabase_key') ||
+      import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+      import.meta.env.VITE_SUPABASE_ANON_KEY ||
+      ''
+  );
   const [syncStatus, setSyncStatus] = useState<'IDLE' | 'CONFIGURED' | 'TESTING'>('IDLE');
 
   useEffect(() => {
@@ -94,6 +103,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
     localStorage.setItem('kirana_supabase_key', supabaseKey.trim());
     setSyncStatus('CONFIGURED');
     setStatusMsg({ type: 'success', text: 'Supabase configuration saved! Background sync connector active.' });
+  };
+
+  const handleTestSupabaseConnection = async () => {
+    const url = supabaseUrl.trim();
+    const key = supabaseKey.trim();
+    if (!url || !key) {
+      setStatusMsg({ type: 'error', text: 'Please enter both Supabase URL and Anon/Publishable Key.' });
+      return;
+    }
+    setSyncStatus('TESTING');
+    setStatusMsg({ type: 'info', text: 'Testing connection to Supabase...' });
+    try {
+      const client = createCustomSupabaseClient(url, key);
+      if (!client) {
+        throw new Error('Could not initialize Supabase client.');
+      }
+      const { error } = await client.from('shop_profile').select('*').limit(1);
+      if (error) {
+        // If table doesn't exist yet, we still know the API connected!
+        if (error.code === '42P01') {
+          setStatusMsg({
+            type: 'info',
+            text: 'Connected to Supabase successfully, but "shop_profile" table is not found yet. Make sure to run supabase_schema.sql in the Supabase SQL Editor!',
+          });
+        } else {
+          throw new Error(error.message);
+        }
+      } else {
+        setStatusMsg({ type: 'success', text: '✅ Successfully connected to Supabase PostgreSQL database!' });
+      }
+      setSyncStatus('CONFIGURED');
+    } catch (err: unknown) {
+      setSyncStatus('IDLE');
+      setStatusMsg({
+        type: 'error',
+        text: `Supabase connection failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
   };
 
   const handleClearTransactions = async () => {
@@ -340,7 +387,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
           </div>
         </div>
 
-        <div className="flex justify-end pt-2">
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            onClick={handleTestSupabaseConnection}
+            disabled={syncStatus === 'TESTING'}
+            className="px-4 py-2 border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition disabled:opacity-50"
+          >
+            {syncStatus === 'TESTING' ? 'Testing...' : 'Test Connection'}
+          </button>
           <button
             type="button"
             onClick={handleSaveSupabaseConfig}
