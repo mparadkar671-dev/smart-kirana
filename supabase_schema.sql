@@ -1,7 +1,8 @@
 -- ==============================================================================
 -- Smart Kirana POS, Inventory & Customer Udhari (Khata) Database Schema
 -- Standard: SRS-KIRANA-POS-V1 (Production Supabase PostgreSQL Migration)
--- 100% Idempotent (Safe to run multiple times without duplicate errors)
+-- Multi-Tenant Row Level Security (RLS) & Standard Supabase Authentication
+-- 100% Idempotent (Safe to execute multiple times in SQL Editor)
 -- ==============================================================================
 
 -- Enable UUID extension
@@ -10,6 +11,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. SHOP PROFILE & SETTINGS
 CREATE TABLE IF NOT EXISTS shop_profile (
     id TEXT PRIMARY KEY DEFAULT 'current_shop',
+    user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
     shop_name TEXT NOT NULL DEFAULT 'Shree Ganesh Kirana & General Store',
     owner_name TEXT NOT NULL DEFAULT 'Ramesh Patel',
     phone TEXT NOT NULL DEFAULT '9876543210',
@@ -28,6 +30,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
     name TEXT NOT NULL,
     short_code TEXT NOT NULL,
     barcode TEXT,
@@ -48,6 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 CREATE INDEX IF NOT EXISTS idx_products_short_code ON products(short_code);
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_products_quick_tap ON products(is_quick_tap);
+CREATE INDEX IF NOT EXISTS idx_products_user ON products(user_id);
 
 -- 3. APPEND-ONLY INVENTORY LOGS (LEDGER INVARIANT)
 DO $$ BEGIN
@@ -65,6 +69,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS inventory_logs (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
     product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     change_qty NUMERIC(10,3) NOT NULL,
     reason_type inventory_reason_enum NOT NULL,
@@ -77,10 +82,12 @@ CREATE TABLE IF NOT EXISTS inventory_logs (
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_prod ON inventory_logs(product_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_reason ON inventory_logs(reason_type);
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_created ON inventory_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_inventory_logs_user ON inventory_logs(user_id);
 
 -- 4. CUSTOMERS & KHATA LEDGER
 CREATE TABLE IF NOT EXISTS customers (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
     address_landmark TEXT,
@@ -93,6 +100,7 @@ CREATE TABLE IF NOT EXISTS customers (
 
 CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 CREATE INDEX IF NOT EXISTS idx_customers_balance ON customers(current_udhari_balance);
+CREATE INDEX IF NOT EXISTS idx_customers_user ON customers(user_id);
 
 -- Pre-seed anonymous system walk-in customer
 INSERT INTO customers (id, name, phone, address_landmark, credit_limit, current_udhari_balance)
@@ -114,6 +122,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS sales_invoices (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
     invoice_number TEXT NOT NULL UNIQUE,
     customer_id TEXT NOT NULL REFERENCES customers(id),
     subtotal_amount NUMERIC(10,2) NOT NULL,
@@ -133,10 +142,12 @@ CREATE TABLE IF NOT EXISTS sales_invoices (
 
 CREATE INDEX IF NOT EXISTS idx_sales_invoices_number ON sales_invoices(invoice_number);
 CREATE INDEX IF NOT EXISTS idx_sales_invoices_created ON sales_invoices(created_at);
+CREATE INDEX IF NOT EXISTS idx_sales_invoices_user ON sales_invoices(user_id);
 
 -- 6. SALE ITEMS
 CREATE TABLE IF NOT EXISTS sale_items (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
     invoice_id TEXT NOT NULL REFERENCES sales_invoices(id) ON DELETE CASCADE,
     product_id TEXT NOT NULL REFERENCES products(id),
     product_name_snapshot TEXT NOT NULL,
@@ -147,6 +158,7 @@ CREATE TABLE IF NOT EXISTS sale_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sale_items_invoice ON sale_items(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_sale_items_user ON sale_items(user_id);
 
 -- 7. KHATA TRANSACTIONS
 DO $$ BEGIN
@@ -163,6 +175,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS khata_transactions (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
     customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
     entry_type khata_entry_enum NOT NULL,
     amount NUMERIC(10,2) NOT NULL,
@@ -174,6 +187,7 @@ CREATE TABLE IF NOT EXISTS khata_transactions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_khata_customer ON khata_transactions(customer_id);
+CREATE INDEX IF NOT EXISTS idx_khata_user ON khata_transactions(user_id);
 
 -- 8. EXPENSES AND OWNER DRAWINGS
 DO $$ BEGIN
@@ -195,6 +209,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS expenses_and_drawings (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
     category expense_category_enum NOT NULL,
     amount NUMERIC(10,2) NOT NULL,
     paid_via expense_paid_via_enum NOT NULL,
@@ -202,9 +217,12 @@ CREATE TABLE IF NOT EXISTS expenses_and_drawings (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses_and_drawings(user_id);
+
 -- 9. DAILY GALLA CASH SESSIONS
 CREATE TABLE IF NOT EXISTS daily_galla_sessions (
     id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
     session_date DATE NOT NULL UNIQUE,
     opening_cash NUMERIC(10,2) NOT NULL DEFAULT 0.00,
     cash_sales_total NUMERIC(10,2) NOT NULL DEFAULT 0.00,
@@ -214,6 +232,79 @@ CREATE TABLE IF NOT EXISTS daily_galla_sessions (
     actual_counted_cash NUMERIC(10,2),
     discrepancy NUMERIC(10,2)
 );
+
+CREATE INDEX IF NOT EXISTS idx_galla_user ON daily_galla_sessions(user_id);
+
+-- ==============================================================================
+-- 10. ROW LEVEL SECURITY (RLS) POLICIES FOR AUTHENTICATED STORE TENANTS
+-- ==============================================================================
+ALTER TABLE shop_profile ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inventory_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sales_invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sale_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE khata_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE expenses_and_drawings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE daily_galla_sessions ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+    -- Shop Profile Policies
+    CREATE POLICY "Users can manage their own shop profile" ON shop_profile
+        FOR ALL TO authenticated
+        USING (auth.uid() = user_id OR user_id IS NULL)
+        WITH CHECK (auth.uid() = user_id);
+
+    -- Products Master Policies
+    CREATE POLICY "Users can manage their own products" ON products
+        FOR ALL TO authenticated
+        USING (auth.uid() = user_id OR user_id IS NULL)
+        WITH CHECK (auth.uid() = user_id);
+
+    -- Inventory Logs Policies
+    CREATE POLICY "Users can manage their own inventory logs" ON inventory_logs
+        FOR ALL TO authenticated
+        USING (auth.uid() = user_id OR user_id IS NULL)
+        WITH CHECK (auth.uid() = user_id);
+
+    -- Customers & Khata Policies
+    CREATE POLICY "Users can manage their own customers" ON customers
+        FOR ALL TO authenticated
+        USING (auth.uid() = user_id OR id = '0000-WALK-IN')
+        WITH CHECK (auth.uid() = user_id OR id = '0000-WALK-IN');
+
+    -- Sales Invoices Policies
+    CREATE POLICY "Users can manage their own sales invoices" ON sales_invoices
+        FOR ALL TO authenticated
+        USING (auth.uid() = user_id OR user_id IS NULL)
+        WITH CHECK (auth.uid() = user_id);
+
+    -- Sale Items Policies
+    CREATE POLICY "Users can manage their own sale items" ON sale_items
+        FOR ALL TO authenticated
+        USING (auth.uid() = user_id OR user_id IS NULL)
+        WITH CHECK (auth.uid() = user_id);
+
+    -- Khata Transactions Policies
+    CREATE POLICY "Users can manage their own khata entries" ON khata_transactions
+        FOR ALL TO authenticated
+        USING (auth.uid() = user_id OR user_id IS NULL)
+        WITH CHECK (auth.uid() = user_id);
+
+    -- Expenses Policies
+    CREATE POLICY "Users can manage their own expenses" ON expenses_and_drawings
+        FOR ALL TO authenticated
+        USING (auth.uid() = user_id OR user_id IS NULL)
+        WITH CHECK (auth.uid() = user_id);
+
+    -- Daily Galla Policies
+    CREATE POLICY "Users can manage their own daily galla sessions" ON daily_galla_sessions
+        FOR ALL TO authenticated
+        USING (auth.uid() = user_id OR user_id IS NULL)
+        WITH CHECK (auth.uid() = user_id);
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 -- ==============================================================================
 -- End of Schema Definition

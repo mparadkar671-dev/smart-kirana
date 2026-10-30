@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Product, Customer, ShopProfile, WALK_IN_CUSTOMER_ID } from '../../types';
+import { Product, Customer, ShopProfile, SalesInvoice, SaleItem, WALK_IN_CUSTOMER_ID } from '../../types';
 import { LooseItemModal } from './LooseItemModal';
 import { UpiCheckoutModal } from './UpiCheckoutModal';
 import { UdhariCheckoutModal } from './UdhariCheckoutModal';
+import { ReceiptModal } from './ReceiptModal';
 import { BillingService, CartItemInput } from '../../services/billingService';
 import { formatINR, roundCurrency, roundQty, toPaise, toRupees } from '../../utils/math';
+import { playBarcodeBeep, playPaymentSuccessChime } from '../../utils/sound';
 import {
   Search,
   ShoppingCart,
@@ -69,6 +71,12 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const [isUpiModalOpen, setIsUpiModalOpen] = useState(false);
   const [isUdhariModalOpen, setIsUdhariModalOpen] = useState(false);
+
+  // Receipt Modal state
+  const [completedInvoice, setCompletedInvoice] = useState<SalesInvoice | null>(null);
+  const [completedInvoiceItems, setCompletedInvoiceItems] = useState<SaleItem[]>([]);
+  const [receiptCustomer, setReceiptCustomer] = useState<Customer | null>(null);
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
 
   // Feedback notifications
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
@@ -199,6 +207,7 @@ export const POSView: React.FC<POSViewProps> = ({
     );
 
     setSearchQuery('');
+    playBarcodeBeep();
   };
 
   // Adjust item quantity in cart
@@ -289,6 +298,11 @@ export const POSView: React.FC<POSViewProps> = ({
       });
 
       clearCurrentCart();
+      playPaymentSuccessChime();
+      setCompletedInvoice(res.invoice);
+      setCompletedInvoiceItems(res.saleItems);
+      setReceiptCustomer(null);
+      setIsReceiptModalOpen(true);
       setSuccessBanner(
         `Invoice ${res.invoice.invoice_number} saved! Cash received ${formatINR(grandTotalRupees)}`
       );
@@ -323,6 +337,11 @@ export const POSView: React.FC<POSViewProps> = ({
       });
 
       clearCurrentCart();
+      playPaymentSuccessChime();
+      setCompletedInvoice(res.invoice);
+      setCompletedInvoiceItems(res.saleItems);
+      setReceiptCustomer(null);
+      setIsReceiptModalOpen(true);
       setIsUpiModalOpen(false);
       setSuccessBanner(
         `Invoice ${res.invoice.invoice_number} saved! UPI Payment received ${formatINR(grandTotalRupees)}`
@@ -364,6 +383,12 @@ export const POSView: React.FC<POSViewProps> = ({
       });
 
       clearCurrentCart();
+      playPaymentSuccessChime();
+      const matchedCust = customers.find((c) => c.id === params.customerId) || null;
+      setCompletedInvoice(res.invoice);
+      setCompletedInvoiceItems(res.saleItems);
+      setReceiptCustomer(matchedCust);
+      setIsReceiptModalOpen(true);
       setIsUdhariModalOpen(false);
       setSuccessBanner(
         `Invoice ${res.invoice.invoice_number} saved! ${
@@ -735,6 +760,16 @@ export const POSView: React.FC<POSViewProps> = ({
         grandTotal={grandTotalRupees}
         customers={customers}
         onConfirm={handleUdhariConfirmed}
+      />
+
+      {/* Thermal Slip & Digital Receipt Print Modal */}
+      <ReceiptModal
+        isOpen={isReceiptModalOpen}
+        onClose={() => setIsReceiptModalOpen(false)}
+        invoice={completedInvoice}
+        items={completedInvoiceItems}
+        profile={shopProfile ?? null}
+        customer={receiptCustomer}
       />
     </div>
   );

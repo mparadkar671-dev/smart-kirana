@@ -31,3 +31,4 @@ export const createCustomSupabaseClient = (url: string, key: string) => {
     },
   });
 };
+

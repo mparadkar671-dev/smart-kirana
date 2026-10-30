@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-kirana-primary: #1e3a8a;
   --color-kirana-secondary: #f97316;
@@ -23,6 +25,12 @@
     background-color: #f8fafc;
     color: #0f172a;
     -webkit-tap-highlight-color: transparent;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+  
+  html.dark body {
+    background-color: #090d16;
+    color: #f1f5f9;
   }
 }
 
@@ -35,3 +43,20 @@
   justify-content: center;
 }
 
+/* Clean thermal print stylesheet for POS receipts */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  @page {
+    margin: 4mm;
+    size: 80mm auto;
+  }
+}

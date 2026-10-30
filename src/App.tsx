@@ -8,8 +8,11 @@ import { KhataView } from './components/khata/KhataView';
 import { GallaView } from './components/galla/GallaView';
 import { ReportsView } from './components/reports/ReportsView';
 import { SettingsView } from './components/settings/SettingsView';
+import { ThemeProvider } from './context/ThemeContext';
+import { AuthProvider } from './context/AuthContext';
+import { Sparkles, PlusCircle } from 'lucide-react';
 
-export const App: React.FC = () => {
+const MainApp: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('pos');
   const [isDbReady, setIsDbReady] = useState(false);
 
@@ -54,10 +57,12 @@ export const App: React.FC = () => {
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
         <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mb-4"></div>
         <h2 className="text-lg font-bold">Initializing Smart Kirana POS...</h2>
-        <p className="text-sm text-slate-400">Loading offline IndexedDB database & inventory master</p>
+        <p className="text-sm text-slate-400">Loading offline IndexedDB database &amp; inventory master</p>
       </div>
     );
   }
+
+  const isStoreFreshEmpty = products && products.length === 0;
 
   return (
     <Shell
@@ -65,6 +70,39 @@ export const App: React.FC = () => {
       onTabChange={setActiveTab}
       shopProfile={shopProfile}
     >
+      {/* Onboarding Welcome Banner for brand new empty store */}
+      {isStoreFreshEmpty && (activeTab === 'pos' || activeTab === 'inventory') && (
+        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-blue-800 text-white p-3 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md border-b border-blue-700 select-none">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-orange-500 rounded-lg text-white shrink-0">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="font-bold text-sm">Welcome! Your Kirana Store is fresh and empty.</div>
+              <div className="text-xs text-blue-200">
+                You have 0 products. Add your own items or explore with sample Indian grocery data.
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab('inventory')}
+              className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs"
+            >
+              <PlusCircle className="w-3.5 h-3.5" /> Add Product
+            </button>
+            <button
+              onClick={async () => {
+                await db.seedDemoProducts();
+              }}
+              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-orange-400" /> Load 25 Sample Items
+            </button>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'pos' && (
         <POSView
           products={products || []}
@@ -85,5 +123,14 @@ export const App: React.FC = () => {
   );
 };
 
-export default App;
+export const App: React.FC = () => {
+  return (
+    <ThemeProvider>
+      <AuthProvider>
+        <MainApp />
+      </AuthProvider>
+    </ThemeProvider>
+  );
+};
 
+export default App;

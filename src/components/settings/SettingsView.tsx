@@ -3,6 +3,7 @@ import { db } from '../../db/db';
 import { ShopProfile } from '../../types';
 import { BackupService } from '../../services/backupService';
 import { createCustomSupabaseClient } from '../../lib/supabase';
+import { isSoundEnabled, setSoundEnabled } from '../../utils/sound';
 import {
   Store,
   QrCode,
@@ -18,6 +19,9 @@ import {
   Cloud,
   Database,
   Wifi,
+  Volume2,
+  VolumeX,
+  Sparkles,
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -42,6 +46,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
       ''
   );
   const [syncStatus, setSyncStatus] = useState<'IDLE' | 'CONFIGURED' | 'TESTING'>('IDLE');
+  const [soundActive, setSoundActive] = useState(() => isSoundEnabled());
+
+  const handleToggleSound = () => {
+    const next = !soundActive;
+    setSoundActive(next);
+    setSoundEnabled(next);
+    setStatusMsg({
+      type: 'info',
+      text: next ? 'POS Scanner audio beeps enabled.' : 'POS Scanner audio beeps muted.',
+    });
+  };
 
   useEffect(() => {
     loadProfile();
@@ -141,6 +156,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         text: `Supabase connection failed: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
+  };
+
+  const handleClearAllToEmpty = async () => {
+    if (
+      window.confirm(
+        '⚠️ DANGER: This will delete ALL products, customers, and transactions, giving you a 100% empty store for fresh start. Proceed?'
+      )
+    ) {
+      await db.clearAllRecordsToEmpty();
+      await loadProfile();
+      setStatusMsg({ type: 'info', text: 'All products and records wiped! Store is now 100% clean and empty.' });
+      if (onDataReset) onDataReset();
+    }
+  };
+
+  const handleSeedDemoProducts = async () => {
+    await db.seedDemoProducts();
+    await loadProfile();
+    setStatusMsg({ type: 'success', text: '25 Indian Kirana demo products loaded successfully!' });
+    if (onDataReset) onDataReset();
   };
 
   const handleClearTransactions = async () => {
@@ -406,29 +441,77 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         </div>
       </div>
 
+      {/* Counter Audio & Hardware Beeps */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-3 transition-colors">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {soundActive ? (
+              <Volume2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            ) : (
+              <VolumeX className="w-5 h-5 text-slate-400" />
+            )}
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">POS Scanner Audio &amp; Chime Beeps</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Play an instant audio confirmation beep on barcode scans and bill checkouts
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleToggleSound}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+              soundActive
+                ? 'bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300'
+                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+            }`}
+          >
+            {soundActive ? 'Sound: ON' : 'Sound: MUTED'}
+          </button>
+        </div>
+      </div>
+
       {/* Database Management & Demo Data Reset (REQ-03) */}
-      <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-5 space-y-4">
-        <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-2">
-          <Trash2 className="w-5 h-5 text-slate-600" />
-          Database Management &amp; Demo State (REQ-03)
+      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+          <Trash2 className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+          Database Management &amp; Store Reset
         </h2>
-        <div className="flex flex-col sm:flex-row gap-3 pt-2">
+        <div className="flex flex-wrap gap-3 pt-2">
+          <button
+            type="button"
+            onClick={handleSeedDemoProducts}
+            className="px-4 py-2.5 border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 text-blue-900 dark:text-blue-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
+          >
+            <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            Load 25 Sample Kirana Demo Products
+          </button>
+
           <button
             type="button"
             onClick={handleClearTransactions}
-            className="px-4 py-2.5 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition"
+            className="px-4 py-2.5 border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-900 dark:text-amber-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
           >
-            <Trash2 className="w-4 h-4 text-amber-700" />
+            <Trash2 className="w-4 h-4 text-amber-700 dark:text-amber-400" />
             Clear Sales &amp; Transactions (Keep Products)
           </button>
 
           <button
             type="button"
-            onClick={handleResetToDemo}
-            className="px-4 py-2.5 border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-800 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition"
+            onClick={handleClearAllToEmpty}
+            className="px-4 py-2.5 border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-900 dark:text-red-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
           >
-            <RotateCcw className="w-4 h-4 text-slate-600" />
-            Reset All to 25 Default Products &amp; Seed Customers
+            <Trash2 className="w-4 h-4 text-red-600" />
+            ⚠️ Wipe All Records (100% Empty Fresh Store)
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResetToDemo}
+            className="px-4 py-2.5 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-800 dark:text-slate-200 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition"
+          >
+            <RotateCcw className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+            Full Demo Reset (25 Products + Demo Customers)
           </button>
         </div>
       </div>

@@ -71,6 +71,13 @@ export function formatINR(amount: number): string {
 }
 
 /**
+ * Returns rupee amount formatted to 2 decimals without symbol
+ */
+export function formatRupees(amount: number): string {
+  return roundCurrency(amount).toFixed(2);
+}
+
+/**
  * Formats quantity with appropriate unit label (e.g., "1.250 kg" or "5 PCS")
  */
 export function formatQuantity(qty: number, unitType: string): string {

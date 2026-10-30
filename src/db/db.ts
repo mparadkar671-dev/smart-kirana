@@ -42,10 +42,12 @@ export class KiranaDatabase extends Dexie {
   }
 
   /**
-   * Initializes the database with mandatory system records, shop profile,
-   * and 25 realistic Indian Kirana products if table is currently empty.
+   * Initializes the database for a new user with mandatory system records:
+   * Walk-in customer ('0000-WALK-IN') and default shop profile.
+   * By default, leaves all product and customer records EMPTY for new users.
+   * If options.seedDemo is explicitly true, seeds 25 sample products and demo customers.
    */
-  async initializeDatabase(): Promise<void> {
+  async initializeDatabase(options: { seedDemo?: boolean } = {}): Promise<void> {
     await this.transaction(
       'rw',
       [this.products, this.customers, this.shop_profile, this.inventory_logs],
@@ -62,34 +64,75 @@ export class KiranaDatabase extends Dexie {
           await this.shop_profile.add(DEFAULT_SHOP_PROFILE);
         }
 
-        // 3. Seed initial 25 products if empty
-        const count = await this.products.count();
-        if (count === 0) {
-          await this.products.bulkAdd(INITIAL_PRODUCTS);
+        // 3. Only seed products if explicitly requested
+        if (options.seedDemo) {
+          await this.seedDemoProducts();
+        }
+      }
+    );
+  }
 
-          // Add initial stock logs for audit trail
-          const initialLogs: InventoryLog[] = INITIAL_PRODUCTS.map((prod) => ({
-            id: `init-log-${prod.id}`,
-            product_id: prod.id,
-            change_qty: prod.current_stock,
-            reason_type: 'PURCHASE_IN',
-            unit_cost_at_time: prod.purchase_price,
-            reference_id: null,
-            notes: 'Initial inventory stock opening balance',
-            created_at: new Date().toISOString(),
-          }));
-          await this.inventory_logs.bulkAdd(initialLogs);
+  /**
+   * Seeds 25 realistic Indian Kirana products and sample customers
+   */
+  async seedDemoProducts(): Promise<void> {
+    const count = await this.products.count();
+    if (count === 0) {
+      await this.products.bulkAdd(INITIAL_PRODUCTS);
 
-          // Also seed initial demo customers with realistic pending udhari
-          for (const cust of INITIAL_CUSTOMERS) {
-            if (cust.id !== WALK_IN_CUSTOMER_ID) {
-              const existing = await this.customers.get(cust.id);
-              if (!existing) {
-                await this.customers.add(cust);
-              }
-            }
+      // Add initial stock logs for audit trail
+      const initialLogs: InventoryLog[] = INITIAL_PRODUCTS.map((prod) => ({
+        id: `init-log-${prod.id}`,
+        product_id: prod.id,
+        change_qty: prod.current_stock,
+        reason_type: 'PURCHASE_IN',
+        unit_cost_at_time: prod.purchase_price,
+        reference_id: null,
+        notes: 'Initial inventory stock opening balance',
+        created_at: new Date().toISOString(),
+      }));
+      await this.inventory_logs.bulkAdd(initialLogs);
+
+      // Seed initial demo customers
+      for (const cust of INITIAL_CUSTOMERS) {
+        if (cust.id !== WALK_IN_CUSTOMER_ID) {
+          const existing = await this.customers.get(cust.id);
+          if (!existing) {
+            await this.customers.add(cust);
           }
         }
+      }
+    }
+  }
+
+  /**
+   * Completely wipes all products, customers, and transactions to start 100% clean
+   */
+  async clearAllRecordsToEmpty(): Promise<void> {
+    await this.transaction(
+      'rw',
+      [
+        this.products,
+        this.customers,
+        this.sales_invoices,
+        this.sale_items,
+        this.khata_transactions,
+        this.expenses_and_drawings,
+        this.daily_galla_sessions,
+        this.inventory_logs,
+      ],
+      async () => {
+        await this.products.clear();
+        await this.customers.clear();
+        await this.sales_invoices.clear();
+        await this.sale_items.clear();
+        await this.khata_transactions.clear();
+        await this.expenses_and_drawings.clear();
+        await this.daily_galla_sessions.clear();
+        await this.inventory_logs.clear();
+
+        // Re-insert mandatory WALK_IN_CUSTOMER
+        await this.customers.add(WALK_IN_CUSTOMER_RECORD);
       }
     );
   }
