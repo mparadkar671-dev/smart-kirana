@@ -1,6 +1,7 @@
 -- ==============================================================================
 -- Smart Kirana POS, Inventory & Customer Udhari (Khata) Database Schema
 -- Standard: SRS-KIRANA-POS-V1 (Production Supabase PostgreSQL Migration)
+-- 100% Idempotent (Safe to run multiple times without duplicate errors)
 -- ==============================================================================
 
 -- Enable UUID extension
@@ -19,7 +20,11 @@ CREATE TABLE IF NOT EXISTS shop_profile (
 );
 
 -- 2. PRODUCTS MASTER
-CREATE TYPE unit_type_enum AS ENUM ('PCS', 'KG_LOOSE', 'LTR', 'PACK');
+DO $$ BEGIN
+    CREATE TYPE unit_type_enum AS ENUM ('PCS', 'KG_LOOSE', 'LTR', 'PACK');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY,
@@ -45,14 +50,18 @@ CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_products_quick_tap ON products(is_quick_tap);
 
 -- 3. APPEND-ONLY INVENTORY LOGS (LEDGER INVARIANT)
-CREATE TYPE inventory_reason_enum AS ENUM (
-    'PURCHASE_IN', 
-    'SALE_OUT', 
-    'RETURN_IN', 
-    'SELF_USE_OUT', 
-    'DAMAGE_EXPIRED_OUT', 
-    'AUDIT_ADJUST'
-);
+DO $$ BEGIN
+    CREATE TYPE inventory_reason_enum AS ENUM (
+        'PURCHASE_IN', 
+        'SALE_OUT', 
+        'RETURN_IN', 
+        'SELF_USE_OUT', 
+        'DAMAGE_EXPIRED_OUT', 
+        'AUDIT_ADJUST'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS inventory_logs (
     id TEXT PRIMARY KEY,
@@ -91,8 +100,17 @@ VALUES ('0000-WALK-IN', 'Walk-in Customer (Cash / UPI)', '0000000000', 'Counter 
 ON CONFLICT (id) DO NOTHING;
 
 -- 5. SALES INVOICES
-CREATE TYPE payment_mode_enum AS ENUM ('CASH', 'UPI', 'UDHARI_FULL', 'SPLIT_PARTIAL');
-CREATE TYPE invoice_status_enum AS ENUM ('COMPLETED', 'VOIDED');
+DO $$ BEGIN
+    CREATE TYPE payment_mode_enum AS ENUM ('CASH', 'UPI', 'UDHARI_FULL', 'SPLIT_PARTIAL');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE invoice_status_enum AS ENUM ('COMPLETED', 'VOIDED');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS sales_invoices (
     id TEXT PRIMARY KEY,
@@ -131,8 +149,17 @@ CREATE TABLE IF NOT EXISTS sale_items (
 CREATE INDEX IF NOT EXISTS idx_sale_items_invoice ON sale_items(invoice_id);
 
 -- 7. KHATA TRANSACTIONS
-CREATE TYPE khata_entry_enum AS ENUM ('DEBIT_UDHARI_GIVEN', 'CREDIT_JAMA_RECEIVED');
-CREATE TYPE khata_channel_enum AS ENUM ('BILL_CREDIT', 'CASH', 'UPI', 'DISCOUNT_SETTLEMENT');
+DO $$ BEGIN
+    CREATE TYPE khata_entry_enum AS ENUM ('DEBIT_UDHARI_GIVEN', 'CREDIT_JAMA_RECEIVED');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE khata_channel_enum AS ENUM ('BILL_CREDIT', 'CASH', 'UPI', 'DISCOUNT_SETTLEMENT');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS khata_transactions (
     id TEXT PRIMARY KEY,
@@ -149,13 +176,22 @@ CREATE TABLE IF NOT EXISTS khata_transactions (
 CREATE INDEX IF NOT EXISTS idx_khata_customer ON khata_transactions(customer_id);
 
 -- 8. EXPENSES AND OWNER DRAWINGS
-CREATE TYPE expense_category_enum AS ENUM (
-    'SHOP_EXPENSE_RENT_ELEC',
-    'SHOP_EXPENSE_TRANSPORT_BAGS',
-    'HOME_SELF_USE_GOODS',
-    'OWNER_CASH_DRAWING'
-);
-CREATE TYPE expense_paid_via_enum AS ENUM ('CASH_GALLA', 'UPI_BANK', 'INVENTORY_DEDUCTION');
+DO $$ BEGIN
+    CREATE TYPE expense_category_enum AS ENUM (
+        'SHOP_EXPENSE_RENT_ELEC',
+        'SHOP_EXPENSE_TRANSPORT_BAGS',
+        'HOME_SELF_USE_GOODS',
+        'OWNER_CASH_DRAWING'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE expense_paid_via_enum AS ENUM ('CASH_GALLA', 'UPI_BANK', 'INVENTORY_DEDUCTION');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS expenses_and_drawings (
     id TEXT PRIMARY KEY,
@@ -182,4 +218,3 @@ CREATE TABLE IF NOT EXISTS daily_galla_sessions (
 -- ==============================================================================
 -- End of Schema Definition
 -- ==============================================================================
-
