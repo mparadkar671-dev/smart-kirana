@@ -1,0 +1,356 @@
+import React, { useState, useEffect } from 'react';
+import { Customer } from '../../types';
+import { db } from '../../db/db';
+import { formatINR, roundCurrency, toPaise, toRupees } from '../../utils/math';
+import { X, UserPlus, AlertTriangle, Check, BookOpen, Search, User } from 'lucide-react';
+
+interface UdhariCheckoutModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  grandTotal: number;
+  customers: Customer[];
+  onConfirm: (params: {
+    customerId: string;
+    mode: 'UDHARI_FULL' | 'SPLIT_PARTIAL';
+    amountPaidNow: number;
+    udhariAdded: number;
+  }) => void;
+}
+
+export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
+  isOpen,
+  onClose,
+  grandTotal,
+  customers,
+  onConfirm,
+}) => {
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isQuickCreate, setIsQuickCreate] = useState(false);
+
+  // Quick Create Form
+  const [newName, setNewName] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newCreditLimit, setNewCreditLimit] = useState(2000);
+
+  // Payment Breakdown
+  const [isSplit, setIsSplit] = useState(false);
+  const [cashPaidNow, setCashPaidNow] = useState<number>(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedCustomerId('');
+      setSearchQuery('');
+      setIsQuickCreate(false);
+      setIsSplit(false);
+      setCashPaidNow(0);
+      setErrorMsg(null);
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  // Filter out system walk-in customer from Udhari list
+  const filteredCustomers = customers
+    .filter((c) => c.id !== '0000-WALK-IN')
+    .filter(
+      (c) =>
+        c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        c.phone.includes(searchQuery)
+    );
+
+  const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
+
+  // Split calculation
+  const effectivePaidNow = isSplit ? roundCurrency(cashPaidNow) : 0;
+  const effectiveUdhari = roundCurrency(grandTotal - effectivePaidNow);
+
+  // Credit Limit Guardrail (REQ-29 / AT-08)
+  const isCreditExceeded =
+    selectedCustomer &&
+    selectedCustomer.current_udhari_balance + effectiveUdhari > selectedCustomer.credit_limit;
+
+  const excessAmount = selectedCustomer
+    ? roundCurrency(selectedCustomer.current_udhari_balance + effectiveUdhari - selectedCustomer.credit_limit)
+    : 0;
+
+  const handleQuickCreateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim() || newPhone.trim().length !== 10) {
+      setErrorMsg('Please enter a valid customer name and 10-digit mobile number');
+      return;
+    }
+
+    const newCustomer: Customer = {
+      id: `cust-${Date.now()}`,
+      name: newName.trim(),
+      phone: newPhone.trim(),
+      credit_limit: newCreditLimit || 2000,
+      current_udhari_balance: 0,
+      oldest_unpaid_date: null,
+      last_reminder_sent_at: null,
+      created_at: new Date().toISOString(),
+    };
+
+    await db.customers.add(newCustomer);
+    setSelectedCustomerId(newCustomer.id);
+    setIsQuickCreate(false);
+    setErrorMsg(null);
+  };
+
+  const handleFinalSubmit = () => {
+    if (!selectedCustomerId) {
+      setErrorMsg('Please select a customer for Khata / Udhari');
+      return;
+    }
+    if (isSplit && (cashPaidNow < 0 || cashPaidNow > grandTotal)) {
+      setErrorMsg(`Cash paid now must be between ₹0 and ₹${grandTotal}`);
+      return;
+    }
+
+    onConfirm({
+      customerId: selectedCustomerId,
+      mode: isSplit && effectivePaidNow > 0 ? 'SPLIT_PARTIAL' : 'UDHARI_FULL',
+      amountPaidNow: effectivePaidNow,
+      udhariAdded: effectiveUdhari,
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150 my-8">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-amber-50/80">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center shadow-xs">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Udhari (Khata) Checkout</h2>
+              <p className="text-xs text-amber-900">Bill Total: {formatINR(grandTotal)}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {errorMsg && (
+          <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
+        <div className="p-6 space-y-4">
+          {/* Quick Create New Customer toggle */}
+          {!isQuickCreate ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wide">
+                  Select Khata Customer
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsQuickCreate(true)}
+                  className="text-xs font-bold text-blue-700 hover:text-blue-900 flex items-center gap-1"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>+ Add New Customer</span>
+                </button>
+              </div>
+
+              {/* Customer Search Box */}
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search customer by Name or 10-digit Phone..."
+                  className="w-full pl-9 pr-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Customer List */}
+              <div className="max-h-44 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+                {filteredCustomers.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-500">
+                    No customers found matching search.
+                  </div>
+                ) : (
+                  filteredCustomers.map((cust) => (
+                    <button
+                      key={cust.id}
+                      type="button"
+                      data-testid={`customer-option-${cust.id}`}
+                      onClick={() => setSelectedCustomerId(cust.id)}
+                      className={`w-full p-2.5 text-left text-xs flex items-center justify-between hover:bg-slate-50 transition ${
+                        selectedCustomerId === cust.id ? 'bg-amber-50/80 font-bold' : ''
+                      }`}
+                    >
+                      <div>
+                        <span className="text-slate-900 font-semibold">{cust.name}</span>
+                        <span className="text-slate-500 font-mono text-[11px] ml-2">{cust.phone}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-slate-400 text-[10px]">Bal: </span>
+                        <span className={`font-bold ${cust.current_udhari_balance > 0 ? 'text-[#dc2626]' : 'text-[#16a34a]'}`}>
+                          {formatINR(cust.current_udhari_balance)}
+                        </span>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : (
+            /* Quick Add Customer Subform */
+            <form onSubmit={handleQuickCreateCustomer} className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <UserPlus className="w-4 h-4 text-blue-700" />
+                  Quick Add New Khata Customer
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsQuickCreate(false)}
+                  className="text-xs text-slate-500 hover:text-slate-800"
+                >
+                  Cancel
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    Customer Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="e.g. Ramesh Sharma"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                    WhatsApp Phone (10 digits) *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    maxLength={10}
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, ''))}
+                    placeholder="9876543210"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-2 bg-blue-800 hover:bg-blue-900 text-white rounded-lg text-xs font-bold shadow-xs transition"
+              >
+                Create & Select Customer
+              </button>
+            </form>
+          )}
+
+          {/* Payment Split Options (REQ-09: Full Udhari vs Split Cash + Udhari) */}
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-700">Split Payment (Part Cash / Part Udhari)?</span>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isSplit}
+                  onChange={(e) => {
+                    setIsSplit(e.target.checked);
+                    if (!e.target.checked) setCashPaidNow(0);
+                  }}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+              </label>
+            </div>
+
+            {isSplit && (
+              <div className="space-y-2 pt-2 border-t border-slate-200">
+                <div className="flex items-center justify-between text-xs">
+                  <label className="font-semibold text-slate-700">Cash Received Now:</label>
+                  <div className="relative w-32">
+                    <span className="absolute left-2.5 top-1.5 text-slate-400 font-bold">₹</span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max={grandTotal}
+                      value={cashPaidNow || ''}
+                      onChange={(e) => setCashPaidNow(parseFloat(e.target.value) || 0)}
+                      className="w-full pl-6 pr-2 py-1.5 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-xs font-bold text-amber-900 bg-amber-100/60 p-2 rounded-lg">
+                  <span>Balance Added to Udhari:</span>
+                  <span className="text-sm font-extrabold text-[#dc2626]">
+                    {formatINR(effectiveUdhari)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Credit Limit Exceeded Guardrail (REQ-29 / AT-08) */}
+          {isCreditExceeded && (
+            <div
+              data-testid="credit-limit-warning"
+              className="p-3 bg-red-50 border border-red-300 rounded-xl text-red-900 text-xs space-y-1.5 animate-pulse"
+            >
+              <div className="flex items-center gap-1.5 font-bold text-red-800">
+                <AlertTriangle className="w-4 h-4 text-red-600" />
+                <span>Credit Trust Limit Exceeded (+{formatINR(excessAmount)} over limit)</span>
+              </div>
+              <p className="text-[11px] text-red-700 leading-relaxed">
+                Customer limit is {formatINR(selectedCustomer!.credit_limit)}. Existing balance: {formatINR(selectedCustomer!.current_udhari_balance)}.
+                New total will reach {formatINR(selectedCustomer!.current_udhari_balance + effectiveUdhari)}.
+              </p>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="pt-2 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-xl text-sm font-medium hover:bg-slate-100 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              data-testid="confirm-udhari-btn"
+              disabled={!selectedCustomerId}
+              onClick={handleFinalSubmit}
+              className="px-5 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-md transition flex items-center gap-2"
+            >
+              <Check className="w-4 h-4" />
+              <span>Confirm Udhari Sale ({formatINR(effectiveUdhari)})</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+

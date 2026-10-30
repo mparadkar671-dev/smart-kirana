@@ -1,0 +1,501 @@
+import React, { useState, useEffect } from 'react';
+import { ShopProfile, SalesInvoice } from '../../types';
+import { ReportsService, DateFilterRange } from '../../services/reportsService';
+import { GallaService } from '../../services/gallaService';
+import { formatINR } from '../../utils/math';
+import {
+  BarChart3,
+  FileSpreadsheet,
+  Download,
+  Calendar,
+  DollarSign,
+  TrendingUp,
+  TrendingDown,
+  ShoppingBag,
+  Users,
+  Package,
+  Layers,
+  RotateCcw,
+  AlertTriangle,
+} from 'lucide-react';
+
+interface ReportsViewProps {
+  shopProfile?: ShopProfile | null;
+  onDataChanged?: () => void;
+}
+
+type ReportTab = 'pnl' | 'products' | 'udhari' | 'invoices' | 'inventory';
+type DatePreset = 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'ALL';
+
+export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataChanged }) => {
+  const [activeTab, setActiveTab] = useState<ReportTab>('pnl');
+  const [datePreset, setDatePreset] = useState<DatePreset>('TODAY');
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Report Data States
+  const [pnlData, setPnlData] = useState<any>(null);
+  const [productsData, setProductsData] = useState<any[]>([]);
+  const [udhariData, setUdhariData] = useState<any[]>([]);
+  const [invoicesData, setInvoicesData] = useState<SalesInvoice[]>([]);
+  const [inventoryData, setInventoryData] = useState<any>(null);
+
+  const defaultProfile: ShopProfile = shopProfile || {
+    id: 'current_shop',
+    shop_name: 'Smart Kirana & General Store',
+    owner_name: 'Owner',
+    phone: '9876543210',
+    upi_vpa: 'kirana@upi',
+    address: 'Main Market Road',
+    gst_footer_note: '',
+    updated_at: new Date().toISOString(),
+  };
+
+  const getDateRange = (): DateFilterRange | undefined => {
+    if (datePreset === 'ALL') return undefined;
+
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
+    if (datePreset === 'TODAY') {
+      return { startDate: todayStr, endDate: todayStr };
+    }
+    if (datePreset === 'YESTERDAY') {
+      const y = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      return { startDate: y, endDate: y };
+    }
+    if (datePreset === 'THIS_WEEK') {
+      const w = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+      return { startDate: w, endDate: todayStr };
+    }
+    if (datePreset === 'THIS_MONTH') {
+      const m = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      return { startDate: m, endDate: todayStr };
+    }
+    return undefined;
+  };
+
+  useEffect(() => {
+    loadAllReports();
+  }, [datePreset, activeTab]);
+
+  const loadAllReports = async () => {
+    setIsLoading(true);
+    const range = getDateRange();
+
+    try {
+      if (activeTab === 'pnl') {
+        const pnl = await ReportsService.getProfitAndLossData(range);
+        setPnlData(pnl);
+      } else if (activeTab === 'products') {
+        const prods = await ReportsService.getProductWiseSalesData(range);
+        setProductsData(prods);
+      } else if (activeTab === 'udhari') {
+        const udh = await ReportsService.getCustomerUdhariSummaryData();
+        setUdhariData(udh);
+      } else if (activeTab === 'invoices') {
+        const invs = await ReportsService.getBillRegisterData(range);
+        setInvoicesData(invs);
+      } else if (activeTab === 'inventory') {
+        const invVal = await ReportsService.getInventoryValuationData();
+        setInventoryData(invVal);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Void Invoice Action (REQ-34 / AT-09)
+  const handleVoidInvoice = async (inv: SalesInvoice) => {
+    if (window.confirm(`Are you sure you want to VOID invoice ${inv.invoice_number}? This will restore product stock and reverse any added Udhari.`)) {
+      await GallaService.voidInvoice(inv.id);
+      await loadAllReports();
+      if (onDataChanged) onDataChanged();
+    }
+  };
+
+  // PDF Export Trigger (REQ-14)
+  const handleExportPdf = async () => {
+    const range = getDateRange();
+    if (activeTab === 'pnl') {
+      await ReportsService.generateProfitAndLossReport(defaultProfile, range);
+    } else if (activeTab === 'products') {
+      await ReportsService.generateProductWiseReport(defaultProfile, range);
+    } else if (activeTab === 'udhari') {
+      await ReportsService.generateCustomerUdhariReport(defaultProfile);
+    } else if (activeTab === 'invoices') {
+      await ReportsService.generateBillRegisterReport(defaultProfile, range);
+    } else if (activeTab === 'inventory') {
+      await ReportsService.generateInventoryValuationReport(defaultProfile);
+    }
+  };
+
+  return (
+    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <BarChart3 className="w-6 h-6 text-blue-700" />
+            Financial & Operational Accounting Reports
+          </h1>
+          <p className="text-xs text-slate-500">
+            P&amp;L Statements, Product Margins, Khata Aging, Invoice Auditing &amp; Stock Capital
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          {/* 1-Click PDF Export */}
+          <button
+            type="button"
+            data-testid="export-pdf-btn"
+            onClick={handleExportPdf}
+            className="flex-1 sm:flex-initial px-4 py-2.5 bg-blue-800 hover:bg-blue-900 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export PDF</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Date Range Presets & Report Tabs */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-slate-200 pb-2">
+        {/* 5 Report Tabs (REQ-14) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0" data-testid="report-tabs">
+          {[
+            { id: 'pnl' as ReportTab, label: '1. Profit & Loss', icon: TrendingUp },
+            { id: 'products' as ReportTab, label: '2. Product Margins', icon: ShoppingBag },
+            { id: 'udhari' as ReportTab, label: '3. Customer Khata', icon: Users },
+            { id: 'invoices' as ReportTab, label: '4. Daily Invoices', icon: Layers },
+            { id: 'inventory' as ReportTab, label: '5. Stock Valuation', icon: Package },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                data-testid={`report-tab-${tab.id}`}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
+                  isActive
+                    ? 'bg-blue-800 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Date Filter Segmented Switcher */}
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs" data-testid="date-preset-filter">
+          <Calendar className="w-3.5 h-3.5 text-slate-400 ml-1.5 mr-0.5" />
+          {[
+            { id: 'TODAY' as DatePreset, label: 'Today' },
+            { id: 'YESTERDAY' as DatePreset, label: 'Yesterday' },
+            { id: 'THIS_WEEK' as DatePreset, label: 'Week' },
+            { id: 'THIS_MONTH' as DatePreset, label: 'Month' },
+            { id: 'ALL' as DatePreset, label: 'All' },
+          ].map((btn) => (
+            <button
+              key={btn.id}
+              type="button"
+              onClick={() => setDatePreset(btn.id)}
+              className={`px-2.5 py-1 rounded-lg font-bold transition ${
+                datePreset === btn.id
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              {btn.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* TAB 1: PROFIT & LOSS STATEMENT (REQ-14.1 & REQ-21) */}
+      {activeTab === 'pnl' && pnlData && (
+        <div className="space-y-4" data-testid="pnl-container">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 uppercase">Sales Revenue</span>
+              <p className="text-xl font-bold text-slate-900 mt-1" data-testid="pnl-sales-revenue">
+                {formatINR(pnlData.salesRevenue)}
+              </p>
+              <p className="text-[10px] text-slate-400">{pnlData.invoiceCount} Invoices</p>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 uppercase">Wholesale COGS</span>
+              <p className="text-xl font-bold text-slate-700 mt-1" data-testid="pnl-cogs">
+                {formatINR(pnlData.cogs)}
+              </p>
+              <p className="text-[10px] text-slate-400">Inventory purchase cost</p>
+            </div>
+
+            <div className="bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200 shadow-2xs">
+              <span className="text-[11px] font-bold text-emerald-800 uppercase">Gross Profit</span>
+              <p className="text-xl font-extrabold text-[#16a34a] mt-1" data-testid="pnl-gross-profit">
+                {formatINR(pnlData.grossProfit)}
+              </p>
+              <p className="text-[10px] text-emerald-700">Revenue - COGS</p>
+            </div>
+
+            <div className="bg-blue-50/70 p-4 rounded-2xl border border-blue-200 shadow-2xs">
+              <span className="text-[11px] font-bold text-blue-800 uppercase">TRUE NET PROFIT</span>
+              <p className="text-xl font-extrabold text-blue-900 mt-1" data-testid="pnl-true-net-profit">
+                {formatINR(pnlData.trueNetProfit)}
+              </p>
+              <p className="text-[10px] text-blue-700">After shop expenses &amp; damage</p>
+            </div>
+          </div>
+
+          {/* Breakdown Table & Home-Use Isolation Card */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+              <h3 className="font-bold text-sm text-slate-900 border-b border-slate-100 pb-2">
+                Operational Deductions Breakdown
+              </h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between py-1 border-b border-slate-50">
+                  <span className="text-slate-600">Shop Operating Expenses (Rent, Elec, Bags):</span>
+                  <span className="font-bold text-red-600" data-testid="pnl-shop-expenses">
+                    -{formatINR(pnlData.shopOperatingExpenses)}
+                  </span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-50">
+                  <span className="text-slate-600">Damage / Expired Stock Loss:</span>
+                  <span className="font-bold text-red-600" data-testid="pnl-damage-loss">
+                    -{formatINR(pnlData.damageLoss)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Home Self-Use Isolation Card (REQ-20) */}
+            <div className="bg-orange-50/70 p-5 rounded-2xl border border-orange-200 shadow-2xs space-y-2">
+              <h3 className="font-bold text-sm text-orange-900 flex items-center gap-1.5">
+                <Package className="w-4 h-4 text-orange-600" />
+                Home / Personal Consumption Isolation (REQ-20)
+              </h3>
+              <p className="text-xs text-orange-800 leading-relaxed">
+                Items taken by shop owner for personal household consumption are valued at wholesale cost and isolated from shop COGS to ensure true retail profit margins are not diluted.
+              </p>
+              <div className="pt-2 flex justify-between items-center text-xs border-t border-orange-200">
+                <span className="font-semibold text-orange-900">Total Home Groceries Valuated:</span>
+                <span className="text-base font-extrabold text-orange-950" data-testid="pnl-home-use">
+                  {formatINR(pnlData.homeSelfUseValuation)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: PRODUCT-WISE MARGIN REPORT (REQ-14.2) */}
+      {activeTab === 'products' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden" data-testid="products-report-container">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                <tr>
+                  <th className="p-3">Product Name</th>
+                  <th className="p-3 text-right">Units Sold</th>
+                  <th className="p-3 text-right">Revenue</th>
+                  <th className="p-3 text-right">Profit Generated</th>
+                  <th className="p-3 text-center">Margin %</th>
+                  <th className="p-3 text-right">Remaining Stock</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {productsData.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-6 text-center text-slate-400">
+                      No product sales recorded in this period.
+                    </td>
+                  </tr>
+                ) : (
+                  productsData.map((p, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50">
+                      <td className="p-3 font-semibold text-slate-900">{p.name}</td>
+                      <td className="p-3 text-right font-bold text-slate-700">
+                        {p.qtySold} {p.unitType}
+                      </td>
+                      <td className="p-3 text-right font-medium text-slate-900">
+                        {formatINR(p.revenue)}
+                      </td>
+                      <td className="p-3 text-right font-bold text-[#16a34a]">
+                        {formatINR(p.profit)}
+                      </td>
+                      <td className="p-3 text-center">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                          {p.marginPct}%
+                        </span>
+                      </td>
+                      <td className="p-3 text-right font-mono text-slate-600">
+                        {p.currentStock} {p.unitType}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: CUSTOMER UDHARI SUMMARY (REQ-14.3) */}
+      {activeTab === 'udhari' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden" data-testid="udhari-report-container">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                <tr>
+                  <th className="p-3">Customer Name</th>
+                  <th className="p-3">WhatsApp Phone</th>
+                  <th className="p-3 text-right">Credit Limit</th>
+                  <th className="p-3 text-right">Pending Udhari</th>
+                  <th className="p-3 text-center">Aging Days</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {udhariData.map((c, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50/50">
+                    <td className="p-3 font-semibold text-slate-900">{c.name}</td>
+                    <td className="p-3 font-mono text-slate-600">{c.phone}</td>
+                    <td className="p-3 text-right text-slate-500">{formatINR(c.creditLimit)}</td>
+                    <td className={`p-3 text-right font-extrabold ${c.balance > 0 ? 'text-[#dc2626]' : 'text-[#16a34a]'}`}>
+                      {formatINR(c.balance)}
+                    </td>
+                    <td className="p-3 text-center">
+                      {c.balance > 0 ? `${c.agingDays}d` : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: DAILY BILL REGISTER & VOID ACTION (REQ-14.4 & REQ-34 / AT-09) */}
+      {activeTab === 'invoices' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden" data-testid="invoices-report-container">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                <tr>
+                  <th className="p-3">Invoice Number</th>
+                  <th className="p-3">Time</th>
+                  <th className="p-3 text-right">Grand Total</th>
+                  <th className="p-3 text-center">Mode</th>
+                  <th className="p-3 text-right">Paid Now</th>
+                  <th className="p-3 text-right">Udhari</th>
+                  <th className="p-3 text-center">Status</th>
+                  <th className="p-3 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {invoicesData.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-6 text-center text-slate-400">
+                      No invoices found for this date range.
+                    </td>
+                  </tr>
+                ) : (
+                  invoicesData.map((inv) => (
+                    <tr key={inv.id} className="hover:bg-slate-50/50">
+                      <td className="p-3 font-mono font-bold text-blue-900">{inv.invoice_number}</td>
+                      <td className="p-3 text-slate-500 font-mono">
+                        {new Date(inv.created_at).toLocaleTimeString('en-IN', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </td>
+                      <td className="p-3 text-right font-extrabold text-slate-900">
+                        {formatINR(inv.grand_total)}
+                      </td>
+                      <td className="p-3 text-center">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                          {inv.payment_mode}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right text-emerald-700 font-bold">
+                        {formatINR(inv.amount_paid_now)}
+                      </td>
+                      <td className="p-3 text-right text-red-600 font-bold">
+                        {formatINR(inv.udhari_added)}
+                      </td>
+                      <td className="p-3 text-center">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            inv.status === 'COMPLETED'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}
+                        >
+                          {inv.status}
+                        </span>
+                      </td>
+                      <td className="p-3 text-center">
+                        {inv.status === 'COMPLETED' && (
+                          <button
+                            type="button"
+                            data-testid={`void-btn-${inv.id}`}
+                            onClick={() => handleVoidInvoice(inv)}
+                            className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg text-[10px] font-bold transition"
+                          >
+                            Void Bill
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: INVENTORY VALUATION REPORT (REQ-14.5) */}
+      {activeTab === 'inventory' && inventoryData && (
+        <div className="space-y-4" data-testid="inventory-report-container">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            <div className="bg-blue-50/70 p-4 rounded-2xl border border-blue-200 shadow-2xs">
+              <span className="text-[11px] font-bold text-blue-800 uppercase">
+                Total Locked Capital (Wholesale Cost)
+              </span>
+              <p className="text-2xl font-extrabold text-blue-950 mt-1" data-testid="locked-capital">
+                {formatINR(inventoryData.totalLockedCapital)}
+              </p>
+              <p className="text-[10px] text-blue-700">∑(current_stock &times; purchase_price)</p>
+            </div>
+
+            <div className="bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200 shadow-2xs">
+              <span className="text-[11px] font-bold text-emerald-800 uppercase">
+                Total Shelf Retail Value
+              </span>
+              <p className="text-2xl font-extrabold text-emerald-950 mt-1">
+                {formatINR(inventoryData.totalSellingValue)}
+              </p>
+              <p className="text-[10px] text-emerald-700">If all shelf stock is sold</p>
+            </div>
+
+            <div className="bg-purple-50/70 p-4 rounded-2xl border border-purple-200 shadow-2xs">
+              <span className="text-[11px] font-bold text-purple-800 uppercase">
+                Potential Gross Margin in Stock
+              </span>
+              <p className="text-2xl font-extrabold text-purple-950 mt-1">
+                {formatINR(inventoryData.potentialGrossMargin)}
+              </p>
+              <p className="text-[10px] text-purple-700">Shelf gross margin potential</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
