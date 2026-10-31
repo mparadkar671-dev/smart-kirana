@@ -11,7 +11,6 @@ import {
   ShopProfile,
   StoreUser,
 } from '../types';
-import { DEFAULT_SHOP_PROFILE } from '../db/seed';
 
 export interface CloudSyncStatus {
   isSyncing: boolean;
@@ -97,7 +96,10 @@ class CloudSyncService {
       };
       if (userId) payload.user_id = userId;
 
-      await supabase.from('products').upsert(payload, { onConflict: 'id' });
+      const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.warn('Sync product to Supabase returned error:', error.message);
+      }
     } catch (err) {
       console.warn('Background sync product to Supabase failed (offline mode):', err);
     }
@@ -109,7 +111,10 @@ class CloudSyncService {
   async deleteProduct(productId: string): Promise<void> {
     if (!supabase) return;
     try {
-      await supabase.from('products').delete().eq('id', productId);
+      const { error } = await supabase.from('products').delete().eq('id', productId);
+      if (error) {
+        console.warn('Delete product from Supabase returned error:', error.message);
+      }
     } catch (err) {
       console.warn('Background delete product from Supabase failed:', err);
     }
@@ -135,7 +140,10 @@ class CloudSyncService {
       };
       if (userId) payload.user_id = userId;
 
-      await supabase.from('customers').upsert(payload, { onConflict: 'id' });
+      const { error } = await supabase.from('customers').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.warn('Sync customer to Supabase returned error:', error.message);
+      }
     } catch (err) {
       console.warn('Background sync customer to Supabase failed:', err);
     }
@@ -147,7 +155,10 @@ class CloudSyncService {
   async deleteCustomer(customerId: string): Promise<void> {
     if (!supabase) return;
     try {
-      await supabase.from('customers').delete().eq('id', customerId);
+      const { error } = await supabase.from('customers').delete().eq('id', customerId);
+      if (error) {
+        console.warn('Delete customer from Supabase returned error:', error.message);
+      }
     } catch (err) {
       console.warn('Background delete customer from Supabase failed:', err);
     }
@@ -177,7 +188,10 @@ class CloudSyncService {
       };
       if (userId) invoicePayload.user_id = userId;
 
-      await supabase.from('sales_invoices').upsert(invoicePayload, { onConflict: 'id' });
+      const { error: invErr } = await supabase.from('sales_invoices').upsert(invoicePayload, { onConflict: 'id' });
+      if (invErr) {
+        console.warn('Sync sales_invoice returned error:', invErr.message);
+      }
 
       if (items && items.length > 0) {
         const itemsPayload = items.map((item) => {
@@ -195,7 +209,10 @@ class CloudSyncService {
           return itemRow;
         });
 
-        await supabase.from('sale_items').upsert(itemsPayload, { onConflict: 'id' });
+        const { error: itemErr } = await supabase.from('sale_items').upsert(itemsPayload, { onConflict: 'id' });
+        if (itemErr) {
+          console.warn('Sync sale_items returned error:', itemErr.message);
+        }
       }
     } catch (err) {
       console.warn('Background sync invoice to Supabase failed:', err);
@@ -222,7 +239,10 @@ class CloudSyncService {
       };
       if (userId) payload.user_id = userId;
 
-      await supabase.from('khata_transactions').upsert(payload, { onConflict: 'id' });
+      const { error } = await supabase.from('khata_transactions').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.warn('Sync khata_transaction returned error:', error.message);
+      }
     } catch (err) {
       console.warn('Background sync khata tx to Supabase failed:', err);
     }
@@ -248,7 +268,10 @@ class CloudSyncService {
       };
       if (userId) payload.user_id = userId;
 
-      await supabase.from('daily_galla_sessions').upsert(payload, { onConflict: 'session_date' });
+      const { error } = await supabase.from('daily_galla_sessions').upsert(payload, { onConflict: 'session_date' });
+      if (error) {
+        console.warn('Sync galla session returned error:', error.message);
+      }
     } catch (err) {
       console.warn('Background sync galla session to Supabase failed:', err);
     }
@@ -271,7 +294,10 @@ class CloudSyncService {
       };
       if (userId) payload.user_id = userId;
 
-      await supabase.from('expenses_and_drawings').upsert(payload, { onConflict: 'id' });
+      const { error } = await supabase.from('expenses_and_drawings').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.warn('Sync expense returned error:', error.message);
+      }
     } catch (err) {
       console.warn('Background sync expense to Supabase failed:', err);
     }
@@ -296,7 +322,10 @@ class CloudSyncService {
       };
       if (userId) payload.user_id = userId;
 
-      await supabase.from('shop_profile').upsert(payload, { onConflict: 'id' });
+      const { error } = await supabase.from('shop_profile').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.warn('Sync shop_profile returned error:', error.message);
+      }
     } catch (err) {
       console.warn('Background sync shop profile to Supabase failed:', err);
     }
@@ -321,7 +350,10 @@ class CloudSyncService {
         updated_at: storeUser.updated_at || new Date().toISOString(),
       };
 
-      await supabase.from('store_users').upsert(payload, { onConflict: 'id' });
+      const { error } = await supabase.from('store_users').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.warn('Sync store_user returned error:', error.message);
+      }
     } catch (err) {
       console.warn('Background sync store user to Supabase failed:', err);
     }
@@ -358,7 +390,8 @@ class CloudSyncService {
             updated_at: new Date().toISOString(),
           };
           if (userId) payload.user_id = userId;
-          await supabase.from('shop_profile').upsert(payload, { onConflict: 'id' });
+          const { error } = await supabase.from('shop_profile').upsert(payload, { onConflict: 'id' });
+          if (error) throw new Error(error.message);
           pushedCount++;
         }
       } catch (e: unknown) {
@@ -406,7 +439,8 @@ class CloudSyncService {
           // Upsert in chunks of 50
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
-            await supabase.from('products').upsert(chunk, { onConflict: 'id' });
+            const { error } = await supabase.from('products').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
             pushedCount += chunk.length;
           }
         }
@@ -435,7 +469,8 @@ class CloudSyncService {
           });
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
-            await supabase.from('customers').upsert(chunk, { onConflict: 'id' });
+            const { error } = await supabase.from('customers').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
             pushedCount += chunk.length;
           }
         }
@@ -467,7 +502,8 @@ class CloudSyncService {
           });
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
-            await supabase.from('sales_invoices').upsert(chunk, { onConflict: 'id' });
+            const { error } = await supabase.from('sales_invoices').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
             pushedCount += chunk.length;
           }
         }
@@ -496,7 +532,8 @@ class CloudSyncService {
           });
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
-            await supabase.from('khata_transactions').upsert(chunk, { onConflict: 'id' });
+            const { error } = await supabase.from('khata_transactions').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
             pushedCount += chunk.length;
           }
         }
@@ -537,7 +574,7 @@ class CloudSyncService {
         lastSyncedAt: now,
         status: hasErrors ? 'error' : 'synced',
         message: hasErrors
-          ? `Synced ${pushedCount} items with warnings: ${errors[0]}`
+          ? `Sync completed with notice: ${errors[0]}`
           : `All ${pushedCount} items synced to Supabase successfully!`,
       });
 
@@ -569,7 +606,8 @@ class CloudSyncService {
     try {
       // 1. Pull Shop Profile
       try {
-        const { data: profile } = await supabase.from('shop_profile').select('*').maybeSingle();
+        const { data: profile, error } = await supabase.from('shop_profile').select('*').maybeSingle();
+        if (error) throw new Error(error.message);
         if (profile) {
           await db.updateShopProfile({
             shop_name: profile.shop_name,
@@ -587,7 +625,8 @@ class CloudSyncService {
 
       // 2. Pull Products
       try {
-        const { data: prods } = await supabase.from('products').select('*');
+        const { data: prods, error } = await supabase.from('products').select('*');
+        if (error) throw new Error(error.message);
         if (prods && prods.length > 0) {
           for (const p of prods) {
             const productRecord: Product = {
@@ -617,7 +656,8 @@ class CloudSyncService {
 
       // 3. Pull Customers
       try {
-        const { data: custs } = await supabase.from('customers').select('*');
+        const { data: custs, error } = await supabase.from('customers').select('*');
+        if (error) throw new Error(error.message);
         if (custs && custs.length > 0) {
           for (const c of custs) {
             const customerRecord: Customer = {
@@ -641,7 +681,8 @@ class CloudSyncService {
 
       // 4. Pull Store Users
       try {
-        const { data: users } = await supabase.from('store_users').select('*');
+        const { data: users, error } = await supabase.from('store_users').select('*');
+        if (error) throw new Error(error.message);
         if (users && users.length > 0) {
           for (const u of users) {
             const userRecord: StoreUser = {

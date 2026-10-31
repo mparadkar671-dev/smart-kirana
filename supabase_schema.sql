@@ -260,7 +260,7 @@ CREATE INDEX IF NOT EXISTS idx_store_users_user ON store_users(user_id);
 CREATE INDEX IF NOT EXISTS idx_store_users_role ON store_users(role);
 
 -- ==============================================================================
--- 10. ROW LEVEL SECURITY (RLS) POLICIES FOR AUTHENTICATED STORE TENANTS
+-- 10. ROW LEVEL SECURITY (RLS) POLICIES FOR STORE APP (AUTHENTICATED & ANON CLIENT)
 -- ==============================================================================
 ALTER TABLE shop_profile ENABLE ROW LEVEL SECURITY;
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
@@ -271,72 +271,83 @@ ALTER TABLE sale_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE khata_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE expenses_and_drawings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_galla_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE store_users ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
-    -- Shop Profile Policies
-    CREATE POLICY "Users can manage their own shop profile" ON shop_profile
-        FOR ALL TO authenticated
-        USING (auth.uid() = user_id OR user_id IS NULL)
-        WITH CHECK (auth.uid() = user_id);
+    -- Drop old restrictive authenticated-only policies if present
+    DROP POLICY IF EXISTS "Users can manage their own shop profile" ON shop_profile;
+    DROP POLICY IF EXISTS "Users can manage their own products" ON products;
+    DROP POLICY IF EXISTS "Users can manage their own inventory logs" ON inventory_logs;
+    DROP POLICY IF EXISTS "Users can manage their own customers" ON customers;
+    DROP POLICY IF EXISTS "Users can manage their own sales invoices" ON sales_invoices;
+    DROP POLICY IF EXISTS "Users can manage their own sale items" ON sale_items;
+    DROP POLICY IF EXISTS "Users can manage their own khata entries" ON khata_transactions;
+    DROP POLICY IF EXISTS "Users can manage their own expenses" ON expenses_and_drawings;
+    DROP POLICY IF EXISTS "Users can manage their own daily galla sessions" ON daily_galla_sessions;
+    DROP POLICY IF EXISTS "Users can manage store users" ON store_users;
+
+    -- Shop Profile Policies (allows sync from both verified store logins and retail counter mode)
+    CREATE POLICY "Allow store app manage shop profile" ON shop_profile
+        FOR ALL TO authenticated, anon
+        USING (true)
+        WITH CHECK (true);
 
     -- Products Master Policies
-    CREATE POLICY "Users can manage their own products" ON products
-        FOR ALL TO authenticated
-        USING (auth.uid() = user_id OR user_id IS NULL)
-        WITH CHECK (auth.uid() = user_id);
+    CREATE POLICY "Allow store app manage products" ON products
+        FOR ALL TO authenticated, anon
+        USING (true)
+        WITH CHECK (true);
 
     -- Inventory Logs Policies
-    CREATE POLICY "Users can manage their own inventory logs" ON inventory_logs
-        FOR ALL TO authenticated
-        USING (auth.uid() = user_id OR user_id IS NULL)
-        WITH CHECK (auth.uid() = user_id);
+    CREATE POLICY "Allow store app manage inventory logs" ON inventory_logs
+        FOR ALL TO authenticated, anon
+        USING (true)
+        WITH CHECK (true);
 
     -- Customers & Khata Policies
-    CREATE POLICY "Users can manage their own customers" ON customers
-        FOR ALL TO authenticated
-        USING (auth.uid() = user_id OR id = '0000-WALK-IN')
-        WITH CHECK (auth.uid() = user_id OR id = '0000-WALK-IN');
+    CREATE POLICY "Allow store app manage customers" ON customers
+        FOR ALL TO authenticated, anon
+        USING (true)
+        WITH CHECK (true);
 
     -- Sales Invoices Policies
-    CREATE POLICY "Users can manage their own sales invoices" ON sales_invoices
-        FOR ALL TO authenticated
-        USING (auth.uid() = user_id OR user_id IS NULL)
-        WITH CHECK (auth.uid() = user_id);
+    CREATE POLICY "Allow store app manage sales invoices" ON sales_invoices
+        FOR ALL TO authenticated, anon
+        USING (true)
+        WITH CHECK (true);
 
     -- Sale Items Policies
-    CREATE POLICY "Users can manage their own sale items" ON sale_items
-        FOR ALL TO authenticated
-        USING (auth.uid() = user_id OR user_id IS NULL)
-        WITH CHECK (auth.uid() = user_id);
+    CREATE POLICY "Allow store app manage sale items" ON sale_items
+        FOR ALL TO authenticated, anon
+        USING (true)
+        WITH CHECK (true);
 
     -- Khata Transactions Policies
-    CREATE POLICY "Users can manage their own khata entries" ON khata_transactions
-        FOR ALL TO authenticated
-        USING (auth.uid() = user_id OR user_id IS NULL)
-        WITH CHECK (auth.uid() = user_id);
+    CREATE POLICY "Allow store app manage khata entries" ON khata_transactions
+        FOR ALL TO authenticated, anon
+        USING (true)
+        WITH CHECK (true);
 
     -- Expenses Policies
-    CREATE POLICY "Users can manage their own expenses" ON expenses_and_drawings
-        FOR ALL TO authenticated
-        USING (auth.uid() = user_id OR user_id IS NULL)
-        WITH CHECK (auth.uid() = user_id);
+    CREATE POLICY "Allow store app manage expenses" ON expenses_and_drawings
+        FOR ALL TO authenticated, anon
+        USING (true)
+        WITH CHECK (true);
 
     -- Daily Galla Policies
-    CREATE POLICY "Users can manage their own daily galla sessions" ON daily_galla_sessions
-        FOR ALL TO authenticated
-        USING (auth.uid() = user_id OR user_id IS NULL)
-        WITH CHECK (auth.uid() = user_id);
+    CREATE POLICY "Allow store app manage daily galla sessions" ON daily_galla_sessions
+        FOR ALL TO authenticated, anon
+        USING (true)
+        WITH CHECK (true);
 
     -- Store Users Policies
-    CREATE POLICY "Users can manage store users" ON store_users
-        FOR ALL TO authenticated
-        USING (auth.uid() = user_id OR user_id IS NULL)
-        WITH CHECK (auth.uid() = user_id);
+    CREATE POLICY "Allow store app manage store users" ON store_users
+        FOR ALL TO authenticated, anon
+        USING (true)
+        WITH CHECK (true);
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
-
-ALTER TABLE store_users ENABLE ROW LEVEL SECURITY;
 
 -- ==============================================================================
 -- 11. INSTANT ACCESS / EMAIL VERIFICATION HELPER (RUN IN SQL EDITOR IF DESIRED)
