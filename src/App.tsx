@@ -11,6 +11,7 @@ import { SettingsView } from './components/settings/SettingsView';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthPage } from './components/auth/AuthPage';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Sparkles, PlusCircle } from 'lucide-react';
 
 const MainApp: React.FC = () => {
@@ -132,11 +133,13 @@ const MainApp: React.FC = () => {
 
 export const App: React.FC = () => {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <MainApp />
-      </AuthProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <MainApp />
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 };
 
