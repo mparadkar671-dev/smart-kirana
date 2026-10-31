@@ -235,6 +235,30 @@ CREATE TABLE IF NOT EXISTS daily_galla_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_galla_user ON daily_galla_sessions(user_id);
 
+-- 10. STORE USERS & ROLE-BASED ACCESS CONTROL (OWNER, MANAGER, ACCOUNTANT, CASHIER)
+DO $$ BEGIN
+    CREATE TYPE user_role_enum AS ENUM ('OWNER', 'MANAGER', 'ACCOUNTANT', 'CASHIER');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+CREATE TABLE IF NOT EXISTS store_users (
+    id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    phone TEXT,
+    role user_role_enum NOT NULL DEFAULT 'OWNER',
+    shop_id TEXT DEFAULT 'current_shop',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_store_users_email ON store_users(email);
+CREATE INDEX IF NOT EXISTS idx_store_users_user ON store_users(user_id);
+CREATE INDEX IF NOT EXISTS idx_store_users_role ON store_users(role);
+
 -- ==============================================================================
 -- 10. ROW LEVEL SECURITY (RLS) POLICIES FOR AUTHENTICATED STORE TENANTS
 -- ==============================================================================
@@ -302,9 +326,28 @@ DO $$ BEGIN
         FOR ALL TO authenticated
         USING (auth.uid() = user_id OR user_id IS NULL)
         WITH CHECK (auth.uid() = user_id);
+
+    -- Store Users Policies
+    CREATE POLICY "Users can manage store users" ON store_users
+        FOR ALL TO authenticated
+        USING (auth.uid() = user_id OR user_id IS NULL)
+        WITH CHECK (auth.uid() = user_id);
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
+
+ALTER TABLE store_users ENABLE ROW LEVEL SECURITY;
+
+-- ==============================================================================
+-- 11. INSTANT ACCESS / EMAIL VERIFICATION HELPER (RUN IN SQL EDITOR IF DESIRED)
+-- ==============================================================================
+-- If your shopkeepers sign up and see "Email not confirmed", you can either:
+-- 1. In Supabase Dashboard -> Authentication -> Providers -> Email -> Turn OFF "Confirm email"
+-- OR
+-- 2. Run this one-line command to auto-confirm all existing registered users:
+UPDATE auth.users 
+SET email_confirmed_at = NOW() 
+WHERE email_confirmed_at IS NULL;
 
 -- ==============================================================================
 -- End of Schema Definition

@@ -1,25 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import {
+  Store,
   ShoppingCart,
   Package,
   BookOpen,
   Wallet,
   BarChart3,
   Settings,
-  Store,
   Wifi,
   WifiOff,
-  Keyboard,
-  Moon,
   Sun,
-  User as UserIcon,
+  Moon,
+  Keyboard,
   LogOut,
+  User as UserIcon,
   ShieldCheck,
+  RefreshCw,
+  CheckCircle2,
+  Users,
 } from 'lucide-react';
-import { ShopProfile } from '../../types';
+import { ShopProfile, UserRole } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { AuthModal } from '../auth/AuthModal';
+import { cloudSyncService, CloudSyncStatus } from '../../services/cloudSyncService';
 
 export type ActiveTab = 'pos' | 'inventory' | 'khata' | 'galla' | 'reports' | 'settings';
 
@@ -37,9 +41,11 @@ export const Shell: React.FC<ShellProps> = ({
   children,
 }) => {
   const { theme, toggleTheme } = useTheme();
-  const { user, isAuthenticated, isOfflineGuest, signOut } = useAuth();
+  const { user, userRole, isAuthenticated, isOfflineGuest, signOut } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+  const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>(() => cloudSyncService.getStatus());
+  const [syncToast, setSyncToast] = useState<string | null>(null);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -48,13 +54,37 @@ export const Shell: React.FC<ShellProps> = ({
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    const unsubscribe = cloudSyncService.subscribe((s) => {
+      setSyncStatus(s);
+    });
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      unsubscribe();
     };
   }, []);
 
+  const handleManualSync = async () => {
+    if (syncStatus.isSyncing) return;
+    setSyncToast('Syncing with Supabase...');
+    const res = await cloudSyncService.syncAllToCloud();
+    if (res.success) {
+      setSyncToast(`Synced ${res.pushedCount} records to cloud!`);
+    } else {
+      setSyncToast(`Sync completed with notice: ${res.errors[0] || 'Check logs'}`);
+    }
+    setTimeout(() => setSyncToast(null), 3000);
+  };
+
   const shopName = shopProfile?.shop_name || 'Smart Kirana POS';
+
+  const roleBadgeMap: Record<UserRole, { label: string; color: string }> = {
+    OWNER: { label: '👑 Owner', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' },
+    MANAGER: { label: '👔 Manager', color: 'bg-blue-500/20 text-blue-300 border-blue-500/40' },
+    ACCOUNTANT: { label: '📊 Munim', color: 'bg-purple-500/20 text-purple-300 border-purple-500/40' },
+    CASHIER: { label: '⚡ Cashier', color: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
+  };
 
   const navItems = [
     { id: 'pos' as ActiveTab, label: 'POS Billing', icon: ShoppingCart, shortcut: 'F1' },
@@ -105,25 +135,50 @@ export const Shell: React.FC<ShellProps> = ({
           </button>
         </div>
 
-        {/* User Account / Cloud Sync Pill */}
-        <div className="px-3 pt-3">
+        {/* User Account & Role Pill */}
+        <div className="px-3 pt-3 space-y-2">
           {isAuthenticated && user ? (
-            <div className="p-2.5 bg-slate-800/80 rounded-xl border border-slate-700/60 flex items-center justify-between">
-              <div className="flex items-center gap-2 overflow-hidden">
-                <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                  <ShieldCheck className="w-4 h-4 text-emerald-300" />
+            <div className="p-2.5 bg-slate-800/80 rounded-xl border border-slate-700/60 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
+                    <ShieldCheck className="w-4 h-4 text-emerald-300" />
+                  </div>
+                  <div className="overflow-hidden">
+                    <div className="text-[11px] font-semibold text-white truncate">{user.email}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${roleBadgeMap[userRole]?.color || 'bg-slate-700 text-slate-300 border-slate-600'}`}>
+                        {roleBadgeMap[userRole]?.label || userRole}
+                      </span>
+                      <span className="text-[9px] text-emerald-400 font-medium">Supabase</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="overflow-hidden">
-                  <div className="text-[11px] font-semibold text-white truncate">{user.email}</div>
-                  <div className="text-[9px] text-emerald-400 font-medium">Cloud Authenticated</div>
-                </div>
+                <button
+                  onClick={() => signOut()}
+                  title="Sign Out"
+                  className="p-1 text-slate-400 hover:text-red-400 transition"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
               </div>
+
+              {/* Cloud Sync Quick Button */}
               <button
-                onClick={() => signOut()}
-                title="Sign Out"
-                className="p-1 text-slate-400 hover:text-red-400 transition"
+                type="button"
+                onClick={handleManualSync}
+                disabled={syncStatus.isSyncing}
+                className="w-full py-1 px-2 rounded-lg bg-slate-900/60 hover:bg-slate-900 text-[10px] text-slate-300 hover:text-white border border-slate-700/50 flex items-center justify-between transition disabled:opacity-50"
               >
-                <LogOut className="w-3.5 h-3.5" />
+                <div className="flex items-center gap-1.5">
+                  <RefreshCw className={`w-3 h-3 ${syncStatus.isSyncing ? 'animate-spin text-blue-400' : 'text-emerald-400'}`} />
+                  <span>{syncStatus.isSyncing ? 'Syncing...' : 'Sync to Supabase'}</span>
+                </div>
+                <span className="text-[9px] text-slate-400 font-mono">
+                  {syncStatus.lastSyncedAt
+                    ? new Date(syncStatus.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : '1-click'}
+                </span>
               </button>
             </div>
           ) : isOfflineGuest ? (
@@ -138,8 +193,8 @@ export const Shell: React.FC<ShellProps> = ({
                 </div>
               </div>
               <button
-                onClick={() => signOut()}
-                title="Exit to Login / Sign Up"
+                onClick={() => setIsAuthModalOpen(true)}
+                title="Connect Cloud Account"
                 className="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-[10px] font-bold text-slate-200 rounded-lg transition"
               >
                 Sign In
@@ -153,6 +208,14 @@ export const Shell: React.FC<ShellProps> = ({
               <UserIcon className="w-3.5 h-3.5" />
               <span>Sign In / Cloud Account</span>
             </button>
+          )}
+
+          {/* Toast Notification */}
+          {syncToast && (
+            <div className="p-1.5 rounded-lg bg-blue-950/80 border border-blue-700/60 text-[10px] text-blue-200 flex items-center gap-1.5 animate-in fade-in">
+              <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+              <span className="truncate">{syncToast}</span>
+            </div>
           )}
         </div>
 
@@ -224,14 +287,29 @@ export const Shell: React.FC<ShellProps> = ({
           </div>
           <div className="overflow-hidden">
             <h1 className="font-bold text-xs truncate max-w-[150px] sm:max-w-xs">{shopName}</h1>
-            <div className="flex items-center gap-1 text-[10px] text-emerald-400 font-medium">
+            <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 font-medium">
               {isOnline ? <Wifi className="w-2.5 h-2.5" /> : <WifiOff className="w-2.5 h-2.5 text-amber-400" />}
               <span>{isOnline ? 'Online' : 'Offline'}</span>
+              {isAuthenticated && (
+                <span className={`text-[8px] px-1 rounded border ${roleBadgeMap[userRole]?.color || ''}`}>
+                  {userRole}
+                </span>
+              )}
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* Quick sync button */}
+          <button
+            onClick={handleManualSync}
+            disabled={syncStatus.isSyncing}
+            title="Sync Cloud"
+            className="p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncStatus.isSyncing ? 'animate-spin text-blue-400' : 'text-emerald-400'}`} />
+          </button>
+
           {/* Mobile Theme Toggle */}
           <button
             onClick={toggleTheme}

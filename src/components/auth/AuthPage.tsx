@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { validatePasswordStrength } from '../../services/authService';
+import { UserRole } from '../../types';
 import {
   Store,
   Lock,
@@ -22,12 +23,13 @@ import {
   BarChart3,
   Scale,
   Sparkles,
+  Users,
 } from 'lucide-react';
 
 type Tab = 'signin' | 'signup' | 'forgot' | 'verify_pending';
 
 export const AuthPage: React.FC = () => {
-  const { signIn, signUp, resetPassword, continueAsGuest } = useAuth();
+  const { signIn, signUp, resetPassword, resendConfirmationEmail, continueAsGuest } = useAuth();
   const { theme, toggleTheme } = useTheme();
 
   const [tab, setTab] = useState<Tab>('signin');
@@ -37,18 +39,24 @@ export const AuthPage: React.FC = () => {
   const [shopName, setShopName] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [phone, setPhone] = useState('');
+  const [role, setRole] = useState<UserRole>('OWNER');
 
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendSuccess, setResendSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const passwordValidation = validatePasswordStrength(password);
 
+  const isEmailNotConfirmed = errorMsg?.toLowerCase().includes('email not confirmed');
+
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
+    setResendSuccess(false);
     setIsSubmitting(true);
     try {
       await signIn(email.trim(), password);
@@ -58,6 +66,22 @@ export const AuthPage: React.FC = () => {
       );
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleResendConfirmation = async () => {
+    if (!email.trim()) {
+      setErrorMsg('Please enter your email address to resend the confirmation link.');
+      return;
+    }
+    setIsResending(true);
+    try {
+      await resendConfirmationEmail(email.trim());
+      setResendSuccess(true);
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Could not resend email. Please try again.');
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -82,6 +106,7 @@ export const AuthPage: React.FC = () => {
         shopName: shopName.trim() || 'My Kirana Store',
         ownerName: ownerName.trim() || 'Owner',
         phone: phone.trim() || '',
+        role,
       });
 
       if (res.needEmailVerification) {
@@ -201,29 +226,27 @@ export const AuthPage: React.FC = () => {
                 <BarChart3 className="w-4 h-4" /> Vyapar-Style Reports
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Galla reconciliation, COGS margins, wholesaler low-stock lists, and Excel exports.
+                Galla reconciliation, COGS margins, wholesaler low stock lists, and Excel exports.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Authentication Card */}
-        <div className="lg:col-span-6 max-w-md w-full mx-auto">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xl overflow-hidden transition-colors">
-            {/* Header / Tabs */}
-            <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-emerald-600 via-teal-700 to-emerald-700 text-white">
-              <div className="flex items-center gap-2.5 mb-2">
-                <div className="p-2 bg-white/10 rounded-xl backdrop-blur-xs border border-white/20">
-                  <ShieldCheck className="w-5 h-5 text-amber-300" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-lg">Store Access &amp; Cloud Sync</h3>
-                  <p className="text-xs text-emerald-100">Sign in to your store account or create a new one</p>
-                </div>
+        {/* Right Column: Auth Card */}
+        <div className="lg:col-span-6 flex justify-center">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+            {/* Card Header with tabs */}
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-700 p-6 text-white">
+              <div className="flex items-center gap-2 mb-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-200" />
+                <h3 className="font-bold text-lg">Store Access &amp; Cloud Sync</h3>
               </div>
+              <p className="text-xs text-emerald-100 mb-4">
+                Sign in to your store account or register a new store with role-based access.
+              </p>
 
               {tab !== 'verify_pending' && (
-                <div className="flex gap-4 mt-4 text-sm font-semibold border-b border-white/20">
+                <div className="flex gap-4 text-xs font-bold border-b border-emerald-500/40">
                   <button
                     type="button"
                     onClick={() => {
@@ -260,12 +283,48 @@ export const AuthPage: React.FC = () => {
 
             {/* Card Body */}
             <div className="p-6 space-y-4">
-              {errorMsg && (
+              {/* Special Email Not Confirmed Helper Box */}
+              {isEmailNotConfirmed ? (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs space-y-2.5">
+                  <div className="flex items-center gap-2 font-bold text-amber-600 dark:text-amber-400">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>Email Confirmation Required</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    Supabase Auth requires clicking the confirmation link sent to <strong>{email}</strong> before password sign-in succeeds.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleResendConfirmation}
+                      disabled={isResending}
+                      className="py-2 px-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm active:scale-98 disabled:opacity-50"
+                    >
+                      {isResending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                      <span>{isResending ? 'Sending...' : 'Resend Confirmation Email'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={continueAsGuest}
+                      className="py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm active:scale-98"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Enter Store (Counter Mode)</span>
+                    </button>
+                  </div>
+                  {resendSuccess && (
+                    <div className="p-2 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1.5 mt-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Verification link resent! Check inbox and spam folders.</span>
+                    </div>
+                  )}
+                </div>
+              ) : errorMsg ? (
                 <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 flex items-start gap-2.5 text-xs text-rose-700 dark:text-rose-300">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{errorMsg}</span>
                 </div>
-              )}
+              ) : null}
 
               {successMsg && (
                 <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 flex items-start gap-2.5 text-xs text-emerald-700 dark:text-emerald-300">
@@ -365,6 +424,35 @@ export const AuthPage: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Role Selector */}
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                      Store Role *
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { id: 'OWNER', label: '👑 Store Owner', desc: 'Full admin access' },
+                        { id: 'MANAGER', label: '👔 Store Manager', desc: 'Counter & stock supervisor' },
+                        { id: 'ACCOUNTANT', label: '📊 Accountant', desc: 'P&L, khata & tax audits' },
+                        { id: 'CASHIER', label: '⚡ Cashier', desc: 'Fast counter billing' },
+                      ].map((r) => (
+                        <button
+                          type="button"
+                          key={r.id}
+                          onClick={() => setRole(r.id as UserRole)}
+                          className={`p-2 rounded-xl border text-left transition ${
+                            role === r.id
+                              ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold'
+                              : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="text-xs font-bold">{r.label}</div>
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500">{r.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
@@ -402,7 +490,7 @@ export const AuthPage: React.FC = () => {
 
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                      Owner Name *
+                      Full Name *
                     </label>
                     <div className="relative">
                       <UserIcon className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -517,7 +605,7 @@ export const AuthPage: React.FC = () => {
                         <RefreshCw className="w-4 h-4 animate-spin" /> Registering Store...
                       </>
                     ) : (
-                      <>Create Verified Store Account</>
+                      <>Create Verified {role} Account</>
                     )}
                   </button>
                 </form>
@@ -625,4 +713,3 @@ export const AuthPage: React.FC = () => {
     </div>
   );
 };
-

@@ -1,6 +1,8 @@
-import { supabase, getSupabaseClient } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { User, Session } from '@supabase/supabase-js';
 import { db } from '../db/db';
+import { UserRole, StoreUser } from '../types';
+import { cloudSyncService } from './cloudSyncService';
 
 export interface PasswordValidationResult {
   isValid: boolean;
@@ -68,17 +70,20 @@ export interface SignUpShopData {
   shopName: string;
   ownerName: string;
   phone: string;
+  role?: UserRole;
 }
 
 export const authService = {
   /**
-   * Registers a new store owner with standard password verification & Supabase Auth
+   * Registers a new store user (Owner, Manager, Accountant, Cashier) with standard password verification & Supabase Auth
    */
   async signUp(email: string, password: string, shopData: SignUpShopData) {
     const validation = validatePasswordStrength(password);
     if (!validation.isValid) {
       throw new Error(`Password does not meet standard security rules: ${validation.errors.join(', ')}`);
     }
+
+    const assignedRole: UserRole = shopData.role || 'OWNER';
 
     // Immediately update local shop profile in IndexedDB so the user's registered name is active
     try {
@@ -90,6 +95,23 @@ export const authService = {
       });
     } catch (e) {
       console.warn('Failed to save local shop profile on signup:', e);
+    }
+
+    // Save local store user record
+    const localStoreUser: StoreUser = {
+      id: `usr-${Date.now()}`,
+      email,
+      full_name: shopData.ownerName || 'Store User',
+      phone: shopData.phone || undefined,
+      role: assignedRole,
+      shop_id: 'current_shop',
+      is_active: true,
+      created_at: new Date().toISOString(),
+    };
+    try {
+      await db.saveStoreUser(localStoreUser);
+    } catch (e) {
+      console.warn('Failed to save local store user:', e);
     }
 
     if (!supabase) {
@@ -104,6 +126,7 @@ export const authService = {
           shop_name: shopData.shopName,
           owner_name: shopData.ownerName,
           phone: shopData.phone,
+          role: assignedRole,
         },
         emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
       },
@@ -113,8 +136,11 @@ export const authService = {
       throw error;
     }
 
-    // If user account was returned, upsert into Supabase shop_profile table
+    // If user account was created, save to Supabase shop_profile and store_users tables
     if (data.user) {
+      localStoreUser.user_id = data.user.id;
+      await db.saveStoreUser(localStoreUser);
+
       try {
         await supabase.from('shop_profile').upsert({
           id: 'current_shop',
@@ -127,6 +153,23 @@ export const authService = {
         });
       } catch (err) {
         console.warn('Could not sync initial profile to Supabase:', err);
+      }
+
+      try {
+        await supabase.from('store_users').upsert({
+          id: localStoreUser.id,
+          user_id: data.user.id,
+          email,
+          full_name: shopData.ownerName || 'Store User',
+          phone: shopData.phone || null,
+          role: assignedRole,
+          shop_id: 'current_shop',
+          is_active: true,
+          created_at: localStoreUser.created_at,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('Could not sync store user to Supabase:', err);
       }
     }
 
@@ -150,7 +193,7 @@ export const authService = {
       throw error;
     }
 
-    // Restore shop profile from Supabase to IndexedDB
+    // Restore shop profile & store user role from Supabase to IndexedDB
     if (data.user) {
       try {
         const { data: profile } = await supabase
@@ -179,12 +222,85 @@ export const authService = {
             });
           }
         }
+
+        // Fetch or initialize store_user role
+        const { data: storeUserData } = await supabase
+          .from('store_users')
+          .select('*')
+          .or(`user_id.eq.${data.user.id},email.eq.${email}`)
+          .maybeSingle();
+
+        const role: UserRole =
+          storeUserData?.role ||
+          (data.user.user_metadata?.role as UserRole) ||
+          'OWNER';
+
+        const storeUserRecord: StoreUser = {
+          id: storeUserData?.id || `usr-${data.user.id.slice(0, 8)}`,
+          user_id: data.user.id,
+          email,
+          full_name:
+            storeUserData?.full_name ||
+            data.user.user_metadata?.owner_name ||
+            'Store User',
+          phone: storeUserData?.phone || data.user.user_metadata?.phone,
+          role,
+          shop_id: 'current_shop',
+          is_active: true,
+          created_at: storeUserData?.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        await db.saveStoreUser(storeUserRecord);
+
+        // Auto pull cloud database into Dexie in background
+        cloudSyncService.pullAllFromCloud().catch((err) => {
+          console.warn('Initial pull from cloud after sign in skipped/failed:', err);
+        });
       } catch (err) {
-        console.warn('Could not sync profile on sign in:', err);
+        console.warn('Could not sync user/profile on sign in:', err);
       }
     }
 
     return data;
+  },
+
+  /**
+   * Resends confirmation email for unconfirmed accounts
+   */
+  async resendConfirmationEmail(email: string) {
+    if (!supabase) {
+      throw new Error('Supabase client is not configured.');
+    }
+
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: {
+        emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return true;
+  },
+
+  /**
+   * Retrieves the role of the current user
+   */
+  async getUserRole(userId?: string, email?: string): Promise<UserRole> {
+    if (userId) {
+      const local = await db.getStoreUserByUserId(userId);
+      if (local?.role) return local.role;
+    }
+    if (email) {
+      const local = await db.getStoreUserByEmail(email);
+      if (local?.role) return local.role;
+    }
+    return 'OWNER';
   },
 
   /**
@@ -236,4 +352,3 @@ export const authService = {
     };
   },
 };
-

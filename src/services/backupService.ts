@@ -9,6 +9,7 @@ import {
   ExpenseAndDrawing,
   DailyGallaSession,
   ShopProfile,
+  StoreUser,
 } from '../types';
 
 export interface DatabaseSnapshot {
@@ -23,6 +24,7 @@ export interface DatabaseSnapshot {
   khata_transactions: KhataTransaction[];
   expenses_and_drawings: ExpenseAndDrawing[];
   daily_galla_sessions: DailyGallaSession[];
+  store_users?: StoreUser[];
 }
 
 export class BackupService {
@@ -40,6 +42,7 @@ export class BackupService {
       khata_transactions,
       expenses_and_drawings,
       daily_galla_sessions,
+      store_users,
     ] = await Promise.all([
       db.shop_profile.toArray(),
       db.products.toArray(),
@@ -50,6 +53,7 @@ export class BackupService {
       db.khata_transactions.toArray(),
       db.expenses_and_drawings.toArray(),
       db.daily_galla_sessions.toArray(),
+      db.store_users.toArray(),
     ]);
 
     return {
@@ -64,11 +68,12 @@ export class BackupService {
       khata_transactions,
       expenses_and_drawings,
       daily_galla_sessions,
+      store_users,
     };
   }
 
   /**
-   * Generates downloadable JSON snapshot file for disaster recovery
+   * Generates a downloadable JSON file in the browser (returns json string for test compatibility)
    */
   static async downloadJsonBackup(): Promise<string> {
     const snapshot = await this.exportFullDatabase();
@@ -96,7 +101,14 @@ export class BackupService {
   }
 
   /**
-   * Restores entire database from JSON snapshot with 100% bit-for-bit parity
+   * Alias for export
+   */
+  static async exportToFile(): Promise<void> {
+    await this.downloadJsonBackup();
+  }
+
+  /**
+   * Restores entire database from JSON string or object
    */
   static async restoreDatabaseFromJson(jsonContent: string | DatabaseSnapshot): Promise<void> {
     const snapshot: DatabaseSnapshot =
@@ -106,6 +118,59 @@ export class BackupService {
       throw new Error('Invalid Kirana database backup snapshot format');
     }
 
+    await this.restoreFromSnapshot(snapshot);
+  }
+
+  /**
+   * Imports and validates a JSON backup file
+   */
+  static async importFromFile(file: File): Promise<{
+    success: boolean;
+    recordCounts: Record<string, number>;
+  }> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = async (event) => {
+        try {
+          const content = event.target?.result as string;
+          const snapshot = JSON.parse(content) as DatabaseSnapshot;
+
+          if (!snapshot.exported_at || !snapshot.version) {
+            throw new Error('Invalid backup file format: Missing metadata headers.');
+          }
+
+          if (!Array.isArray(snapshot.products) || !Array.isArray(snapshot.customers)) {
+            throw new Error('Invalid backup structure: Products or Customers table missing.');
+          }
+
+          await this.restoreFromSnapshot(snapshot);
+
+          resolve({
+            success: true,
+            recordCounts: {
+              products: snapshot.products.length,
+              customers: snapshot.customers.length,
+              sales_invoices: snapshot.sales_invoices?.length || 0,
+              khata_transactions: snapshot.khata_transactions?.length || 0,
+              inventory_logs: snapshot.inventory_logs?.length || 0,
+              store_users: snapshot.store_users?.length || 0,
+            },
+          });
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      reader.onerror = () => reject(new Error('Failed to read file from disk.'));
+      reader.readAsText(file);
+    });
+  }
+
+  /**
+   * Restores tables inside an atomic Dexie transaction
+   */
+  static async restoreFromSnapshot(snapshot: DatabaseSnapshot): Promise<void> {
     await db.transaction(
       'rw',
       [
@@ -118,6 +183,7 @@ export class BackupService {
         db.khata_transactions,
         db.expenses_and_drawings,
         db.daily_galla_sessions,
+        db.store_users,
       ],
       async () => {
         // Clear all tables
@@ -130,6 +196,7 @@ export class BackupService {
         await db.khata_transactions.clear();
         await db.expenses_and_drawings.clear();
         await db.daily_galla_sessions.clear();
+        await db.store_users.clear();
 
         // Restore tables
         if (snapshot.shop_profile?.length) await db.shop_profile.bulkAdd(snapshot.shop_profile);
@@ -141,8 +208,8 @@ export class BackupService {
         if (snapshot.khata_transactions?.length) await db.khata_transactions.bulkAdd(snapshot.khata_transactions);
         if (snapshot.expenses_and_drawings?.length) await db.expenses_and_drawings.bulkAdd(snapshot.expenses_and_drawings);
         if (snapshot.daily_galla_sessions?.length) await db.daily_galla_sessions.bulkAdd(snapshot.daily_galla_sessions);
+        if (snapshot.store_users?.length) await db.store_users.bulkAdd(snapshot.store_users);
       }
     );
   }
 }
-

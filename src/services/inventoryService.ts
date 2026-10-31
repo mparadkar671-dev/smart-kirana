@@ -1,6 +1,7 @@
 import { db } from '../db/db';
 import { Product, InventoryLog, ExpenseAndDrawing, UnitType, InventoryReason } from '../types';
 import { roundQty, roundCurrency, calculateProfitMarginPercent } from '../utils/math';
+import { cloudSyncService } from './cloudSyncService';
 
 export interface CreateProductInput {
   name: string;
@@ -60,6 +61,7 @@ export class InventoryService {
       }
     });
 
+    cloudSyncService.syncProduct(newProduct);
     return newProduct;
   }
 
@@ -111,6 +113,10 @@ export class InventoryService {
 
       await db.products.update(productId, patched);
     });
+
+    db.products.get(productId).then((p) => {
+      if (p) cloudSyncService.syncProduct(p);
+    });
   }
 
   /**
@@ -120,6 +126,7 @@ export class InventoryService {
     await db.transaction('rw', [db.products, db.inventory_logs], async () => {
       await db.products.delete(productId);
     });
+    cloudSyncService.deleteProduct(productId);
   }
 
   /**
@@ -130,6 +137,7 @@ export class InventoryService {
     await db.transaction('rw', [db.products, db.inventory_logs], async () => {
       await db.products.bulkDelete(productIds);
     });
+    for (const id of productIds) { cloudSyncService.deleteProduct(id); }
   }
 
   /**

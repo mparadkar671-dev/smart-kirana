@@ -9,6 +9,7 @@ import {
   ExpenseAndDrawing,
   DailyGallaSession,
   ShopProfile,
+  StoreUser,
   WALK_IN_CUSTOMER_RECORD,
   WALK_IN_CUSTOMER_ID,
 } from '../types';
@@ -24,6 +25,7 @@ export class KiranaDatabase extends Dexie {
   expenses_and_drawings!: EntityTable<ExpenseAndDrawing, 'id'>;
   daily_galla_sessions!: EntityTable<DailyGallaSession, 'id'>;
   shop_profile!: EntityTable<ShopProfile, 'id'>;
+  store_users!: EntityTable<StoreUser, 'id'>;
 
   constructor() {
     super('SmartKiranaDB');
@@ -38,6 +40,10 @@ export class KiranaDatabase extends Dexie {
       expenses_and_drawings: 'id, category, paid_via, created_at',
       daily_galla_sessions: 'id, &session_date, created_at',
       shop_profile: 'id',
+    });
+
+    this.version(2).stores({
+      store_users: 'id, user_id, email, role, shop_id, created_at',
     });
   }
 
@@ -239,6 +245,25 @@ export class KiranaDatabase extends Dexie {
       ...profile,
       updated_at: new Date().toISOString(),
     });
+  }
+
+  /**
+   * Store user helper methods
+   */
+  async getStoreUsers(): Promise<StoreUser[]> {
+    return await this.store_users.toArray();
+  }
+
+  async saveStoreUser(user: StoreUser): Promise<void> {
+    await this.store_users.put(user);
+  }
+
+  async getStoreUserByEmail(email: string): Promise<StoreUser | undefined> {
+    return await this.store_users.where('email').equalsIgnoreCase(email).first();
+  }
+
+  async getStoreUserByUserId(userId: string): Promise<StoreUser | undefined> {
+    return await this.store_users.where('user_id').equals(userId).first();
   }
 }
 

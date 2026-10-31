@@ -104,6 +104,21 @@ export type ExpenseCategory =
 
 export type ExpensePaidVia = 'CASH_GALLA' | 'UPI_BANK' | 'INVENTORY_DEDUCTION';
 
+export type UserRole = 'OWNER' | 'MANAGER' | 'ACCOUNTANT' | 'CASHIER';
+
+export interface StoreUser {
+  id: string; // UUID PK
+  user_id?: string; // Supabase Auth user ID
+  email: string;
+  full_name: string;
+  phone?: string;
+  role: UserRole;
+  shop_id: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
 export interface ExpenseAndDrawing {
   id: string; // UUID PK
   category: ExpenseCategory;
