@@ -2,7 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../db/db';
 import { ShopProfile } from '../../types';
 import { BackupService } from '../../services/backupService';
-import { supabase, createCustomSupabaseClient } from '../../lib/supabase';
+import {
+  supabase,
+  createCustomSupabaseClient,
+  getSupabaseCredentials,
+  normalizeSupabaseUrl,
+  normalizeSupabaseKey,
+} from '../../lib/supabase';
 import { isSoundEnabled, setSoundEnabled } from '../../utils/sound';
 import {
   Store,
@@ -34,17 +40,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
-  // Supabase Settings (REQ-16)
-  const [supabaseUrl, setSupabaseUrl] = useState(
-    () => localStorage.getItem('kirana_supabase_url') || import.meta.env.VITE_SUPABASE_URL || ''
-  );
-  const [supabaseKey, setSupabaseKey] = useState(
-    () =>
-      localStorage.getItem('kirana_supabase_key') ||
-      import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-      import.meta.env.VITE_SUPABASE_ANON_KEY ||
-      ''
-  );
+  // Supabase Settings (REQ-16) - Preloaded with environment or saved credentials
+  const [supabaseUrl, setSupabaseUrl] = useState(() => getSupabaseCredentials().url);
+  const [supabaseKey, setSupabaseKey] = useState(() => getSupabaseCredentials().key);
   const [syncStatus, setSyncStatus] = useState<'IDLE' | 'CONFIGURED' | 'TESTING'>('IDLE');
   const [soundActive, setSoundActive] = useState(() => isSoundEnabled());
 
@@ -137,19 +135,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   };
 
   const handleSaveSupabaseConfig = () => {
-    localStorage.setItem('kirana_supabase_url', supabaseUrl.trim());
-    localStorage.setItem('kirana_supabase_key', supabaseKey.trim());
+    const cleanUrl = normalizeSupabaseUrl(supabaseUrl);
+    const cleanKey = normalizeSupabaseKey(supabaseKey);
+    localStorage.setItem('kirana_supabase_url', cleanUrl);
+    localStorage.setItem('kirana_supabase_key', cleanKey);
+    setSupabaseUrl(cleanUrl);
+    setSupabaseKey(cleanKey);
     setSyncStatus('CONFIGURED');
     setStatusMsg({ type: 'success', text: 'Supabase configuration saved! Background sync connector active.' });
   };
 
   const handleTestSupabaseConnection = async () => {
-    const url = supabaseUrl.trim();
-    const key = supabaseKey.trim();
+    const url = normalizeSupabaseUrl(supabaseUrl);
+    const key = normalizeSupabaseKey(supabaseKey);
     if (!url || !key) {
-      setStatusMsg({ type: 'error', text: 'Please enter both Supabase URL and Anon/Publishable Key.' });
+      setStatusMsg({
+        type: 'error',
+        text: 'Please enter both Supabase URL (e.g. https://xxx.supabase.co) and Publishable/Anon Key.',
+      });
       return;
     }
+    setSupabaseUrl(url);
+    setSupabaseKey(key);
     setSyncStatus('TESTING');
     setStatusMsg({ type: 'info', text: 'Testing connection to Supabase...' });
     try {
