@@ -5,6 +5,9 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // Expose VITE_* plus the NEXT_PUBLIC_* public Supabase vars injected by the
+  // Vercel Supabase integration. Server secrets (no prefix) are never exposed.
+  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
   plugins: [
     tailwindcss(),
     react(),
