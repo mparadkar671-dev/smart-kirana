@@ -41,3 +41,4 @@ HEALTHCHECK --interval=30s --timeout=3s \
 
 # Start Nginx
 CMD ["nginx", "-g", "daemon off;"]
+

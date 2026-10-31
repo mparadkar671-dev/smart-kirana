@@ -71,3 +71,4 @@ jobs:
           curl -f http://localhost:8080/ || exit 1
           docker stop test-container
           docker rm test-container
+

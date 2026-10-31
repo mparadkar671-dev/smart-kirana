@@ -92,3 +92,4 @@ Your store POS will be running on `http://localhost:3005` with high-performance 
 docker build -t smart-kirana:latest .
 docker run -d -p 3005:80 --name smart-kirana-pos smart-kirana:latest
 ```
+
