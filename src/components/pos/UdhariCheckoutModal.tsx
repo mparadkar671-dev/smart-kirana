@@ -9,6 +9,7 @@ interface UdhariCheckoutModalProps {
   onClose: () => void;
   grandTotal: number;
   customers: Customer[];
+  initialCustomerId?: string;
   onConfirm: (params: {
     customerId: string;
     mode: 'UDHARI_FULL' | 'SPLIT_PARTIAL';
@@ -22,6 +23,7 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
   onClose,
   grandTotal,
   customers,
+  initialCustomerId,
   onConfirm,
 }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
@@ -40,14 +42,14 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedCustomerId('');
+      setSelectedCustomerId(initialCustomerId || '');
       setSearchQuery('');
       setIsQuickCreate(false);
       setIsSplit(false);
       setCashPaidNow(0);
       setErrorMsg(null);
     }
-  }, [isOpen]);
+  }, [isOpen, initialCustomerId]);
 
   if (!isOpen) return null;
 

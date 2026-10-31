@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../db/db';
 import { ShopProfile } from '../../types';
 import { BackupService } from '../../services/backupService';
-import { createCustomSupabaseClient } from '../../lib/supabase';
+import { supabase, createCustomSupabaseClient } from '../../lib/supabase';
 import { isSoundEnabled, setSoundEnabled } from '../../utils/sound';
 import {
   Store,
@@ -73,6 +73,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
     setIsSaving(true);
     try {
       await db.updateShopProfile(profile);
+
+      // Also sync to Supabase if configured & authenticated
+      if (supabase) {
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          if (authData?.user) {
+            await supabase.from('shop_profile').upsert({
+              id: 'current_shop',
+              user_id: authData.user.id,
+              shop_name: profile.shop_name,
+              owner_name: profile.owner_name,
+              phone: profile.phone,
+              upi_vpa: profile.upi_vpa,
+              address: profile.address,
+              gst_footer_note: profile.gst_footer_note,
+              updated_at: new Date().toISOString(),
+            });
+          }
+        } catch (cloudErr) {
+          console.warn('Could not sync profile update to cloud:', cloudErr);
+        }
+      }
+
       setSaveSuccess(true);
       setStatusMsg({ type: 'success', text: 'Shop settings and UPI configuration updated successfully!' });
       setTimeout(() => setSaveSuccess(false), 3000);

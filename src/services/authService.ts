@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { User, Session } from '@supabase/supabase-js';
+import { db } from '../db/db';
 
 export interface PasswordValidationResult {
   isValid: boolean;
@@ -79,6 +80,18 @@ export const authService = {
       throw new Error(`Password does not meet standard security rules: ${validation.errors.join(', ')}`);
     }
 
+    // Immediately update local shop profile in IndexedDB so the user's registered name is active
+    try {
+      await db.updateShopProfile({
+        shop_name: shopData.shopName || 'My Kirana Store',
+        owner_name: shopData.ownerName || 'Store Owner',
+        phone: shopData.phone || '',
+        upi_vpa: `${shopData.phone || 'kirana'}@upi`,
+      });
+    } catch (e) {
+      console.warn('Failed to save local shop profile on signup:', e);
+    }
+
     if (!supabase) {
       throw new Error('Supabase client is not configured. Check your credentials in Settings.');
     }
@@ -100,6 +113,23 @@ export const authService = {
       throw error;
     }
 
+    // If user account was returned, upsert into Supabase shop_profile table
+    if (data.user) {
+      try {
+        await supabase.from('shop_profile').upsert({
+          id: 'current_shop',
+          user_id: data.user.id,
+          shop_name: shopData.shopName || 'My Kirana Store',
+          owner_name: shopData.ownerName || 'Store Owner',
+          phone: shopData.phone || '',
+          upi_vpa: `${shopData.phone || 'kirana'}@upi`,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('Could not sync initial profile to Supabase:', err);
+      }
+    }
+
     return data;
   },
 
@@ -118,6 +148,40 @@ export const authService = {
 
     if (error) {
       throw error;
+    }
+
+    // Restore shop profile from Supabase to IndexedDB
+    if (data.user) {
+      try {
+        const { data: profile } = await supabase
+          .from('shop_profile')
+          .select('*')
+          .eq('user_id', data.user.id)
+          .maybeSingle();
+
+        if (profile) {
+          await db.updateShopProfile({
+            shop_name: profile.shop_name,
+            owner_name: profile.owner_name,
+            phone: profile.phone,
+            upi_vpa: profile.upi_vpa || 'kirana@upi',
+            address: profile.address || '',
+            gst_footer_note: profile.gst_footer_note || '',
+          });
+        } else if (data.user.user_metadata) {
+          const meta = data.user.user_metadata;
+          if (meta.shop_name || meta.owner_name) {
+            await db.updateShopProfile({
+              shop_name: meta.shop_name || 'My Kirana Store',
+              owner_name: meta.owner_name || 'Store Owner',
+              phone: meta.phone || '',
+              upi_vpa: `${meta.phone || 'kirana'}@upi`,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Could not sync profile on sign in:', err);
+      }
     }
 
     return data;
