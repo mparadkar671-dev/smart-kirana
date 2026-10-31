@@ -122,21 +122,21 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150 my-8">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150 my-8 transition-colors">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-amber-50/80">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-amber-50/80 dark:bg-amber-950/40">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center shadow-xs">
               <BookOpen className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">Udhari (Khata) Checkout</h2>
-              <p className="text-xs text-amber-900">Bill Total: {formatINR(grandTotal)}</p>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Udhari (Khata) Checkout</h2>
+              <p className="text-xs text-amber-900 dark:text-amber-300">Bill Total: {formatINR(grandTotal)}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg transition"
+            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition"
           >
             <X className="w-5 h-5" />
           </button>
@@ -192,13 +192,13 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
                       type="button"
                       data-testid={`customer-option-${cust.id}`}
                       onClick={() => setSelectedCustomerId(cust.id)}
-                      className={`w-full p-2.5 text-left text-xs flex items-center justify-between hover:bg-slate-50 transition ${
-                        selectedCustomerId === cust.id ? 'bg-amber-50/80 font-bold' : ''
+                      className={`w-full p-2.5 text-left text-xs flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800 transition ${
+                        selectedCustomerId === cust.id ? 'bg-amber-50/80 dark:bg-amber-950/40 font-bold' : ''
                       }`}
                     >
                       <div>
-                        <span className="text-slate-900 font-semibold">{cust.name}</span>
-                        <span className="text-slate-500 font-mono text-[11px] ml-2">{cust.phone}</span>
+                        <span className="text-slate-900 dark:text-slate-100 font-semibold">{cust.name}</span>
+                        <span className="text-slate-500 dark:text-slate-400 font-mono text-[11px] ml-2">{cust.phone}</span>
                       </div>
                       <div className="text-right">
                         <span className="text-slate-400 text-[10px]">Bal: </span>

@@ -76,28 +76,28 @@ export const ReceiveJamaModal: React.FC<ReceiveJamaModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150 my-8">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150 my-8 transition-colors">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-emerald-100 bg-emerald-50/80">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-emerald-100 dark:border-emerald-900/40 bg-emerald-50/80 dark:bg-emerald-950/40">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
               <CheckCircle className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">Receive Jama (Payment)</h2>
-              <p className="text-xs text-emerald-800 font-semibold">{customer.name}</p>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Receive Jama (Payment)</h2>
+              <p className="text-xs text-emerald-800 dark:text-emerald-300 font-semibold">{customer.name}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg transition"
+            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {errorMsg && (
-          <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2">
+          <div className="mx-6 mt-4 p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-xl text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMsg}</span>
           </div>
@@ -105,9 +105,9 @@ export const ReceiveJamaModal: React.FC<ReceiveJamaModalProps> = ({
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Current Pending Balance Banner */}
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl flex items-center justify-between">
             <div>
-              <span className="text-[11px] text-slate-500 uppercase font-semibold">Total Pending Udhari</span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 uppercase font-semibold">Total Pending Udhari</span>
               <div className="text-xl font-extrabold text-[#dc2626]" data-testid="customer-current-balance">
                 {formatINR(customer.current_udhari_balance)}
               </div>
@@ -118,7 +118,7 @@ export const ReceiveJamaModal: React.FC<ReceiveJamaModalProps> = ({
                   key={pct}
                   type="button"
                   onClick={() => handlePercentageQuickChip(pct)}
-                  className="px-2 py-1 bg-white border border-slate-300 hover:border-emerald-500 text-slate-700 text-xs font-bold rounded-lg transition"
+                  className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:border-emerald-500 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-lg transition"
                 >
                   {pct}%
                 </button>

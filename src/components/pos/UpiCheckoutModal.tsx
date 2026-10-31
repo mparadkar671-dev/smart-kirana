@@ -27,16 +27,16 @@ export const UpiCheckoutModal: React.FC<UpiCheckoutModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-sm overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150 transition-colors">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-blue-50/80">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800 bg-blue-50/80 dark:bg-blue-950/40">
           <div className="flex items-center gap-2">
-            <QrCode className="w-5 h-5 text-blue-700" />
-            <h2 className="text-base font-bold text-slate-900">Dynamic Counter UPI QR</h2>
+            <QrCode className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">Dynamic Counter UPI QR</h2>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg transition"
+            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition"
           >
             <X className="w-5 h-5" />
           </button>
@@ -44,11 +44,11 @@ export const UpiCheckoutModal: React.FC<UpiCheckoutModalProps> = ({
 
         <div className="p-6 flex flex-col items-center text-center space-y-4">
           <div>
-            <span className="text-xs text-slate-500 uppercase font-semibold">Exact Payable Amount</span>
-            <div className="text-3xl font-extrabold text-blue-900" data-testid="upi-exact-amount">
+            <span className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold">Exact Payable Amount</span>
+            <div className="text-3xl font-extrabold text-blue-900 dark:text-blue-300" data-testid="upi-exact-amount">
               {formatINR(amount)}
             </div>
-            <p className="text-xs text-slate-500 font-mono mt-0.5">{shopVpa}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">{shopVpa}</p>
           </div>
 
           {/* Dynamic QR Code (Locked to exact amount) */}

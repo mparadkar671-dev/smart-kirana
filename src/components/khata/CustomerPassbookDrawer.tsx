@@ -96,26 +96,26 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-xl h-full shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-200 overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 w-full max-w-xl h-full shadow-2xl flex flex-col border-l border-slate-200 dark:border-slate-800 animate-in slide-in-from-right duration-200 overflow-hidden transition-colors">
         {/* Top Drawer Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-200 bg-slate-50 flex items-start justify-between">
+        <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 flex items-start justify-between">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-slate-900">{currentCustomer.name}</h2>
-              <span className="text-xs font-mono bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">{currentCustomer.name}</h2>
+              <span className="text-xs font-mono bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-full">
                 {currentCustomer.phone}
               </span>
             </div>
             {currentCustomer.address_landmark && (
-              <p className="text-xs text-slate-500">{currentCustomer.address_landmark}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{currentCustomer.address_landmark}</p>
             )}
             <div className="flex items-center gap-2 pt-1">
-              <span className="text-[11px] text-slate-500">Credit Trust Limit:</span>
-              <span className="text-xs font-bold text-slate-700">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">Credit Trust Limit:</span>
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
                 {formatINR(currentCustomer.credit_limit)}
               </span>
               {currentCustomer.current_udhari_balance > currentCustomer.credit_limit && (
-                <span className="text-[10px] font-bold text-red-600 bg-red-100 px-1.5 py-0.5 rounded">
+                <span className="text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-950/60 px-1.5 py-0.5 rounded">
                   Limit Exceeded!
                 </span>
               )}
@@ -124,15 +124,15 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
 
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200/60 transition"
+            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Balance Card & Action Buttons */}
-        <div className="p-4 border-b border-slate-200 bg-white space-y-3">
-          <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
+        <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 space-y-3">
+          <div className="flex items-center justify-between p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-800">
             <div>
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
                 Current Pending Udhari
@@ -262,7 +262,7 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
                           <td className="p-2.5 text-right font-bold text-[#16a34a]">
                             {!isDebit ? formatINR(tx.amount) : '-'}
                           </td>
-                          <td className="p-2.5 text-right font-bold text-slate-900">
+                          <td className="p-2.5 text-right font-bold text-slate-900 dark:text-white">
                             {formatINR(tx.running_balance_after)}
                           </td>
                         </tr>

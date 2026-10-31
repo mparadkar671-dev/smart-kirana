@@ -226,18 +226,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   };
 
   if (!profile) {
-    return <div className="p-6 text-slate-500">Loading settings...</div>;
+    return <div className="p-6 text-slate-500 dark:text-slate-400">Loading settings...</div>;
   }
 
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-200 pb-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <Store className="w-6 h-6 text-blue-800" />
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Store className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             Shop Profile &amp; Cloud Sync Configuration
           </h1>
-          <p className="text-sm text-slate-500">Manage store details, UPI QR VPA, JSON disaster backups, and Supabase cloud sync</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Manage store details, UPI QR VPA, JSON disaster backups, and Supabase cloud sync
+          </p>
         </div>
       </div>
 
@@ -245,10 +247,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         <div
           className={`p-3 rounded-lg text-sm flex items-center gap-2 ${
             statusMsg.type === 'success'
-              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800'
               : statusMsg.type === 'error'
-              ? 'bg-red-50 text-red-800 border border-red-200'
-              : 'bg-blue-50 text-blue-800 border border-blue-200'
+              ? 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-800'
+              : 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800'
           }`}
         >
           {statusMsg.type === 'success' ? (
@@ -261,15 +263,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
       )}
 
       {/* Shop Profile Form */}
-      <form onSubmit={handleSave} className="bg-white rounded-xl shadow-xs border border-slate-200 p-5 space-y-4">
-        <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-2">
-          <Store className="w-5 h-5 text-blue-700" />
+      <form onSubmit={handleSave} className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+          <Store className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           Shop Identity &amp; Contact
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
+            <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
               Shop Name (Appears on Bills &amp; WhatsApp)
             </label>
             <input
@@ -277,13 +279,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
               required
               value={profile.shop_name}
               onChange={(e) => setProfile({ ...profile, shop_name: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               placeholder="e.g. Shree Ganesh Kirana Store"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
+            <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
               Owner Name
             </label>
             <input
@@ -291,13 +293,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
               required
               value={profile.owner_name}
               onChange={(e) => setProfile({ ...profile, owner_name: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               placeholder="e.g. Ramesh Patel"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1 flex items-center gap-1">
+            <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1 flex items-center gap-1">
               <Phone className="w-3.5 h-3.5 text-slate-400" />
               Owner Phone Number (10 digits)
             </label>
@@ -308,13 +310,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
               maxLength={10}
               value={profile.phone}
               onChange={(e) => setProfile({ ...profile, phone: e.target.value.replace(/\D/g, '') })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               placeholder="e.g. 9876543210"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1 flex items-center gap-1">
+            <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1 flex items-center gap-1">
               <QrCode className="w-3.5 h-3.5 text-slate-400" />
               Shop UPI ID / VPA (For Dynamic QR Codes)
             </label>
@@ -323,13 +325,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
               required
               value={profile.upi_vpa}
               onChange={(e) => setProfile({ ...profile, upi_vpa: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none font-mono"
               placeholder="e.g. kirana@upi or 9876543210@paytm"
             />
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1 flex items-center gap-1">
+            <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1 flex items-center gap-1">
               <MapPin className="w-3.5 h-3.5 text-slate-400" />
               Shop Address &amp; Landmark
             </label>
@@ -337,13 +339,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
               type="text"
               value={profile.address}
               onChange={(e) => setProfile({ ...profile, address: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               placeholder="e.g. Shop No. 4, Main Market, Station Road"
             />
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1 flex items-center gap-1">
+            <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1 flex items-center gap-1">
               <FileText className="w-3.5 h-3.5 text-slate-400" />
               Invoice &amp; PDF Footer Note / GST (Optional)
             </label>
@@ -351,7 +353,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
               rows={2}
               value={profile.gst_footer_note}
               onChange={(e) => setProfile({ ...profile, gst_footer_note: e.target.value })}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-lg text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               placeholder="e.g. Goods once sold will not be taken back without bill. Visit again!"
             />
           </div>
@@ -361,7 +363,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
           <button
             type="submit"
             disabled={isSaving}
-            className="px-5 py-2.5 bg-blue-800 hover:bg-blue-900 text-white font-medium rounded-lg text-sm shadow-xs transition flex items-center gap-2"
+            className="px-5 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white font-medium rounded-lg text-sm shadow-xs transition flex items-center gap-2"
           >
             {saveSuccess ? (
               <>
@@ -375,12 +377,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
       </form>
 
       {/* 1-Click JSON Snapshot Backup & Disaster Recovery (REQ-16) */}
-      <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-5 space-y-4">
-        <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-2">
-          <Database className="w-5 h-5 text-blue-700" />
+      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+          <Database className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           Local Database JSON Backup &amp; Restore (REQ-16)
         </h2>
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
           Export your entire shop data (all 8 tables) into a single encrypted JSON file for safekeeping on Google Drive or your computer.
         </p>
 
@@ -395,8 +397,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
             <span>Download JSON Snapshot Backup</span>
           </button>
 
-          <label className="px-4 py-2.5 border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 rounded-lg text-sm font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition">
-            <Upload className="w-4 h-4 text-slate-600" />
+          <label className="px-4 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg text-sm font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition">
+            <Upload className="w-4 h-4 text-slate-600 dark:text-slate-400" />
             <span>Restore from JSON File</span>
             <input
               type="file"
@@ -410,23 +412,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
       </div>
 
       {/* Supabase Cloud Sync Connector (REQ-16) */}
-      <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-          <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-            <Cloud className="w-5 h-5 text-blue-700" />
+      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
+            <Cloud className="w-5 h-5 text-blue-600 dark:text-blue-400" />
             Supabase Cloud Sync (Optional Multi-Device Sync)
           </h2>
-          <span className="text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-2 py-0.5 rounded-full">
+          <span className="text-xs bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold px-2 py-0.5 rounded-full">
             100% Free Tier (500MB Postgres)
           </span>
         </div>
-        <p className="text-xs text-slate-600">
-          Sync your counter PC with mobile phones. Run <code className="bg-slate-100 px-1 py-0.5 rounded font-mono">supabase_schema.sql</code> in your Supabase SQL Editor and enter credentials below:
+        <p className="text-xs text-slate-600 dark:text-slate-400">
+          Sync your counter PC with mobile phones. Run <code className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-1 py-0.5 rounded font-mono">supabase_schema.sql</code> in your Supabase SQL Editor and enter credentials below:
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
+            <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
               Supabase Project URL
             </label>
             <input
@@ -434,12 +436,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
               value={supabaseUrl}
               onChange={(e) => setSupabaseUrl(e.target.value)}
               placeholder="https://xyz.supabase.co"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
+            <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
               Supabase Anon / Public API Key
             </label>
             <input
@@ -447,7 +449,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
               value={supabaseKey}
               onChange={(e) => setSupabaseKey(e.target.value)}
               placeholder="eyJhbGciOiJIUzI1NiIsIn..."
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono"
+              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
           </div>
         </div>
@@ -457,14 +459,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
             type="button"
             onClick={handleTestSupabaseConnection}
             disabled={syncStatus === 'TESTING'}
-            className="px-4 py-2 border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold transition disabled:opacity-50"
+            className="px-4 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition disabled:opacity-50"
           >
             {syncStatus === 'TESTING' ? 'Testing...' : 'Test Connection'}
           </button>
           <button
             type="button"
             onClick={handleSaveSupabaseConfig}
-            className="px-4 py-2 bg-blue-800 hover:bg-blue-900 text-white rounded-lg text-xs font-bold transition"
+            className="px-4 py-2 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
           >
             Save Cloud Sync Credentials
           </button>
