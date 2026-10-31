@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase, getSupabaseClient } from '../lib/supabase';
 import { User, Session } from '@supabase/supabase-js';
 import { db } from '../db/db';
 

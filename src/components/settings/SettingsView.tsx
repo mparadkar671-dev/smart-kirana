@@ -6,6 +6,7 @@ import {
   supabase,
   createCustomSupabaseClient,
   getSupabaseCredentials,
+  setSupabaseCredentials,
   normalizeSupabaseUrl,
   normalizeSupabaseKey,
 } from '../../lib/supabase';
@@ -137,8 +138,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   const handleSaveSupabaseConfig = () => {
     const cleanUrl = normalizeSupabaseUrl(supabaseUrl);
     const cleanKey = normalizeSupabaseKey(supabaseKey);
-    localStorage.setItem('kirana_supabase_url', cleanUrl);
-    localStorage.setItem('kirana_supabase_key', cleanKey);
+    setSupabaseCredentials(cleanUrl, cleanKey);
     setSupabaseUrl(cleanUrl);
     setSupabaseKey(cleanKey);
     setSyncStatus('CONFIGURED');
