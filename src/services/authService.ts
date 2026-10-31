@@ -1,8 +1,9 @@
 import { supabase } from '../lib/supabase';
 import { User, Session } from '@supabase/supabase-js';
 import { db } from '../db/db';
-import { UserRole, StoreUser } from '../types';
+import { UserRole, StoreUser, RegisteredShop } from '../types';
 import { cloudSyncService } from './cloudSyncService';
+import { notificationService } from './notificationService';
 
 export interface PasswordValidationResult {
   isValid: boolean;
@@ -71,9 +72,75 @@ export interface SignUpShopData {
   ownerName: string;
   phone: string;
   role?: UserRole;
+  shopId?: string;
+  isJoiningExisting?: boolean;
 }
 
 export const authService = {
+  /**
+   * Fetches available registered shops from cloud and local cache for staff dropdown selection
+   */
+  async getAvailableShops(): Promise<RegisteredShop[]> {
+    const shops: RegisteredShop[] = [];
+    const seen = new Set<string>();
+
+    // 1. From local DB profile
+    try {
+      const local = await db.getShopProfile();
+      if (local && local.shop_name && local.shop_name !== 'Shree Ganesh Kirana & General Store') {
+        shops.push({
+          id: local.id || 'current_shop',
+          shop_name: local.shop_name,
+          owner_name: local.owner_name,
+          phone: local.phone,
+          address: local.address,
+        });
+        seen.add(local.shop_name.toLowerCase().trim());
+      }
+    } catch (e) {
+      console.warn('Error reading local shop profile:', e);
+    }
+
+    // 2. From Supabase shop_profile
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('shop_profile')
+          .select('id, shop_name, owner_name, phone, address')
+          .limit(50);
+        if (data && !error) {
+          for (const row of data) {
+            const key = (row.shop_name || '').toLowerCase().trim();
+            if (key && !seen.has(key)) {
+              shops.push({
+                id: row.id,
+                shop_name: row.shop_name,
+                owner_name: row.owner_name,
+                phone: row.phone,
+                address: row.address,
+              });
+              seen.add(key);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching shops from Supabase:', err);
+      }
+    }
+
+    // Default fallback if database has no registered shops yet
+    if (shops.length === 0) {
+      shops.push({
+        id: 'default_shop',
+        shop_name: 'Laxi Vatsalaya store',
+        owner_name: 'Mayuresh paradkar',
+        phone: '9405048317',
+      });
+    }
+
+    return shops;
+  },
+
   /**
    * Registers a new store user (Owner, Manager, Accountant, Cashier) with standard password verification & Supabase Auth
    */
@@ -84,17 +151,23 @@ export const authService = {
     }
 
     const assignedRole: UserRole = shopData.role || 'OWNER';
+    // Non-owners joining an existing shop require store owner approval before gaining full access
+    const isJoining = Boolean(shopData.isJoiningExisting || assignedRole !== 'OWNER');
+    const isActive = !isJoining; // Owners are active immediately; staff require owner approval
+    const approvalStatus = isActive ? 'APPROVED' : 'PENDING';
 
-    // Immediately update local shop profile in IndexedDB so the user's registered name is active
-    try {
-      await db.updateShopProfile({
-        shop_name: shopData.shopName || 'My Kirana Store',
-        owner_name: shopData.ownerName || 'Store Owner',
-        phone: shopData.phone || '',
-        upi_vpa: `${shopData.phone || 'kirana'}@upi`,
-      });
-    } catch (e) {
-      console.warn('Failed to save local shop profile on signup:', e);
+    // If Owner registering a new shop, update local shop profile
+    if (!isJoining) {
+      try {
+        await db.updateShopProfile({
+          shop_name: shopData.shopName || 'My Kirana Store',
+          owner_name: shopData.ownerName || 'Store Owner',
+          phone: shopData.phone || '',
+          upi_vpa: `${shopData.phone || 'kirana'}@upi`,
+        });
+      } catch (e) {
+        console.warn('Failed to save local shop profile on signup:', e);
+      }
     }
 
     // Save local store user record
@@ -104,10 +177,12 @@ export const authService = {
       full_name: shopData.ownerName || 'Store User',
       phone: shopData.phone || undefined,
       role: assignedRole,
-      shop_id: 'current_shop',
-      is_active: true,
+      shop_id: shopData.shopId || 'current_shop',
+      is_active: isActive,
+      approval_status: approvalStatus,
       created_at: new Date().toISOString(),
     };
+
     try {
       await db.saveStoreUser(localStoreUser);
     } catch (e) {
@@ -127,6 +202,8 @@ export const authService = {
           owner_name: shopData.ownerName,
           phone: shopData.phone,
           role: assignedRole,
+          is_active: isActive,
+          approval_status: approvalStatus,
         },
         emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
       },
@@ -141,18 +218,20 @@ export const authService = {
       localStoreUser.user_id = data.user.id;
       await db.saveStoreUser(localStoreUser);
 
-      try {
-        await supabase.from('shop_profile').upsert({
-          id: 'current_shop',
-          user_id: data.user.id,
-          shop_name: shopData.shopName || 'My Kirana Store',
-          owner_name: shopData.ownerName || 'Store Owner',
-          phone: shopData.phone || '',
-          upi_vpa: `${shopData.phone || 'kirana'}@upi`,
-          updated_at: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.warn('Could not sync initial profile to Supabase:', err);
+      if (!isJoining) {
+        try {
+          await supabase.from('shop_profile').upsert({
+            id: 'current_shop',
+            user_id: data.user.id,
+            shop_name: shopData.shopName || 'My Kirana Store',
+            owner_name: shopData.ownerName || 'Store Owner',
+            phone: shopData.phone || '',
+            upi_vpa: `${shopData.phone || 'kirana'}@upi`,
+            updated_at: new Date().toISOString(),
+          });
+        } catch (err) {
+          console.warn('Could not sync initial profile to Supabase:', err);
+        }
       }
 
       try {
@@ -163,13 +242,35 @@ export const authService = {
           full_name: shopData.ownerName || 'Store User',
           phone: shopData.phone || null,
           role: assignedRole,
-          shop_id: 'current_shop',
-          is_active: true,
+          shop_id: shopData.shopId || 'current_shop',
+          is_active: isActive,
           created_at: localStoreUser.created_at,
           updated_at: new Date().toISOString(),
         });
       } catch (err) {
         console.warn('Could not sync store user to Supabase:', err);
+      }
+
+      // If joining as staff, notify store owner
+      if (isJoining) {
+        notificationService.pushNotification({
+          id: `staff-req-${localStoreUser.id}`,
+          type: 'STAFF_REQUEST',
+          title: `👤 Staff Join Request: ${shopData.ownerName || email}`,
+          message: `Requested access as ${assignedRole} for ${shopData.shopName}. Tap to approve permissions.`,
+          timestamp: new Date().toISOString(),
+          isRead: false,
+          priority: 'high',
+          category: 'staff',
+          actionLabel: 'Approve Staff Access',
+          actionType: 'APPROVE_STAFF',
+          actionData: {
+            userId: localStoreUser.id,
+            email,
+            role: assignedRole,
+            name: shopData.ownerName,
+          },
+        });
       }
     }
 
@@ -235,6 +336,8 @@ export const authService = {
           (data.user.user_metadata?.role as UserRole) ||
           'OWNER';
 
+        const isActive = storeUserData?.is_active ?? true;
+
         const storeUserRecord: StoreUser = {
           id: storeUserData?.id || `usr-${data.user.id.slice(0, 8)}`,
           user_id: data.user.id,
@@ -245,24 +348,133 @@ export const authService = {
             'Store User',
           phone: storeUserData?.phone || data.user.user_metadata?.phone,
           role,
-          shop_id: 'current_shop',
-          is_active: true,
+          shop_id: storeUserData?.shop_id || 'current_shop',
+          is_active: isActive,
+          approval_status: isActive ? 'APPROVED' : 'PENDING',
           created_at: storeUserData?.created_at || new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
 
         await db.saveStoreUser(storeUserRecord);
 
+        if (!isActive && role !== 'OWNER') {
+          throw new Error(
+            `ACCESS_PENDING_APPROVAL: Your request to join this store as ${role} is awaiting approval from the store owner.`
+          );
+        }
+
         // Auto pull cloud database into Dexie in background
         cloudSyncService.pullAllFromCloud().catch((err) => {
           console.warn('Initial pull from cloud after sign in skipped/failed:', err);
         });
       } catch (err) {
+        if (err instanceof Error && err.message.startsWith('ACCESS_PENDING_APPROVAL')) {
+          throw err;
+        }
         console.warn('Could not sync user/profile on sign in:', err);
       }
     }
 
     return data;
+  },
+
+  /**
+   * Fetches all staff members from local Dexie and Supabase cloud
+   */
+  async getAllStaff(): Promise<StoreUser[]> {
+    let list = await db.getStoreUsers();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('store_users').select('*');
+        if (data && !error && data.length > 0) {
+          for (const u of data) {
+            await db.saveStoreUser({
+              id: u.id,
+              user_id: u.user_id,
+              email: u.email,
+              full_name: u.full_name,
+              phone: u.phone,
+              role: u.role,
+              shop_id: u.shop_id || 'current_shop',
+              is_active: u.is_active ?? true,
+              approval_status: u.is_active ? 'APPROVED' : 'PENDING',
+              created_at: u.created_at || new Date().toISOString(),
+              updated_at: u.updated_at,
+            });
+          }
+          list = await db.getStoreUsers();
+        }
+      } catch (err) {
+        console.warn('Offline fallback reading staff list:', err);
+      }
+    }
+    return list;
+  },
+
+  /**
+   * Owner approves or activates / suspends a staff member
+   */
+  async setStaffStatus(id: string, isActive: boolean): Promise<void> {
+    const user = await db.store_users.get(id);
+    if (!user) throw new Error('Staff record not found.');
+    user.is_active = isActive;
+    user.approval_status = isActive ? 'APPROVED' : 'PENDING';
+    user.updated_at = new Date().toISOString();
+    await db.saveStoreUser(user);
+
+    if (supabase) {
+      try {
+        await supabase.from('store_users').upsert({
+          id: user.id,
+          user_id: user.user_id,
+          email: user.email,
+          full_name: user.full_name,
+          phone: user.phone,
+          role: user.role,
+          shop_id: user.shop_id,
+          is_active: isActive,
+          updated_at: user.updated_at,
+        });
+      } catch (err) {
+        console.warn('Could not sync staff status update to cloud:', err);
+      }
+    }
+  },
+
+  /**
+   * Owner updates staff member role (Manager, Accountant, Cashier)
+   */
+  async updateStaffRole(id: string, newRole: UserRole): Promise<void> {
+    const user = await db.store_users.get(id);
+    if (!user) throw new Error('Staff record not found.');
+    user.role = newRole;
+    user.updated_at = new Date().toISOString();
+    await db.saveStoreUser(user);
+
+    if (supabase) {
+      try {
+        await supabase.from('store_users').update({
+          role: newRole,
+          updated_at: user.updated_at,
+        }).eq('id', id);
+      } catch (err) {
+        console.warn('Could not sync role change to cloud:', err);
+      }
+    }
+  },
+
+  /**
+   * Removes a staff member from store
+   */
+  async deleteStaffMember(id: string): Promise<void> {
+    await db.store_users.delete(id);
+    if (supabase) {
+      try {
+        await supabase.from('store_users').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Could not sync staff delete to cloud:', err);
+      }
+    }
   },
 
   /**

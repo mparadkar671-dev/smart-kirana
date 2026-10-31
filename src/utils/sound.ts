@@ -113,3 +113,36 @@ export const playWarningTone = (): void => {
   }
 };
 
+/**
+ * Gentle bell notification chime (E5 -> G#5 -> B5 arpeggio)
+ */
+export const playNotificationChime = (): void => {
+  if (!isSoundEnabled()) return;
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const notes = [659.25, 830.61, 987.77]; // E5, G#5, B5
+
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + i * 0.08);
+
+      gain.gain.setValueAtTime(0.12, now + i * 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.2);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now + i * 0.08);
+      osc.stop(now + i * 0.08 + 0.2);
+    });
+  } catch {
+    // Graceful fallback
+  }
+};
+

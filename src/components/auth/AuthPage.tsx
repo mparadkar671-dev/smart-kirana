@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { validatePasswordStrength } from '../../services/authService';
-import { UserRole } from '../../types';
+import { validatePasswordStrength, authService } from '../../services/authService';
+import { UserRole, RegisteredShop } from '../../types';
 import {
   Store,
   Lock,
@@ -24,6 +24,10 @@ import {
   Scale,
   Sparkles,
   Users,
+  ChevronDown,
+  Building2,
+  PlusCircle,
+  Clock,
 } from 'lucide-react';
 
 type Tab = 'signin' | 'signup' | 'forgot' | 'verify_pending';
@@ -41,6 +45,12 @@ export const AuthPage: React.FC = () => {
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<UserRole>('OWNER');
 
+  // Shop selection modes: 'existing' (dropdown of registered stores) or 'new' (enter new store)
+  const [shopMode, setShopMode] = useState<'existing' | 'new'>('new');
+  const [availableShops, setAvailableShops] = useState<RegisteredShop[]>([]);
+  const [selectedShopId, setSelectedShopId] = useState<string>('');
+  const [isLoadingShops, setIsLoadingShops] = useState(false);
+
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResending, setIsResending] = useState(false);
@@ -51,6 +61,58 @@ export const AuthPage: React.FC = () => {
   const passwordValidation = validatePasswordStrength(password);
 
   const isEmailNotConfirmed = errorMsg?.toLowerCase().includes('email not confirmed');
+  const isPendingApproval =
+    errorMsg?.toLowerCase().includes('awaiting approval') ||
+    errorMsg?.includes('ACCESS_PENDING_APPROVAL');
+
+  useEffect(() => {
+    loadShops();
+  }, []);
+
+  const loadShops = async () => {
+    setIsLoadingShops(true);
+    try {
+      const list = await authService.getAvailableShops();
+      setAvailableShops(list);
+      if (list.length > 0 && !shopName) {
+        setSelectedShopId(list[0].id);
+        if (role !== 'OWNER') {
+          setShopName(list[0].shop_name);
+          if (list[0].phone) setPhone(list[0].phone);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed loading shops:', e);
+    } finally {
+      setIsLoadingShops(false);
+    }
+  };
+
+  const handleRoleSelect = (selectedRole: UserRole) => {
+    setRole(selectedRole);
+    if (selectedRole === 'OWNER') {
+      // Owners can either create new or manage existing
+    } else {
+      // Staff members join an existing store
+      setShopMode('existing');
+      if (availableShops.length > 0) {
+        const found = availableShops.find((s) => s.id === selectedShopId) || availableShops[0];
+        setShopName(found.shop_name);
+        setSelectedShopId(found.id);
+      }
+    }
+  };
+
+  const handleSelectExistingShop = (id: string) => {
+    setSelectedShopId(id);
+    const found = availableShops.find((s) => s.id === id);
+    if (found) {
+      setShopName(found.shop_name);
+      if (found.phone && !phone) {
+        setPhone(found.phone);
+      }
+    }
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,17 +162,29 @@ export const AuthPage: React.FC = () => {
       return;
     }
 
+    if (!shopName.trim()) {
+      setErrorMsg('Please choose or enter a store name.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
+      const isJoining = shopMode === 'existing' || role !== 'OWNER';
       const res = await signUp(email.trim(), password, {
         shopName: shopName.trim() || 'My Kirana Store',
-        ownerName: ownerName.trim() || 'Owner',
+        ownerName: ownerName.trim() || 'Store Member',
         phone: phone.trim() || '',
         role,
+        shopId: selectedShopId || 'current_shop',
+        isJoiningExisting: isJoining,
       });
 
       if (res.needEmailVerification) {
         setTab('verify_pending');
+      } else if (isJoining) {
+        setSuccessMsg(
+          `Registration submitted! Your request to join "${shopName}" as ${role} has been submitted for store owner approval. Once approved, you can sign in with full permissions.`
+        );
       } else {
         setSuccessMsg('Store account registered successfully! Entering POS...');
       }
@@ -319,6 +393,26 @@ export const AuthPage: React.FC = () => {
                     </div>
                   )}
                 </div>
+              ) : isPendingApproval ? (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-xs space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-amber-600 dark:text-amber-400">
+                    <Clock className="w-4 h-4 shrink-0 animate-pulse" />
+                    <span>Store Access Pending Owner Approval</span>
+                  </div>
+                  <p className="leading-relaxed text-[11px]">
+                    Your login is verified, but your requested role (<strong>{role}</strong>) for this store requires approval from the store owner in <strong>Settings &amp; Store → Store Staff</strong>.
+                  </p>
+                  <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                    Please contact your store owner to approve your access.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={(e) => handleSignIn(e)}
+                    className="mt-1 py-1.5 px-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition shadow-xs"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Check Approval Status
+                  </button>
+                </div>
               ) : errorMsg ? (
                 <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 flex items-start gap-2.5 text-xs text-rose-700 dark:text-rose-300">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -431,7 +525,7 @@ export const AuthPage: React.FC = () => {
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       {[
-                        { id: 'OWNER', label: '👑 Store Owner', desc: 'Full admin access' },
+                        { id: 'OWNER', label: '👑 Store Owner', desc: 'Full admin access / Create shop' },
                         { id: 'MANAGER', label: '👔 Store Manager', desc: 'Counter & stock supervisor' },
                         { id: 'ACCOUNTANT', label: '📊 Accountant', desc: 'P&L, khata & tax audits' },
                         { id: 'CASHIER', label: '⚡ Cashier', desc: 'Fast counter billing' },
@@ -439,7 +533,7 @@ export const AuthPage: React.FC = () => {
                         <button
                           type="button"
                           key={r.id}
-                          onClick={() => setRole(r.id as UserRole)}
+                          onClick={() => handleRoleSelect(r.id as UserRole)}
                           className={`p-2 rounded-xl border text-left transition ${
                             role === r.id
                               ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold'
@@ -453,23 +547,87 @@ export const AuthPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                        Store Name *
+                  {/* Store Mode Selector: Join Existing Store vs Create New Store */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                        Select Store *
                       </label>
+                      <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg text-[10px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setShopMode('existing')}
+                          className={`px-2 py-0.5 rounded-md transition ${
+                            shopMode === 'existing'
+                              ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                              : 'text-slate-500'
+                          }`}
+                        >
+                          🏢 Existing Shop
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShopMode('new')}
+                          className={`px-2 py-0.5 rounded-md transition ${
+                            shopMode === 'new'
+                              ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                              : 'text-slate-500'
+                          }`}
+                        >
+                          ✨ New Shop
+                        </button>
+                      </div>
+                    </div>
+
+                    {shopMode === 'existing' ? (
+                      <div className="space-y-1.5">
+                        <div className="relative">
+                          <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+                          <select
+                            value={selectedShopId}
+                            onChange={(e) => handleSelectExistingShop(e.target.value)}
+                            className="w-full pl-9 pr-8 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500 font-semibold appearance-none cursor-pointer"
+                          >
+                            {availableShops.length === 0 ? (
+                              <option value="">No registered shops found - Click New Shop</option>
+                            ) : (
+                              availableShops.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.shop_name} (Owner: {s.owner_name})
+                                </option>
+                              ))
+                            )}
+                          </select>
+                          <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
+                        </div>
+
+                        {/* Owner Permission & Approval Note */}
+                        {role !== 'OWNER' && (
+                          <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-[11px] text-blue-700 dark:text-blue-300 flex items-start gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                            <span>
+                              <strong>Owner Permission:</strong> Access as {role} for this shop will be submitted to the store owner for one-click approval before full permissions activate.
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
                       <div className="relative">
-                        <Store className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                        <Store className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                         <input
                           type="text"
                           required
                           value={shopName}
                           onChange={(e) => setShopName(e.target.value)}
-                          placeholder="Apna Kirana"
-                          className="w-full pl-8 pr-2 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                          placeholder="e.g. Laxi Vatsalaya store"
+                          className="w-full pl-9 pr-3 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
                         />
                       </div>
-                    </div>
+                    )}
+                  </div>
+
+                  {/* Phone & Full Name */}
+                  <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
                         WhatsApp No. *
@@ -486,22 +644,21 @@ export const AuthPage: React.FC = () => {
                         />
                       </div>
                     </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                      Full Name *
-                    </label>
-                    <div className="relative">
-                      <UserIcon className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                      <input
-                        type="text"
-                        required
-                        value={ownerName}
-                        onChange={(e) => setOwnerName(e.target.value)}
-                        placeholder="Rajesh Sharma"
-                        className="w-full pl-9 pr-3 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
-                      />
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                        Your Full Name *
+                      </label>
+                      <div className="relative">
+                        <UserIcon className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                        <input
+                          type="text"
+                          required
+                          value={ownerName}
+                          onChange={(e) => setOwnerName(e.target.value)}
+                          placeholder="Mayuresh paradkar"
+                          className="w-full pl-8 pr-2 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
 

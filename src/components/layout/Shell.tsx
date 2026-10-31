@@ -18,11 +18,14 @@ import {
   RefreshCw,
   CheckCircle2,
   Users,
+  Bell,
 } from 'lucide-react';
 import { ShopProfile, UserRole } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { AuthModal } from '../auth/AuthModal';
+import { NotificationDrawer } from '../notifications/NotificationDrawer';
+import { notificationService } from '../../services/notificationService';
 import { cloudSyncService, CloudSyncStatus } from '../../services/cloudSyncService';
 
 export type ActiveTab = 'pos' | 'inventory' | 'khata' | 'galla' | 'reports' | 'settings';
@@ -43,6 +46,8 @@ export const Shell: React.FC<ShellProps> = ({
   const { theme, toggleTheme } = useTheme();
   const { user, userRole, isAuthenticated, isOfflineGuest, signOut } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState(() => notificationService.getUnreadCount());
   const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>(() => cloudSyncService.getStatus());
   const [syncToast, setSyncToast] = useState<string | null>(null);
@@ -58,10 +63,15 @@ export const Shell: React.FC<ShellProps> = ({
       setSyncStatus(s);
     });
 
+    const unsubscribeNotifs = notificationService.subscribe((list) => {
+      setUnreadNotifsCount(list.filter((n) => !n.isRead).length);
+    });
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       unsubscribe();
+      unsubscribeNotifs();
     };
   }, []);
 
@@ -124,15 +134,29 @@ export const Shell: React.FC<ShellProps> = ({
             </div>
           </div>
 
-          {/* Theme Toggle Button */}
-          <button
-            onClick={toggleTheme}
-            aria-label="Toggle theme"
-            title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
-            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-          >
-            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-blue-300" />}
-          </button>
+          {/* Right Header Buttons: Notifications & Theme */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => setIsNotificationOpen(true)}
+              aria-label="Store Notifications"
+              title="Store Notifications"
+              className="relative p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            >
+              <Bell className="w-4 h-4 text-slate-300" />
+              {unreadNotifsCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 animate-pulse ring-2 ring-slate-900" />
+              )}
+            </button>
+
+            <button
+              onClick={toggleTheme}
+              aria-label="Toggle theme"
+              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
+              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            >
+              {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-blue-300" />}
+            </button>
+          </div>
         </div>
 
         {/* User Account & Role Pill */}
@@ -300,6 +324,19 @@ export const Shell: React.FC<ShellProps> = ({
         </div>
 
         <div className="flex items-center gap-1.5">
+          {/* Mobile Notifications Bell */}
+          <button
+            onClick={() => setIsNotificationOpen(true)}
+            aria-label="Store Notifications"
+            title="Store Notifications"
+            className="relative p-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition"
+          >
+            <Bell className="w-4 h-4" />
+            {unreadNotifsCount > 0 && (
+              <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse ring-2 ring-slate-900" />
+            )}
+          </button>
+
           {/* Quick sync button */}
           <button
             onClick={handleManualSync}
@@ -378,6 +415,13 @@ export const Shell: React.FC<ShellProps> = ({
 
       {/* Auth Modal */}
       <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
+
+      {/* Store Notifications Drawer */}
+      <NotificationDrawer
+        isOpen={isNotificationOpen}
+        onClose={() => setIsNotificationOpen(false)}
+        onNavigateTab={(tab) => onTabChange(tab)}
+      />
     </div>
   );
 };

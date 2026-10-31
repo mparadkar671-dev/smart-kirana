@@ -115,6 +115,7 @@ export interface StoreUser {
   role: UserRole;
   shop_id: string;
   is_active: boolean;
+  approval_status?: 'PENDING' | 'APPROVED' | 'REJECTED';
   created_at: string;
   updated_at?: string;
 }
@@ -161,4 +162,41 @@ export const WALK_IN_CUSTOMER_RECORD: Customer = {
   current_udhari_balance: 0,
   created_at: new Date(0).toISOString(),
 };
+
+export interface RegisteredShop {
+  id: string;
+  shop_name: string;
+  owner_name: string;
+  phone: string;
+  address?: string;
+}
+
+export type NotificationCategory = 'inventory' | 'khata' | 'staff' | 'galla' | 'system';
+export type NotificationPriority = 'low' | 'normal' | 'high' | 'critical';
+export type NotificationType =
+  | 'LOW_STOCK'
+  | 'OUT_OF_STOCK'
+  | 'EXPIRY_ALERT'
+  | 'KHATA_OVERDUE'
+  | 'CREDIT_LIMIT_EXCEEDED'
+  | 'STAFF_REQUEST'
+  | 'STAFF_APPROVED'
+  | 'GALLA_DISCREPANCY'
+  | 'CLOUD_SYNC'
+  | 'BACKUP_REMINDER';
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  timestamp: string; // ISO String
+  isRead: boolean;
+  priority: NotificationPriority;
+  category: NotificationCategory;
+  actionLabel?: string;
+  actionType?: 'GO_TO_INVENTORY' | 'GO_TO_KHATA' | 'APPROVE_STAFF' | 'GO_TO_GALLA' | 'GO_TO_SETTINGS';
+  actionData?: Record<string, unknown>;
+}
+
 

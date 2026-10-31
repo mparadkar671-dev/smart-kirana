@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { validatePasswordStrength } from '../../services/authService';
-import { UserRole } from '../../types';
+import { validatePasswordStrength, authService } from '../../services/authService';
+import { UserRole, RegisteredShop } from '../../types';
 import {
   Lock,
   Mail,
@@ -17,6 +17,9 @@ import {
   RefreshCw,
   X,
   Zap,
+  Building2,
+  ChevronDown,
+  Clock,
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -39,6 +42,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<UserRole>('OWNER');
 
+  // Shop selection mode
+  const [shopMode, setShopMode] = useState<'existing' | 'new'>('new');
+  const [availableShops, setAvailableShops] = useState<RegisteredShop[]>([]);
+  const [selectedShopId, setSelectedShopId] = useState<string>('');
+
   // UI state
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -47,10 +55,45 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (isOpen) {
+      authService.getAvailableShops().then((list) => {
+        setAvailableShops(list);
+        if (list.length > 0 && !shopName) {
+          setSelectedShopId(list[0].id);
+        }
+      });
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const passwordValidation = validatePasswordStrength(password);
   const isEmailNotConfirmed = errorMsg?.toLowerCase().includes('email not confirmed');
+  const isPendingApproval =
+    errorMsg?.toLowerCase().includes('awaiting approval') ||
+    errorMsg?.includes('ACCESS_PENDING_APPROVAL');
+
+  const handleRoleSelect = (selectedRole: UserRole) => {
+    setRole(selectedRole);
+    if (selectedRole !== 'OWNER') {
+      setShopMode('existing');
+      if (availableShops.length > 0) {
+        const found = availableShops.find((s) => s.id === selectedShopId) || availableShops[0];
+        setShopName(found.shop_name);
+        setSelectedShopId(found.id);
+      }
+    }
+  };
+
+  const handleSelectExistingShop = (id: string) => {
+    setSelectedShopId(id);
+    const found = availableShops.find((s) => s.id === id);
+    if (found) {
+      setShopName(found.shop_name);
+      if (found.phone && !phone) setPhone(found.phone);
+    }
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,19 +142,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       return;
     }
 
+    if (!shopName.trim()) {
+      setErrorMsg('Please choose or enter a store name.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
+      const isJoining = shopMode === 'existing' || role !== 'OWNER';
       const res = await signUp(email.trim(), password, {
         shopName: shopName.trim() || 'My Kirana Store',
-        ownerName: ownerName.trim() || 'Owner',
+        ownerName: ownerName.trim() || 'Store Member',
         phone: phone.trim() || '',
         role,
+        shopId: selectedShopId || 'current_shop',
+        isJoiningExisting: isJoining,
       });
 
       if (res.needEmailVerification) {
         setTab('verify_pending');
+      } else if (isJoining) {
+        setSuccessMsg(
+          `Request submitted! Your request to join "${shopName}" as ${role} has been submitted for store owner approval.`
+        );
       } else {
-        setSuccessMsg('Account registered successfully!');
+        setSuccessMsg('Account registered successfully! Entering POS...');
         setTimeout(() => onClose(), 1000);
       }
     } catch (err: unknown) {
@@ -234,6 +289,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 </div>
               )}
             </div>
+          ) : isPendingApproval ? (
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-200 text-xs space-y-2">
+              <div className="flex items-center gap-2 font-bold text-amber-600 dark:text-amber-400">
+                <Clock className="w-4 h-4 shrink-0 animate-pulse" />
+                <span>Store Access Pending Approval</span>
+              </div>
+              <p className="leading-relaxed text-[11px]">
+                Your account is registered, but your role (<strong>{role}</strong>) requires approval from the store owner in <strong>Settings &amp; Store → Store Staff</strong>.
+              </p>
+              <button
+                type="button"
+                onClick={(e) => handleSignIn(e)}
+                className="py-1 px-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-xs flex items-center gap-1 transition"
+              >
+                <RefreshCw className="w-3 h-3" /> Check Approval Status
+              </button>
+            </div>
           ) : errorMsg ? (
             <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 flex items-start gap-2 text-xs text-rose-700 dark:text-rose-300">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -354,7 +426,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     <button
                       type="button"
                       key={r.id}
-                      onClick={() => setRole(r.id as UserRole)}
+                      onClick={() => handleRoleSelect(r.id as UserRole)}
                       className={`p-2 rounded-xl border text-left transition ${
                         role === r.id
                           ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold'
@@ -368,20 +440,78 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                    Store Name *
+              {/* Store Mode: Existing Store vs New Store */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                    Store *
                   </label>
+                  <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg text-[10px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setShopMode('existing')}
+                      className={`px-1.5 py-0.5 rounded transition ${
+                        shopMode === 'existing'
+                          ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                          : 'text-slate-500'
+                      }`}
+                    >
+                      🏢 Existing Shop
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShopMode('new')}
+                      className={`px-1.5 py-0.5 rounded transition ${
+                        shopMode === 'new'
+                          ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                          : 'text-slate-500'
+                      }`}
+                    >
+                      ✨ New Shop
+                    </button>
+                  </div>
+                </div>
+
+                {shopMode === 'existing' ? (
+                  <div className="space-y-1">
+                    <div className="relative">
+                      <Building2 className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2 pointer-events-none" />
+                      <select
+                        value={selectedShopId}
+                        onChange={(e) => handleSelectExistingShop(e.target.value)}
+                        className="w-full pl-8 pr-7 py-1.5 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none font-semibold cursor-pointer appearance-none"
+                      >
+                        {availableShops.length === 0 ? (
+                          <option value="">No registered shops found - Click New</option>
+                        ) : (
+                          availableShops.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.shop_name} (Owner: {s.owner_name})
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2 pointer-events-none" />
+                    </div>
+                    {role !== 'OWNER' && (
+                      <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                        ℹ️ Joining requires owner permission. Request will be submitted to the owner.
+                      </p>
+                    )}
+                  </div>
+                ) : (
                   <input
                     type="text"
                     required
                     value={shopName}
                     onChange={(e) => setShopName(e.target.value)}
-                    placeholder="Apna Kirana"
+                    placeholder="e.g. Laxi Vatsalaya store"
                     className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
                   />
-                </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
                     WhatsApp No. *
@@ -395,20 +525,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                  Full Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={ownerName}
-                  onChange={(e) => setOwnerName(e.target.value)}
-                  placeholder="Rajesh Sharma"
-                  className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
-                />
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
+                    Your Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={ownerName}
+                    onChange={(e) => setOwnerName(e.target.value)}
+                    placeholder="Mayuresh paradkar"
+                    className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                  />
+                </div>
               </div>
 
               <div>

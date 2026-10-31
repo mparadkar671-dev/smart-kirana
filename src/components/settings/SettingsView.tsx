@@ -3,6 +3,8 @@ import { db } from '../../db/db';
 import { ShopProfile, StoreUser, UserRole } from '../../types';
 import { BackupService } from '../../services/backupService';
 import { cloudSyncService, CloudSyncStatus } from '../../services/cloudSyncService';
+import { authService } from '../../services/authService';
+import { notificationService } from '../../services/notificationService';
 import { useAuth } from '../../context/AuthContext';
 import {
   supabase,
@@ -35,6 +37,11 @@ import {
   Users,
   ShieldCheck,
   Lock,
+  UserPlus,
+  Check,
+  X,
+  Clock,
+  Building2,
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -58,6 +65,105 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>(() => cloudSyncService.getStatus());
   const [isSyncingCloud, setIsSyncingCloud] = useState(false);
   const [storeUsers, setStoreUsers] = useState<StoreUser[]>([]);
+  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+  const [newStaffEmail, setNewStaffEmail] = useState('');
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffPhone, setNewStaffPhone] = useState('');
+  const [newStaffRole, setNewStaffRole] = useState<UserRole>('CASHIER');
+  const [staffActionLoading, setStaffActionLoading] = useState<string | null>(null);
+
+  const refreshStaffList = async () => {
+    try {
+      const users = await authService.getAllStaff();
+      setStoreUsers(users);
+    } catch {
+      const local = await db.getStoreUsers();
+      setStoreUsers(local);
+    }
+  };
+
+  const handleApproveStaff = async (id: string) => {
+    setStaffActionLoading(id);
+    try {
+      await authService.setStaffStatus(id, true);
+      await notificationService.refreshNotifications();
+      await refreshStaffList();
+      setStatusMsg({ type: 'success', text: 'Staff access permission approved successfully!' });
+    } catch (err: unknown) {
+      setStatusMsg({ type: 'error', text: 'Failed to approve staff: ' + (err instanceof Error ? err.message : String(err)) });
+    } finally {
+      setStaffActionLoading(null);
+    }
+  };
+
+  const handleToggleStaffActive = async (id: string, currentActive: boolean) => {
+    setStaffActionLoading(id);
+    try {
+      await authService.setStaffStatus(id, !currentActive);
+      await refreshStaffList();
+      setStatusMsg({
+        type: 'info',
+        text: !currentActive ? 'Staff account activated.' : 'Staff access suspended.',
+      });
+    } catch (err: unknown) {
+      setStatusMsg({ type: 'error', text: 'Failed updating staff status.' });
+    } finally {
+      setStaffActionLoading(null);
+    }
+  };
+
+  const handleRoleChange = async (id: string, newRole: UserRole) => {
+    try {
+      await authService.updateStaffRole(id, newRole);
+      await refreshStaffList();
+      setStatusMsg({ type: 'success', text: `Role updated to ${newRole}.` });
+    } catch (err: unknown) {
+      setStatusMsg({ type: 'error', text: 'Failed to update role.' });
+    }
+  };
+
+  const handleDeleteStaff = async (id: string, name: string) => {
+    if (confirm(`Remove staff member "${name}" from this store?`)) {
+      try {
+        await authService.deleteStaffMember(id);
+        await refreshStaffList();
+        setStatusMsg({ type: 'info', text: 'Staff member removed from store.' });
+      } catch (err: unknown) {
+        setStatusMsg({ type: 'error', text: 'Failed to remove staff.' });
+      }
+    }
+  };
+
+  const handleAddStaffMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStaffEmail.trim()) return;
+
+    try {
+      const newStaff: StoreUser = {
+        id: `usr-${Date.now()}`,
+        email: newStaffEmail.trim(),
+        full_name: newStaffName.trim() || newStaffEmail.split('@')[0],
+        phone: newStaffPhone.trim() || undefined,
+        role: newStaffRole,
+        shop_id: profile?.id || 'current_shop',
+        is_active: true, // Owner pre-approved
+        approval_status: 'APPROVED',
+        created_at: new Date().toISOString(),
+      };
+      await db.saveStoreUser(newStaff);
+      if (supabase) {
+        await supabase.from('store_users').upsert(newStaff);
+      }
+      await refreshStaffList();
+      setShowAddStaffModal(false);
+      setNewStaffEmail('');
+      setNewStaffName('');
+      setNewStaffPhone('');
+      setStatusMsg({ type: 'success', text: `Pre-approved ${newStaff.full_name} as ${newStaff.role}!` });
+    } catch (err: unknown) {
+      setStatusMsg({ type: 'error', text: 'Failed to add staff: ' + (err instanceof Error ? err.message : String(err)) });
+    }
+  };
 
   const handleToggleSound = () => {
     const next = !soundActive;
@@ -71,7 +177,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
 
   useEffect(() => {
     db.getShopProfile().then((p) => setProfile(p));
-    db.getStoreUsers().then((users) => setStoreUsers(users));
+    refreshStaffList();
 
     const unsubscribe = cloudSyncService.subscribe((s) => {
       setCloudStatus(s);
@@ -383,46 +489,284 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
 
       {/* Role & Staff Account Overview Card */}
       <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
-            <Users className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            Active User &amp; Store Role
-          </h2>
-          <span className="text-xs bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold px-2.5 py-0.5 rounded-full">
-            {roleBadgeMap[userRole]?.label || userRole}
-          </span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                <span>Store Staff &amp; Role Permissions</span>
+                <span className="text-xs bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold px-2 py-0.5 rounded-full">
+                  {roleBadgeMap[userRole]?.label || userRole}
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Grant or revoke access for Managers, Accountants, and Cashiers for your store
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowAddStaffModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 shrink-0 self-start sm:self-auto"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>+ Add / Pre-Approve Staff</span>
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
-            <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Signed-In Account</div>
-            <div className="text-sm font-bold text-slate-900 dark:text-white mt-0.5 truncate">
-              {user?.email || 'Counter Guest (Local Mode)'}
+        {/* Current Signed-in User Pill */}
+        <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Device Session</div>
+            <div className="text-sm font-bold text-slate-900 dark:text-white truncate">
+              {user?.email || 'Counter Guest Mode (Offline)'}
             </div>
-            <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               {roleBadgeMap[userRole]?.desc}
             </p>
           </div>
+          <span className="px-2 py-1 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/30 flex items-center gap-1">
+            <Check className="w-3.5 h-3.5" /> Signed In
+          </span>
+        </div>
 
-          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80 space-y-1">
-            <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Registered Store Staff</div>
-            <div className="text-xs text-slate-700 dark:text-slate-300">
-              {storeUsers.length > 0 ? (
-                <div className="space-y-1 mt-1">
-                  {storeUsers.map((u) => (
-                    <div key={u.id} className="flex justify-between items-center text-[11px]">
-                      <span className="font-medium truncate max-w-[150px]">{u.full_name || u.email}</span>
-                      <span className="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 rounded text-[9px] font-bold">{u.role}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <span className="italic text-slate-400">1 account active (You)</span>
-              )}
-            </div>
+        {/* Staff Table / List */}
+        <div className="space-y-2 pt-1">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-500 dark:text-slate-400 px-1">
+            <span>REGISTERED STORE TEAM ({storeUsers.length})</span>
+            <button
+              type="button"
+              onClick={refreshStaffList}
+              className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 text-[11px]"
+            >
+              <RefreshCw className="w-3 h-3" /> Refresh
+            </button>
           </div>
+
+          {storeUsers.length === 0 ? (
+            <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-xs text-slate-400">
+              No staff members registered yet. Share your store name <strong>"{profile?.shop_name}"</strong> with your staff to let them register or tap "+ Add / Pre-Approve Staff".
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+              {storeUsers.map((u) => {
+                const isPending = u.is_active === false || u.approval_status === 'PENDING';
+                const isCurrent = u.email === user?.email;
+                return (
+                  <div
+                    key={u.id}
+                    className={`p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition ${
+                      isPending
+                        ? 'bg-amber-500/5 dark:bg-amber-500/10'
+                        : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-850'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-700 dark:text-slate-300 font-bold shrink-0 mt-0.5">
+                        {u.role === 'OWNER' ? '👑' : u.role === 'MANAGER' ? '👔' : u.role === 'ACCOUNTANT' ? '📊' : '⚡'}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-slate-900 dark:text-white">
+                            {u.full_name || 'Staff Member'}
+                          </span>
+                          {isCurrent && (
+                            <span className="text-[10px] px-1.5 py-0.2 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded font-semibold">
+                              You
+                            </span>
+                          )}
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                              isPending
+                                ? 'bg-amber-500/15 text-amber-600 border-amber-500/30'
+                                : 'bg-emerald-500/15 text-emerald-600 border-emerald-500/30'
+                            }`}
+                          >
+                            {isPending ? '⏳ Awaiting Approval' : '✓ Permitted'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          {u.email} {u.phone ? `• 📞 ${u.phone}` : ''}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Role selector and Actions */}
+                    <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                      {/* Role Switcher */}
+                      {u.role !== 'OWNER' && userRole === 'OWNER' ? (
+                        <select
+                          value={u.role}
+                          onChange={(e) => handleRoleChange(u.id, e.target.value as UserRole)}
+                          className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-xs bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-white font-semibold outline-none cursor-pointer"
+                        >
+                          <option value="MANAGER">👔 Manager</option>
+                          <option value="ACCOUNTANT">📊 Accountant</option>
+                          <option value="CASHIER">⚡ Cashier</option>
+                        </select>
+                      ) : (
+                        <span className="text-xs font-bold text-slate-600 dark:text-slate-300 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                          {u.role}
+                        </span>
+                      )}
+
+                      {/* Approval / Toggle Actions (Owner only) */}
+                      {userRole === 'OWNER' && !isCurrent && (
+                        <>
+                          {isPending ? (
+                            <button
+                              type="button"
+                              onClick={() => handleApproveStaff(u.id)}
+                              disabled={staffActionLoading === u.id}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 transition shadow-xs disabled:opacity-50"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>{staffActionLoading === u.id ? 'Approving...' : 'Approve'}</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStaffActive(u.id, u.is_active)}
+                              disabled={staffActionLoading === u.id}
+                              className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs text-slate-600 dark:text-slate-300 transition"
+                            >
+                              {u.is_active ? 'Suspend' : 'Activate'}
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteStaff(u.id, u.full_name || u.email)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                            title="Remove staff"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Modal: Pre-Approve / Add Staff */}
+      {showAddStaffModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-5 max-w-md w-full space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">Add Store Staff Member</h3>
+              </div>
+              <button
+                onClick={() => setShowAddStaffModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddStaffMember} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                  Staff Email Address *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={newStaffEmail}
+                  onChange={(e) => setNewStaffEmail(e.target.value)}
+                  placeholder="cashier@example.com"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  value={newStaffName}
+                  onChange={(e) => setNewStaffName(e.target.value)}
+                  placeholder="Amit Verma"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                  Phone (WhatsApp)
+                </label>
+                <input
+                  type="tel"
+                  value={newStaffPhone}
+                  onChange={(e) => setNewStaffPhone(e.target.value)}
+                  placeholder="9876543210"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                  Assigned Store Role *
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'MANAGER', label: '👔 Manager', desc: 'Stock & supervisor' },
+                    { id: 'ACCOUNTANT', label: '📊 Accountant', desc: 'Audit & books' },
+                    { id: 'CASHIER', label: '⚡ Cashier', desc: 'Counter billing' },
+                  ].map((r) => (
+                    <button
+                      type="button"
+                      key={r.id}
+                      onClick={() => setNewStaffRole(r.id as UserRole)}
+                      className={`p-2 rounded-xl border text-center transition ${
+                        newStaffRole === r.id
+                          ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      <div className="text-xs font-bold">{r.label}</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{r.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-[11px] text-blue-700 dark:text-blue-300 flex items-start gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                <span>
+                  This staff member will be pre-approved. When they sign up with <strong>{newStaffEmail || 'this email'}</strong> and select "{profile?.shop_name}", they will be automatically granted access.
+                </span>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddStaffModal(false)}
+                  className="flex-1 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition active:scale-95"
+                >
+                  Confirm &amp; Add Staff
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* 1. Shop Identity Form */}
       <form onSubmit={handleSaveProfile} className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
