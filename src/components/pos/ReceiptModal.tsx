@@ -11,8 +11,8 @@ import {
   Sparkles,
   Image as ImageIcon,
 } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
-import html2canvas from 'html2canvas';
+import { QRCodeCanvas } from 'qrcode.react';
+import { generateReceiptCanvas } from '../../utils/receiptCanvas';
 
 interface ReceiptModalProps {
   isOpen: boolean;
@@ -49,16 +49,26 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   };
 
   /**
-   * Generates a canvas of the receipt paper element
+   * Generates a high-res 2D canvas of the receipt using Native HTML5 Canvas
+   * 100% immune to Tailwind v4 oklch CSS color bugs or DOM clipping
    */
-  const captureReceiptCanvas = async (): Promise<HTMLCanvasElement | null> => {
-    if (!receiptRef.current) return null;
-    return await html2canvas(receiptRef.current, {
-      scale: 2.5,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-    });
+  const captureReceiptCanvas = (): HTMLCanvasElement | null => {
+    try {
+      const qrEl = document.getElementById('receipt-upi-qr-canvas') as HTMLCanvasElement | null;
+      return generateReceiptCanvas({
+        invoice,
+        items: safeItems,
+        profile,
+        customer,
+        previousBalance,
+        currentKhataBalance,
+        udhariAddedThisBill,
+        qrCanvasElement: qrEl,
+      });
+    } catch (err) {
+      console.error('Failed to generate receipt canvas:', err);
+      return null;
+    }
   };
 
   /**
@@ -82,7 +92,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       setTimeout(() => setCopyFeedback(null), 3000);
     } catch (e) {
       console.error('Failed to export bill image:', e);
-      alert('Could not generate bill image.');
+      setCopyFeedback('Could not generate bill image'); setTimeout(() => setCopyFeedback(null), 3000);
     } finally {
       setIsExporting(false);
     }
@@ -359,7 +369,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           {upiLink && (
             <div className="py-3 flex flex-col items-center border-b border-dashed border-slate-300">
               <div className="p-2 bg-white rounded-lg shadow-2xs border border-slate-200">
-                <QRCodeSVG value={upiLink} size={88} />
+                <QRCodeCanvas id="receipt-upi-qr-canvas" value={upiLink} size={92} />
               </div>
               <p className="text-[10px] text-slate-600 font-medium mt-1">Scan &amp; Pay via PhonePe / GPay / Paytm / BHIM</p>
             </div>

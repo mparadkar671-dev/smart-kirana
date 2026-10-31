@@ -101,3 +101,4 @@ describe('Store Staff Approval & Notification Center Suite', () => {
     expect(updatedUser?.approval_status).toBe('APPROVED');
   });
 });
+
