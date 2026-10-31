@@ -16,6 +16,10 @@ import {
   Trash2,
   Sparkles,
   Layers,
+  CheckSquare,
+  Square,
+  FolderSync,
+  X,
 } from 'lucide-react';
 
 interface InventoryViewProps {
@@ -41,6 +45,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [adjustmentMode, setAdjustmentMode] = useState<'STOCK_IN' | 'STOCK_OUT'>('STOCK_IN');
 
+  // Multi-select state
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  const [bulkCategoryTarget, setBulkCategoryTarget] = useState<string>('');
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+
   const lowStockCount = InventoryService.filterLowStock(products).length;
   const expiringCount = InventoryService.filterExpiringSoon(products, 15).length;
   const totalAlerts = lowStockCount + expiringCount;
@@ -60,6 +69,70 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   });
 
   const categories = Array.from(new Set(products.map((p) => p.category))).sort();
+
+  const handleToggleSelectAll = () => {
+    if (selectedProductIds.size === filteredProducts.length && filteredProducts.length > 0) {
+      setSelectedProductIds(new Set());
+    } else {
+      setSelectedProductIds(new Set(filteredProducts.map((p) => p.id)));
+    }
+  };
+
+  const handleToggleSelectProduct = (productId: string) => {
+    const next = new Set(selectedProductIds);
+    if (next.has(productId)) {
+      next.delete(productId);
+    } else {
+      next.add(productId);
+    }
+    setSelectedProductIds(next);
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedProductIds.size === 0) return;
+    const confirmMsg = `Are you sure you want to delete ${selectedProductIds.size} selected products? This will remove them from the inventory.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsBulkProcessing(true);
+    try {
+      await InventoryService.bulkDeleteProducts(Array.from(selectedProductIds));
+      setSelectedProductIds(new Set());
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`Bulk delete failed: ${err.message}`);
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  const handleBulkToggleQuickTap = async (enable: boolean) => {
+    if (selectedProductIds.size === 0) return;
+    setIsBulkProcessing(true);
+    try {
+      await InventoryService.bulkToggleQuickTap(Array.from(selectedProductIds), enable);
+      setSelectedProductIds(new Set());
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`Bulk update failed: ${err.message}`);
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  const handleBulkChangeCategory = async () => {
+    if (selectedProductIds.size === 0 || !bulkCategoryTarget.trim()) return;
+    setIsBulkProcessing(true);
+    try {
+      await InventoryService.bulkUpdateCategory(Array.from(selectedProductIds), bulkCategoryTarget.trim());
+      setSelectedProductIds(new Set());
+      setBulkCategoryTarget('');
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`Bulk category update failed: ${err.message}`);
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
 
   const handleOpenAdd = () => {
     setEditingProduct(null);
@@ -180,12 +253,101 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             </select>
           </div>
 
+          {/* Multi-Select Floating Bulk Action Bar */}
+          {selectedProductIds.size > 0 && (
+            <div className="sticky top-2 z-20 flex flex-wrap items-center justify-between gap-3 p-3.5 bg-blue-50 dark:bg-slate-800 border-2 border-blue-600 dark:border-blue-500 rounded-2xl shadow-lg transition-all animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 bg-blue-700 text-white rounded-lg text-xs font-bold">
+                  {selectedProductIds.size} Selected
+                </span>
+                <span className="text-xs text-slate-600 dark:text-slate-300 hidden sm:inline">
+                  Bulk Operations
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Bulk Category dropdown */}
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={bulkCategoryTarget}
+                    onChange={(e) => setBulkCategoryTarget(e.target.value)}
+                    className="px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-medium text-slate-800 dark:text-slate-200"
+                  >
+                    <option value="">Move Category...</option>
+                    {categories.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!bulkCategoryTarget || isBulkProcessing}
+                    onClick={handleBulkChangeCategory}
+                    className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded-lg text-xs font-bold disabled:opacity-40 transition"
+                  >
+                    Apply
+                  </button>
+                </div>
+
+                {/* Fast-Tap Quick Grid Bulk actions */}
+                <button
+                  type="button"
+                  disabled={isBulkProcessing}
+                  onClick={() => handleBulkToggleQuickTap(true)}
+                  className="px-2.5 py-1.5 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900 text-amber-800 dark:text-amber-300 rounded-lg text-xs font-bold transition flex items-center gap-1"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  +Fast-Tap
+                </button>
+                <button
+                  type="button"
+                  disabled={isBulkProcessing}
+                  onClick={() => handleBulkToggleQuickTap(false)}
+                  className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition"
+                >
+                  -Fast-Tap
+                </button>
+
+                {/* Bulk Delete */}
+                <button
+                  type="button"
+                  disabled={isBulkProcessing}
+                  onClick={handleBulkDelete}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Delete ({selectedProductIds.size})
+                </button>
+
+                {/* Deselect All */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedProductIds(new Set())}
+                  className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                  title="Deselect All"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Products Table */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm" data-testid="products-table">
                 <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">
                   <tr>
+                    <th className="p-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={filteredProducts.length > 0 && selectedProductIds.size === filteredProducts.length}
+                        onChange={handleToggleSelectAll}
+                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        title="Select All"
+                      />
+                    </th>
                     <th className="p-3">Product Name &amp; Code</th>
                     <th className="p-3">Category</th>
                     <th className="p-3">Unit</th>
@@ -203,7 +365,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     const isLow = p.current_stock <= p.low_stock_threshold;
 
                     return (
-                      <tr key={p.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition group">
+                      <tr key={p.id} className={`hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition group ${selectedProductIds.has(p.id) ? 'bg-blue-50/30 dark:bg-blue-950/20' : ''}`}>
+                        {/* Multi-Select Checkbox */}
+                        <td className="p-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedProductIds.has(p.id)}
+                            onChange={() => handleToggleSelectProduct(p.id)}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                        </td>
+
                         {/* Name + Code */}
                         <td className="p-3">
                           <div className="flex items-center gap-2">

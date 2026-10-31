@@ -16,6 +16,8 @@ import {
   TrendingDown,
   User,
   Filter,
+  Trash2,
+  X,
 } from 'lucide-react';
 
 interface KhataViewProps {
@@ -44,6 +46,10 @@ export const KhataView: React.FC<KhataViewProps> = ({
 
   // Today's recovered Jama calculation
   const [todayJamaRecovered, setTodayJamaRecovered] = useState<number>(0);
+
+  // Multi-select state
+  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   useEffect(() => {
     loadTodayJama();
@@ -143,6 +149,70 @@ export const KhataView: React.FC<KhataViewProps> = ({
     });
     KhataService.logReminderSent(c.id);
     window.open(url, '_blank');
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedCustomerIds.size === filteredAndSortedCustomers.length && filteredAndSortedCustomers.length > 0) {
+      setSelectedCustomerIds(new Set());
+    } else {
+      setSelectedCustomerIds(new Set(filteredAndSortedCustomers.map((c) => c.id)));
+    }
+  };
+
+  const handleToggleSelectCustomer = (customerId: string) => {
+    const next = new Set(selectedCustomerIds);
+    if (next.has(customerId)) {
+      next.delete(customerId);
+    } else {
+      next.add(customerId);
+    }
+    setSelectedCustomerIds(next);
+  };
+
+  const handleDeleteSingleCustomer = async (c: Customer) => {
+    let confirmMsg = `Are you sure you want to delete customer "${c.name}"?`;
+    if (c.current_udhari_balance > 0) {
+      confirmMsg = `WARNING: "${c.name}" has an outstanding Udhari balance of ₹${c.current_udhari_balance}. Deleting this customer will remove their ledger records. Proceed?`;
+    }
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      await KhataService.deleteCustomer(c.id);
+      setSelectedCustomerIds((prev) => {
+        const next = new Set(prev);
+        next.delete(c.id);
+        return next;
+      });
+      loadTodayJama();
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message}`);
+    }
+  };
+
+  const handleBulkDeleteCustomers = async () => {
+    if (selectedCustomerIds.size === 0) return;
+    const selectedCustomersList = validCustomers.filter((c) => selectedCustomerIds.has(c.id));
+    const totalBalance = selectedCustomersList.reduce((sum, c) => sum + (c.current_udhari_balance || 0), 0);
+
+    let confirmMsg = `Are you sure you want to delete ${selectedCustomerIds.size} selected customer(s)?`;
+    if (totalBalance > 0) {
+      confirmMsg = `WARNING: ${selectedCustomerIds.size} selected customer(s) have a total outstanding Udhari balance of ₹${totalBalance}. Deleting them will remove their ledger records. Are you sure you wish to proceed?`;
+    }
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsBulkDeleting(true);
+    try {
+      await KhataService.bulkDeleteCustomers(Array.from(selectedCustomerIds));
+      setSelectedCustomerIds(new Set());
+      loadTodayJama();
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`Bulk delete failed: ${err.message}`);
+    } finally {
+      setIsBulkDeleting(false);
+    }
   };
 
   return (
@@ -254,12 +324,53 @@ export const KhataView: React.FC<KhataViewProps> = ({
           </div>
         </div>
 
+        {/* Bulk Actions Bar */}
+        {selectedCustomerIds.size > 0 && (
+          <div className="sticky top-2 z-20 flex flex-wrap items-center justify-between gap-3 p-3.5 bg-blue-50 dark:bg-slate-800 border-2 border-blue-600 dark:border-blue-500 rounded-2xl shadow-lg transition-all animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 bg-blue-700 text-white rounded-lg text-xs font-bold">
+                {selectedCustomerIds.size} Customers Selected
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={handleBulkDeleteCustomers}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs disabled:opacity-40"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Delete Selected ({selectedCustomerIds.size})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCustomerIds(new Set())}
+                className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                title="Deselect All"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Customer Khata Table */}
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden transition-colors">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm" data-testid="customers-table">
               <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 font-semibold uppercase">
                 <tr>
+                  <th className="p-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={filteredAndSortedCustomers.length > 0 && selectedCustomerIds.size === filteredAndSortedCustomers.length}
+                      onChange={handleToggleSelectAll}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      title="Select All"
+                    />
+                  </th>
                   <th className="p-3">Customer Name</th>
                   <th className="p-3">Phone</th>
                   <th className="p-3 text-right">Credit Limit</th>
@@ -271,7 +382,7 @@ export const KhataView: React.FC<KhataViewProps> = ({
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredAndSortedCustomers.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                    <td colSpan={7} className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
                       No customers match your search or filter.
                     </td>
                   </tr>
@@ -284,8 +395,18 @@ export const KhataView: React.FC<KhataViewProps> = ({
                       <tr
                         key={cust.id}
                         data-testid={`customer-row-${cust.id}`}
-                        className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition group"
+                        className={`hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition group ${selectedCustomerIds.has(cust.id) ? 'bg-blue-50/30 dark:bg-blue-950/20' : ''}`}
                       >
+                        {/* Checkbox */}
+                        <td className="p-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedCustomerIds.has(cust.id)}
+                            onChange={() => handleToggleSelectCustomer(cust.id)}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                        </td>
+
                         {/* Name */}
                         <td className="p-3">
                           <div className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
@@ -348,7 +469,7 @@ export const KhataView: React.FC<KhataViewProps> = ({
                           )}
                         </td>
 
-                        {/* Actions: Passbook, WhatsApp, Receive Jama */}
+                        {/* Actions: Passbook, WhatsApp, Receive Jama, Delete */}
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
                             {/* Passbook Drawer Trigger */}
@@ -382,6 +503,17 @@ export const KhataView: React.FC<KhataViewProps> = ({
                               className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-30 transition"
                             >
                               <CheckCircle className="w-4 h-4" />
+                            </button>
+
+                            {/* Delete Customer */}
+                            <button
+                              type="button"
+                              data-testid={`delete-cust-${cust.id}`}
+                              onClick={() => handleDeleteSingleCustomer(cust)}
+                              title="Delete Customer"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-700 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </td>

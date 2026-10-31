@@ -123,6 +123,46 @@ export class InventoryService {
   }
 
   /**
+   * Bulk deletes multiple products atomically
+   */
+  static async bulkDeleteProducts(productIds: string[]): Promise<void> {
+    if (!productIds || productIds.length === 0) return;
+    await db.transaction('rw', [db.products, db.inventory_logs], async () => {
+      await db.products.bulkDelete(productIds);
+    });
+  }
+
+  /**
+   * Bulk toggles Quick-Tap (Fast-Tap counter grid) for multiple products
+   */
+  static async bulkToggleQuickTap(productIds: string[], isQuickTap: boolean): Promise<void> {
+    if (!productIds || productIds.length === 0) return;
+    await db.transaction('rw', [db.products], async () => {
+      for (const id of productIds) {
+        await db.products.update(id, {
+          is_quick_tap: isQuickTap,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    });
+  }
+
+  /**
+   * Bulk updates category for multiple products
+   */
+  static async bulkUpdateCategory(productIds: string[], newCategory: string): Promise<void> {
+    if (!productIds || productIds.length === 0 || !newCategory) return;
+    await db.transaction('rw', [db.products], async () => {
+      for (const id of productIds) {
+        await db.products.update(id, {
+          category: newCategory,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    });
+  }
+
+  /**
    * Quick Stock In (++ Restock)
    * Atomically updates product current_stock and inserts a PURCHASE_IN inventory log.
    */

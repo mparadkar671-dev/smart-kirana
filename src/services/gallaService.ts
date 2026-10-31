@@ -5,6 +5,7 @@ import {
   ExpenseCategory,
   ExpensePaidVia,
   SalesInvoice,
+  PaymentMode,
 } from '../types';
 import { roundCurrency, toPaise, toRupees } from '../utils/math';
 
@@ -273,6 +274,111 @@ export class GallaService {
     );
 
     return voidedInvoice;
+  }
+
+  /**
+   * Bulk voids multiple invoices
+   */
+  static async bulkVoidInvoices(invoiceIds: string[]): Promise<void> {
+    for (const id of invoiceIds) {
+      await this.voidInvoice(id);
+    }
+  }
+
+  /**
+   * Updates an invoice payment mode or customer (e.g. from Cash to UPI or Udhari)
+   */
+  static async updateInvoiceDetails(
+    invoiceId: string,
+    updates: {
+      customerId?: string;
+      paymentMode?: PaymentMode;
+    }
+  ): Promise<void> {
+    await db.transaction(
+      'rw',
+      [
+        db.sales_invoices,
+        db.customers,
+        db.khata_transactions,
+        db.daily_galla_sessions,
+      ],
+      async () => {
+        const inv = await db.sales_invoices.get(invoiceId);
+        if (!inv) throw new Error(`Invoice not found: ${invoiceId}`);
+        if (inv.status === 'VOIDED') throw new Error('Cannot edit a voided invoice');
+
+        const nowIso = new Date().toISOString();
+        const oldMode = inv.payment_mode;
+        const newMode = updates.paymentMode || oldMode;
+        const newCustomerId = updates.customerId || inv.customer_id;
+
+        const invoiceDate = inv.created_at.split('T')[0];
+        const session = await db.daily_galla_sessions.where({ session_date: invoiceDate }).first();
+
+        if (session) {
+          if (oldMode === 'CASH' && newMode !== 'CASH') {
+            const newSales = roundCurrency(Math.max(0, session.cash_sales_total - inv.amount_paid_now));
+            const newExpected = roundCurrency(Math.max(0, session.expected_closing_cash - inv.amount_paid_now));
+            await db.daily_galla_sessions.update(session.id, {
+              cash_sales_total: newSales,
+              expected_closing_cash: newExpected,
+            });
+          } else if (oldMode !== 'CASH' && newMode === 'CASH') {
+            const newSales = roundCurrency(session.cash_sales_total + inv.amount_paid_now);
+            const newExpected = roundCurrency(session.expected_closing_cash + inv.amount_paid_now);
+            await db.daily_galla_sessions.update(session.id, {
+              cash_sales_total: newSales,
+              expected_closing_cash: newExpected,
+            });
+          }
+        }
+
+        let amountPaidNow = inv.amount_paid_now;
+        let udhariAdded = inv.udhari_added;
+
+        // Handle Udhari adjustment if switched to/from Udhari
+        if (oldMode === 'UDHARI_FULL' && newMode !== 'UDHARI_FULL') {
+          if (inv.customer_id !== '0000-WALK-IN') {
+            const cust = await db.customers.get(inv.customer_id);
+            if (cust) {
+              const rev = roundCurrency(Math.max(0, cust.current_udhari_balance - inv.udhari_added));
+              await db.customers.update(inv.customer_id, { current_udhari_balance: rev });
+            }
+          }
+          amountPaidNow = inv.grand_total;
+          udhariAdded = 0;
+        } else if (oldMode !== 'UDHARI_FULL' && newMode === 'UDHARI_FULL') {
+          if (newCustomerId !== '0000-WALK-IN') {
+            const cust = await db.customers.get(newCustomerId);
+            if (cust) {
+              const newBal = roundCurrency(cust.current_udhari_balance + inv.grand_total);
+              await db.customers.update(newCustomerId, { current_udhari_balance: newBal });
+              await db.khata_transactions.add({
+                id: `khata-edit-${Date.now()}`,
+                customer_id: newCustomerId,
+                entry_type: 'DEBIT_UDHARI_GIVEN',
+                amount: inv.grand_total,
+                payment_channel: 'BILL_CREDIT',
+                invoice_id: invoiceId,
+                running_balance_after: newBal,
+                notes: `Transferred to Udhari from invoice ${inv.invoice_number}`,
+                created_at: nowIso,
+              });
+            }
+          }
+          amountPaidNow = 0;
+          udhariAdded = inv.grand_total;
+        }
+
+        await db.sales_invoices.update(invoiceId, {
+          payment_mode: newMode,
+          customer_id: newCustomerId,
+          amount_paid_now: amountPaidNow,
+          udhari_added: udhariAdded,
+        });
+      }
+    );
   }
 }
 

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ShopProfile, SalesInvoice } from '../../types';
+import { ShopProfile, SalesInvoice, PaymentMode, Customer, SaleItem } from '../../types';
+import { db } from '../../db/db';
 import { ReportsService, DateFilterRange } from '../../services/reportsService';
 import { GallaService } from '../../services/gallaService';
+import { ReceiptModal } from '../pos/ReceiptModal';
 import { formatINR } from '../../utils/math';
 import {
   BarChart3,
@@ -18,6 +20,10 @@ import {
   Layers,
   RotateCcw,
   AlertTriangle,
+  Eye,
+  Edit2,
+  Trash2,
+  X,
 } from 'lucide-react';
 
 interface ReportsViewProps {
@@ -39,6 +45,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
   const [udhariData, setUdhariData] = useState<any[]>([]);
   const [invoicesData, setInvoicesData] = useState<SalesInvoice[]>([]);
   const [inventoryData, setInventoryData] = useState<any>(null);
+
+  // Invoices Multi-Select & Actions
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
+  const [isBulkVoiding, setIsBulkVoiding] = useState(false);
+
+  // View Receipt Slip Modal State
+  const [viewReceiptInvoice, setViewReceiptInvoice] = useState<SalesInvoice | null>(null);
+  const [viewReceiptItems, setViewReceiptItems] = useState<SaleItem[]>([]);
+  const [viewReceiptCustomer, setViewReceiptCustomer] = useState<Customer | null>(null);
+
+  // Edit Invoice Modal State
+  const [editingInvoice, setEditingInvoice] = useState<SalesInvoice | null>(null);
+  const [editPaymentMode, setEditPaymentMode] = useState<PaymentMode>('CASH');
+  const [editCustomerId, setEditCustomerId] = useState<string>('0000-WALK-IN');
+  const [customersList, setCustomersList] = useState<Customer[]>([]);
 
   const defaultProfile: ShopProfile = shopProfile || {
     id: 'current_shop',
@@ -111,6 +132,77 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       await GallaService.voidInvoice(inv.id);
       await loadAllReports();
       if (onDataChanged) onDataChanged();
+    }
+  };
+
+  const handleToggleSelectAllInvoices = () => {
+    if (selectedInvoiceIds.size === invoicesData.length && invoicesData.length > 0) {
+      setSelectedInvoiceIds(new Set());
+    } else {
+      setSelectedInvoiceIds(new Set(invoicesData.map((inv) => inv.id)));
+    }
+  };
+
+  const handleToggleSelectInvoice = (invId: string) => {
+    const next = new Set(selectedInvoiceIds);
+    if (next.has(invId)) {
+      next.delete(invId);
+    } else {
+      next.add(invId);
+    }
+    setSelectedInvoiceIds(next);
+  };
+
+  const handleBulkVoidInvoices = async () => {
+    if (selectedInvoiceIds.size === 0) return;
+    if (!window.confirm(`Are you sure you want to VOID ${selectedInvoiceIds.size} selected invoices? This will restore product stock and reverse any added Udhari.`)) {
+      return;
+    }
+
+    setIsBulkVoiding(true);
+    try {
+      await GallaService.bulkVoidInvoices(Array.from(selectedInvoiceIds));
+      setSelectedInvoiceIds(new Set());
+      await loadAllReports();
+      if (onDataChanged) onDataChanged();
+    } catch (err: any) {
+      alert(`Bulk void failed: ${err.message}`);
+    } finally {
+      setIsBulkVoiding(false);
+    }
+  };
+
+  const handleViewSlip = async (inv: SalesInvoice) => {
+    const items = await db.sale_items.where({ invoice_id: inv.id }).toArray();
+    let cust: Customer | null = null;
+    if (inv.customer_id) {
+      cust = (await db.customers.get(inv.customer_id)) || null;
+    }
+    setViewReceiptItems(items);
+    setViewReceiptCustomer(cust);
+    setViewReceiptInvoice(inv);
+  };
+
+  const handleOpenEditInvoice = async (inv: SalesInvoice) => {
+    setEditingInvoice(inv);
+    setEditPaymentMode(inv.payment_mode);
+    setEditCustomerId(inv.customer_id || '0000-WALK-IN');
+    const custs = await db.customers.toArray();
+    setCustomersList(custs);
+  };
+
+  const handleSaveInvoiceEdit = async () => {
+    if (!editingInvoice) return;
+    try {
+      await GallaService.updateInvoiceDetails(editingInvoice.id, {
+        paymentMode: editPaymentMode,
+        customerId: editCustomerId,
+      });
+      setEditingInvoice(null);
+      await loadAllReports();
+      if (onDataChanged) onDataChanged();
+    } catch (err: any) {
+      alert(`Failed to update invoice: ${err.message}`);
     }
   };
 
@@ -435,80 +527,160 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
 
       {/* TAB 4: DAILY BILL REGISTER & VOID ACTION (REQ-14.4 & REQ-34 / AT-09) */}
       {activeTab === 'invoices' && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden" data-testid="invoices-report-container">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
-                <tr>
-                  <th className="p-3">Invoice Number</th>
-                  <th className="p-3">Time</th>
-                  <th className="p-3 text-right">Grand Total</th>
-                  <th className="p-3 text-center">Mode</th>
-                  <th className="p-3 text-right">Paid Now</th>
-                  <th className="p-3 text-right">Udhari</th>
-                  <th className="p-3 text-center">Status</th>
-                  <th className="p-3 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {invoicesData.length === 0 ? (
+        <div className="space-y-3" data-testid="invoices-report-container">
+          {/* Bulk Invoices Action Bar */}
+          {selectedInvoiceIds.size > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-red-50 dark:bg-slate-800 border-2 border-red-500 rounded-2xl shadow-sm">
+              <span className="px-2.5 py-1 bg-red-600 text-white rounded-lg text-xs font-bold">
+                {selectedInvoiceIds.size} Invoices Selected
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isBulkVoiding}
+                  onClick={handleBulkVoidInvoices}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs disabled:opacity-40"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Bulk Void Selected
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedInvoiceIds(new Set())}
+                  className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                  title="Deselect All"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
                   <tr>
-                    <td colSpan={8} className="p-6 text-center text-slate-400 dark:text-slate-500">
-                      No invoices found for this date range.
-                    </td>
+                    <th className="p-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={invoicesData.length > 0 && selectedInvoiceIds.size === invoicesData.length}
+                        onChange={handleToggleSelectAllInvoices}
+                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        title="Select All"
+                      />
+                    </th>
+                    <th className="p-3">Invoice Number</th>
+                    <th className="p-3">Time</th>
+                    <th className="p-3 text-right">Grand Total</th>
+                    <th className="p-3 text-center">Mode</th>
+                    <th className="p-3 text-right">Paid Now</th>
+                    <th className="p-3 text-right">Udhari</th>
+                    <th className="p-3 text-center">Status</th>
+                    <th className="p-3 text-center">Action</th>
                   </tr>
-                ) : (
-                  invoicesData.map((inv) => (
-                    <tr key={inv.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                      <td className="p-3 font-mono font-bold text-blue-900 dark:text-blue-300">{inv.invoice_number}</td>
-                      <td className="p-3 text-slate-500 dark:text-slate-400 font-mono">
-                        {new Date(inv.created_at).toLocaleTimeString('en-IN', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </td>
-                      <td className="p-3 text-right font-extrabold text-slate-900 dark:text-white">
-                        {formatINR(inv.grand_total)}
-                      </td>
-                      <td className="p-3 text-center">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                          {inv.payment_mode}
-                        </span>
-                      </td>
-                      <td className="p-3 text-right text-emerald-700 dark:text-emerald-400 font-bold">
-                        {formatINR(inv.amount_paid_now)}
-                      </td>
-                      <td className="p-3 text-right text-red-600 dark:text-red-400 font-bold">
-                        {formatINR(inv.udhari_added)}
-                      </td>
-                      <td className="p-3 text-center">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            inv.status === 'COMPLETED'
-                              ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
-                              : 'bg-red-100 dark:bg-red-950 text-red-800 dark:text-red-300'
-                          }`}
-                        >
-                          {inv.status}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center">
-                        {inv.status === 'COMPLETED' && (
-                          <button
-                            type="button"
-                            data-testid={`void-btn-${inv.id}`}
-                            onClick={() => handleVoidInvoice(inv)}
-                            className="px-2 py-1 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/60 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 rounded-lg text-[10px] font-bold transition"
-                          >
-                            Void Bill
-                          </button>
-                        )}
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {invoicesData.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="p-6 text-center text-slate-400 dark:text-slate-500">
+                        No invoices found for this date range.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    invoicesData.map((inv) => (
+                      <tr
+                        key={inv.id}
+                        className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/40 ${
+                          selectedInvoiceIds.has(inv.id) ? 'bg-red-50/30 dark:bg-red-950/20' : ''
+                        }`}
+                      >
+                        <td className="p-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedInvoiceIds.has(inv.id)}
+                            onChange={() => handleToggleSelectInvoice(inv.id)}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                        </td>
+                        <td className="p-3 font-mono font-bold text-blue-900 dark:text-blue-300">
+                          {inv.invoice_number}
+                        </td>
+                        <td className="p-3 text-slate-500 dark:text-slate-400 font-mono">
+                          {new Date(inv.created_at).toLocaleTimeString('en-IN', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </td>
+                        <td className="p-3 text-right font-extrabold text-slate-900 dark:text-white">
+                          {formatINR(inv.grand_total)}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                            {inv.payment_mode}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right text-emerald-700 dark:text-emerald-400 font-bold">
+                          {formatINR(inv.amount_paid_now)}
+                        </td>
+                        <td className="p-3 text-right text-red-600 dark:text-red-400 font-bold">
+                          {formatINR(inv.udhari_added)}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              inv.status === 'COMPLETED'
+                                ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                                : 'bg-red-100 dark:bg-red-950 text-red-800 dark:text-red-300'
+                            }`}
+                          >
+                            {inv.status}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            {/* View Slip / Thermal Receipt */}
+                            <button
+                              type="button"
+                              onClick={() => handleViewSlip(inv)}
+                              title="View Thermal Slip / WhatsApp Share"
+                              className="p-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg text-[10px] font-bold transition"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Edit Invoice Details */}
+                            {inv.status === 'COMPLETED' && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditInvoice(inv)}
+                                title="Edit Payment Mode or Customer"
+                                className="p-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-[10px] font-bold transition"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {/* Void Bill */}
+                            {inv.status === 'COMPLETED' && (
+                              <button
+                                type="button"
+                                data-testid={`void-btn-${inv.id}`}
+                                onClick={() => handleVoidInvoice(inv)}
+                                title="Void Bill"
+                                className="px-2 py-1 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/60 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 rounded-lg text-[10px] font-bold transition"
+                              >
+                                Void
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -545,6 +717,103 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
                 {formatINR(inventoryData.potentialGrossMargin)}
               </p>
               <p className="text-[10px] text-purple-700 dark:text-purple-400">Shelf gross margin potential</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Receipt Modal for Viewing/Printing/Sharing Thermal Slip */}
+      <ReceiptModal
+        isOpen={!!viewReceiptInvoice}
+        onClose={() => setViewReceiptInvoice(null)}
+        invoice={viewReceiptInvoice}
+        items={viewReceiptItems}
+        profile={defaultProfile}
+        customer={viewReceiptCustomer}
+      />
+
+      {/* Edit Invoice Details Modal */}
+      {editingInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in fade-in">
+            <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                  Edit Invoice #{editingInvoice.invoice_number}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Total Amount: {formatINR(editingInvoice.grand_total)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingInvoice(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {/* Customer Selection */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Assign Customer
+                </label>
+                <select
+                  value={editCustomerId}
+                  onChange={(e) => setEditCustomerId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="0000-WALK-IN">Walk-in Customer (General)</option>
+                  {customersList
+                    .filter((c) => c.id !== '0000-WALK-IN')
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.phone})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Payment Mode Selection */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Payment Mode
+                </label>
+                <select
+                  value={editPaymentMode}
+                  onChange={(e) => setEditPaymentMode(e.target.value as PaymentMode)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="CASH">Cash Payment</option>
+                  <option value="UPI">UPI / Digital</option>
+                  <option value="UDHARI_FULL">Full Udhari (Khata Credit)</option>
+                  <option value="SPLIT_PARTIAL">Split Partial</option>
+                </select>
+                {editPaymentMode === 'UDHARI_FULL' && editCustomerId === '0000-WALK-IN' && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                    * Note: Please assign an account customer above to record this on their Udhari ledger.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setEditingInvoice(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveInvoiceEdit}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-xs"
+              >
+                Update Invoice
+              </button>
             </div>
           </div>
         </div>

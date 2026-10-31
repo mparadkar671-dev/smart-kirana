@@ -279,5 +279,32 @@ export class KhataService {
 
     doc.save(`Khata_Statement_${customer.name.replace(/\s+/g, '_')}_${dateStr}.pdf`);
   }
+
+  /**
+   * Deletes a customer and associated khata transactions
+   */
+  static async deleteCustomer(customerId: string): Promise<void> {
+    if (customerId === '0000-WALK-IN') {
+      throw new Error('Cannot delete system Walk-in Customer.');
+    }
+    await db.transaction('rw', [db.customers, db.khata_transactions], async () => {
+      await db.customers.delete(customerId);
+      await db.khata_transactions.where({ customer_id: customerId }).delete();
+    });
+  }
+
+  /**
+   * Bulk deletes multiple customers
+   */
+  static async bulkDeleteCustomers(customerIds: string[]): Promise<void> {
+    const validIds = customerIds.filter((id) => id !== '0000-WALK-IN');
+    if (validIds.length === 0) return;
+    await db.transaction('rw', [db.customers, db.khata_transactions], async () => {
+      await db.customers.bulkDelete(validIds);
+      for (const id of validIds) {
+        await db.khata_transactions.where({ customer_id: id }).delete();
+      }
+    });
+  }
 }
 
