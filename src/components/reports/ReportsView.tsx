@@ -10,11 +10,9 @@ import {
   BarChart3,
   FileSpreadsheet,
   Download,
-  Printer,
   Calendar,
   DollarSign,
   TrendingUp,
-  TrendingDown,
   ShoppingBag,
   Users,
   Package,
@@ -22,10 +20,15 @@ import {
   RotateCcw,
   AlertTriangle,
   Eye,
-  Edit2,
   Trash2,
-  Undo2,
   X,
+  Clock,
+  Truck,
+  Receipt,
+  FileText,
+  Send,
+  CheckCircle,
+  HelpCircle,
 } from 'lucide-react';
 
 interface ReportsViewProps {
@@ -33,20 +36,46 @@ interface ReportsViewProps {
   onDataChanged?: () => void;
 }
 
-type ReportTab = 'pnl' | 'products' | 'udhari' | 'invoices' | 'inventory';
-type DatePreset = 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'ALL';
+export type ReportTab =
+  | 'pnl'
+  | 'products'
+  | 'udhari'
+  | 'inventory'
+  | 'reorder'
+  | 'galla'
+  | 'returns'
+  | 'tax'
+  | 'invoices';
+
+export type DatePreset = 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'ALL';
+
+function downloadFileBlob(buffer: ArrayBuffer | Uint8Array, filename: string, mimeType: string) {
+  const blob = new Blob([buffer as any], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataChanged }) => {
   const [activeTab, setActiveTab] = useState<ReportTab>('pnl');
   const [datePreset, setDatePreset] = useState<DatePreset>('TODAY');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Report Data States
+  // 7 Standardized Reports Data States
   const [pnlData, setPnlData] = useState<any>(null);
   const [productsData, setProductsData] = useState<any[]>([]);
-  const [udhariData, setUdhariData] = useState<any[]>([]);
-  const [invoicesData, setInvoicesData] = useState<SalesInvoice[]>([]);
+  const [udhariData, setUdhariData] = useState<any>(null);
   const [inventoryData, setInventoryData] = useState<any>(null);
+  const [reorderData, setReorderData] = useState<any>(null);
+  const [gallaData, setGallaData] = useState<any>(null);
+  const [returnsData, setReturnsData] = useState<any>(null);
+  const [taxData, setTaxData] = useState<any>(null);
+  const [invoicesData, setInvoicesData] = useState<SalesInvoice[]>([]);
 
   // Invoices Multi-Select & Actions
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
@@ -63,7 +92,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
   const defaultProfile: ShopProfile = shopProfile || {
     id: 'current_shop',
     shop_name: 'Smart Kirana & General Store',
-    owner_name: 'Owner',
+    owner_name: 'Store Owner',
     phone: '9876543210',
     upi_vpa: 'kirana@upi',
     address: 'Main Market Road',
@@ -104,30 +133,135 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
     const range = getDateRange();
 
     try {
-      if (activeTab === 'pnl') {
+      if (activeTab === 'pnl' || activeTab === 'products') {
         const pnl = await ReportsService.getProfitAndLossData(range);
         setPnlData(pnl);
-      } else if (activeTab === 'products') {
-        const prods = await ReportsService.getProductWiseSalesData(range);
-        setProductsData(prods);
+        setProductsData(pnl.itemWise || []);
       } else if (activeTab === 'udhari') {
-        const udh = await ReportsService.getCustomerUdhariSummaryData();
+        const udh = await ReportsService.getCustomerKhataAgingData();
         setUdhariData(udh);
+      } else if (activeTab === 'inventory') {
+        const invVal = await ReportsService.getStockValuationAndDeadStockData();
+        setInventoryData(invVal);
+      } else if (activeTab === 'reorder') {
+        const reord = await ReportsService.getSmartWholesalerReorderData();
+        setReorderData(reord);
+      } else if (activeTab === 'galla') {
+        const gal = await ReportsService.getDailyGallaShiftAuditData(range);
+        setGallaData(gal);
+      } else if (activeTab === 'returns') {
+        const ret = await ReportsService.getSalesReturnAndStockAdjustmentData(range);
+        setReturnsData(ret);
+      } else if (activeTab === 'tax') {
+        const tx = await ReportsService.getHsnTaxSummaryData(range);
+        setTaxData(tx);
       } else if (activeTab === 'invoices') {
         const invs = await ReportsService.getBillRegisterData(range);
         setInvoicesData(invs);
-      } else if (activeTab === 'inventory') {
-        const invVal = await ReportsService.getInventoryValuationData();
-        setInventoryData(invVal);
       }
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Void Invoice Action (REQ-34 / AT-09)
+  // Download Master 7-Sheet Vyapar Excel Workbook
+  const handleDownloadMasterExcel = async () => {
+    try {
+      const range = getDateRange();
+      const xlsxBuffer = await ReportsService.generateVyaparMasterExcelPack(defaultProfile, range);
+      const dateStr = new Date().toISOString().split('T')[0];
+      downloadFileBlob(
+        xlsxBuffer,
+        `Vyapar_Master_Pack_7_Sheets_${dateStr}.xlsx`,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+    } catch (err: any) {
+      alert(`Master Excel generation failed: ${err.message}`);
+    }
+  };
+
+  // Download Tab-Specific Formatted Excel (.xlsx)
+  const handleExportCurrentExcel = async () => {
+    const range = getDateRange();
+    const dateStr = new Date().toISOString().split('T')[0];
+    const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+    try {
+      if (activeTab === 'pnl' || activeTab === 'products') {
+        const res = await ReportsService.generateProfitAndLossReport(defaultProfile, range);
+        downloadFileBlob(res.xlsxBuffer, `Profit_Loss_Report_${dateStr}.xlsx`, mime);
+      } else if (activeTab === 'udhari') {
+        const res = await ReportsService.generateCustomerKhataAgingReport(defaultProfile);
+        downloadFileBlob(res.xlsxBuffer, `Khata_Aging_Recovery_${dateStr}.xlsx`, mime);
+      } else if (activeTab === 'inventory') {
+        const res = await ReportsService.generateStockValuationReport(defaultProfile);
+        downloadFileBlob(res.xlsxBuffer, `Stock_Valuation_DeadStock_${dateStr}.xlsx`, mime);
+      } else if (activeTab === 'reorder') {
+        const res = await ReportsService.generateWholesalerReorderReport(defaultProfile);
+        downloadFileBlob(res.xlsxBuffer, `Wholesaler_Reorder_Sheet_${dateStr}.xlsx`, mime);
+      } else if (activeTab === 'galla') {
+        const res = await ReportsService.generateGallaAuditReport(defaultProfile, range);
+        downloadFileBlob(res.xlsxBuffer, `Galla_CashFlow_Audit_${dateStr}.xlsx`, mime);
+      } else if (activeTab === 'returns') {
+        const res = await ReportsService.generateSalesReturnAuditReport(defaultProfile, range);
+        downloadFileBlob(res.xlsxBuffer, `Returns_Adjustments_Audit_${dateStr}.xlsx`, mime);
+      } else if (activeTab === 'tax') {
+        const res = await ReportsService.generateHsnTaxSummaryReport(defaultProfile, range);
+        downloadFileBlob(res.xlsxBuffer, `HSN_GST_Tax_Summary_${dateStr}.xlsx`, mime);
+      } else if (activeTab === 'invoices') {
+        const res = await ReportsService.generateBillRegisterReport(defaultProfile, range);
+        downloadFileBlob(res.xlsxBuffer, `Daily_Bill_Register_${dateStr}.xlsx`, mime);
+      }
+    } catch (err: any) {
+      alert(`Excel export failed: ${err.message}`);
+    }
+  };
+
+  // Export PDF Trigger
+  const handleExportPdf = async () => {
+    const range = getDateRange();
+    const dateStr = new Date().toISOString().split('T')[0];
+    const mime = 'application/pdf';
+
+    try {
+      let res: { pdfBuffer: ArrayBuffer };
+      if (activeTab === 'pnl' || activeTab === 'products') {
+        res = await ReportsService.generateProfitAndLossReport(defaultProfile, range);
+        downloadFileBlob(res.pdfBuffer, `Profit_Loss_${dateStr}.pdf`, mime);
+      } else if (activeTab === 'udhari') {
+        res = await ReportsService.generateCustomerKhataAgingReport(defaultProfile);
+        downloadFileBlob(res.pdfBuffer, `Khata_Aging_${dateStr}.pdf`, mime);
+      } else if (activeTab === 'inventory') {
+        res = await ReportsService.generateStockValuationReport(defaultProfile);
+        downloadFileBlob(res.pdfBuffer, `Stock_Valuation_${dateStr}.pdf`, mime);
+      } else if (activeTab === 'reorder') {
+        res = await ReportsService.generateWholesalerReorderReport(defaultProfile);
+        downloadFileBlob(res.pdfBuffer, `Wholesaler_Reorder_${dateStr}.pdf`, mime);
+      } else if (activeTab === 'galla') {
+        res = await ReportsService.generateGallaAuditReport(defaultProfile, range);
+        downloadFileBlob(res.pdfBuffer, `Galla_Audit_${dateStr}.pdf`, mime);
+      } else if (activeTab === 'returns') {
+        res = await ReportsService.generateSalesReturnAuditReport(defaultProfile, range);
+        downloadFileBlob(res.pdfBuffer, `Returns_Audit_${dateStr}.pdf`, mime);
+      } else if (activeTab === 'tax') {
+        res = await ReportsService.generateHsnTaxSummaryReport(defaultProfile, range);
+        downloadFileBlob(res.pdfBuffer, `HSN_Tax_Summary_${dateStr}.pdf`, mime);
+      } else if (activeTab === 'invoices') {
+        res = await ReportsService.generateBillRegisterReport(defaultProfile, range);
+        downloadFileBlob(res.pdfBuffer, `Bill_Register_${dateStr}.pdf`, mime);
+      }
+    } catch (err: any) {
+      alert(`PDF export failed: ${err.message}`);
+    }
+  };
+
+  // Void Invoice Action
   const handleVoidInvoice = async (inv: SalesInvoice) => {
-    if (window.confirm(`Are you sure you want to VOID invoice ${inv.invoice_number}? This will restore product stock and reverse any added Udhari.`)) {
+    if (
+      window.confirm(
+        `Are you sure you want to VOID invoice ${inv.invoice_number}? This will restore product stock and reverse any added Udhari.`
+      )
+    ) {
       await GallaService.voidInvoice(inv.id);
       await loadAllReports();
       if (onDataChanged) onDataChanged();
@@ -154,7 +288,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
 
   const handleBulkVoidInvoices = async () => {
     if (selectedInvoiceIds.size === 0) return;
-    if (!window.confirm(`Are you sure you want to VOID ${selectedInvoiceIds.size} selected invoices? This will restore product stock and reverse any added Udhari.`)) {
+    if (
+      !window.confirm(
+        `Are you sure you want to VOID ${selectedInvoiceIds.size} selected invoices? This will restore product stock and reverse any added Udhari.`
+      )
+    ) {
       return;
     }
 
@@ -188,112 +326,78 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
     if (onDataChanged) onDataChanged();
   };
 
-  // PDF Export Trigger (REQ-14)
-  const handleExportPdf = async () => {
-    const range = getDateRange();
-    if (activeTab === 'pnl') {
-      await ReportsService.generateProfitAndLossReport(defaultProfile, range);
-    } else if (activeTab === 'products') {
-      await ReportsService.generateProductWiseReport(defaultProfile, range);
-    } else if (activeTab === 'udhari') {
-      await ReportsService.generateCustomerUdhariReport(defaultProfile);
-    } else if (activeTab === 'invoices') {
-      await ReportsService.generateBillRegisterReport(defaultProfile, range);
-    } else if (activeTab === 'inventory') {
-      await ReportsService.generateInventoryValuationReport(defaultProfile);
-    }
-  };
-
-  // 1-Click Excel / CSV Export
-  const handleExportCsv = () => {
-    const dateStr = new Date().toISOString().split('T')[0];
-    let csvContent = '';
-    let filename = `Vyapar_Report_${activeTab}_${dateStr}.csv`;
-
-    if (activeTab === 'pnl' && pnlData) {
-      csvContent = `Metric,Amount (INR)\n` +
-        `Sales Revenue,${pnlData.salesRevenue}\n` +
-        `Invoice Count,${pnlData.invoiceCount}\n` +
-        `Wholesale COGS,${pnlData.cogs}\n` +
-        `Gross Profit,${pnlData.grossProfit}\n` +
-        `Shop Operating Expenses,${pnlData.shopOperatingExpenses}\n` +
-        `Damage Loss,${pnlData.damageLoss}\n` +
-        `Home Grocery Isolation (Cost),${pnlData.homeSelfUseValuation}\n` +
-        `True Net Profit,${pnlData.trueNetProfit}\n`;
-    } else if (activeTab === 'products') {
-      csvContent = `Product Name,Units Sold,Unit,Revenue,Profit,Margin %,Remaining Stock\n` +
-        productsData.map(p => `"${p.name.replace(/"/g, '""')}",${p.qtySold},${p.unitType},${p.revenue},${p.profit},${p.marginPct}%,${p.currentStock}`).join('\n');
-    } else if (activeTab === 'udhari') {
-      csvContent = `Customer Name,Phone,Credit Limit,Pending Udhari,Aging Days\n` +
-        udhariData.map(c => `"${c.name.replace(/"/g, '""')}",${c.phone},${c.creditLimit},${c.balance},${c.agingDays}`).join('\n');
-    } else if (activeTab === 'invoices') {
-      csvContent = `Invoice Number,Date Time,Payment Mode,Grand Total,Paid Now,Udhari Added,Status\n` +
-        invoicesData.map(i => `"${i.invoice_number}","${i.created_at}",${i.payment_mode},${i.grand_total},${i.amount_paid_now},${i.udhari_added},${i.status}`).join('\n');
-    } else if (activeTab === 'inventory' && inventoryData) {
-      csvContent = `Metric,Amount (INR)\n` +
-        `Total Locked Capital (Wholesale Cost),${inventoryData.totalLockedCapital}\n` +
-        `Total Shelf Retail Value,${inventoryData.totalSellingValue}\n` +
-        `Potential Gross Margin,${inventoryData.potentialGrossMargin}\n`;
-    }
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // 1-Click WhatsApp payment reminder generator
+  const sendWhatsAppReminder = (customer: any) => {
+    const text = encodeURIComponent(
+      `Namaste ${customer.name} ji, this is a friendly reminder from ${defaultProfile.shop_name}. Your outstanding Khata balance is ${formatINR(customer.balance)}. Kindly pay via UPI to ${defaultProfile.upi_vpa}. Thank you!`
+    );
+    window.open(`https://wa.me/91${customer.phone}?text=${text}`, '_blank');
   };
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs transition-colors">
+      {/* Top Header & Master Vyapar Excel Download */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs transition-colors">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <BarChart3 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-            Vyapar Accounting &amp; Business Reports
+            Vyapar Accounting &amp; Business Intelligence Suite
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            P&amp;L Statements, Product Margins, Khata Aging, Invoice Auditing &amp; Stock Capital
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            7 Standardized Reports: True Net Profit, Khata Aging, Dead-Stock, 14-Day Velocity, Galla Drawer &amp; HSN GST
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          {/* 1-Click CSV / Excel Export */}
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+          {/* Master 7-Sheet Excel Workbook Button */}
           <button
             type="button"
-            onClick={handleExportCsv}
-            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition"
+            onClick={handleDownloadMasterExcel}
+            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+            title="Download all 7 Vyapar reports in a single multi-sheet .xlsx file"
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>Excel / CSV</span>
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Master 7-Sheet Excel</span>
           </button>
 
-          {/* 1-Click PDF Export */}
+          {/* Current Tab Formatted Excel (.xlsx) */}
+          <button
+            type="button"
+            onClick={handleExportCurrentExcel}
+            className="flex-1 sm:flex-initial px-3 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition"
+            title="Download active report in formatted Excel with store header & totals"
+          >
+            <Download className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Export Excel</span>
+          </button>
+
+          {/* Current Tab Formatted PDF */}
           <button
             type="button"
             data-testid="export-pdf-btn"
             onClick={handleExportPdf}
-            className="flex-1 sm:flex-initial px-4 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
           >
-            <Download className="w-4 h-4" />
+            <FileText className="w-4 h-4" />
             <span>Export PDF</span>
           </button>
         </div>
       </div>
 
-      {/* Date Range Presets & Report Tabs */}
+      {/* Date Range Presets & Report Tabs Navigation */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-slate-200 dark:border-slate-800 pb-2">
-        {/* 5 Report Tabs (REQ-14) */}
+        {/* All 8 Report Tabs */}
         <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0" data-testid="report-tabs">
           {[
-            { id: 'pnl' as ReportTab, label: '1. Profit & Loss', icon: TrendingUp },
-            { id: 'products' as ReportTab, label: '2. Product Margins', icon: ShoppingBag },
-            { id: 'udhari' as ReportTab, label: '3. Customer Khata', icon: Users },
-            { id: 'invoices' as ReportTab, label: '4. Daily Invoices', icon: Layers },
-            { id: 'inventory' as ReportTab, label: '5. Stock Valuation', icon: Package },
+            { id: 'pnl' as ReportTab, label: '1. P&L & Margins', icon: TrendingUp },
+            { id: 'products' as ReportTab, label: '2. Product Performance', icon: ShoppingBag },
+            { id: 'udhari' as ReportTab, label: '3. Khata Aging', icon: Users },
+            { id: 'inventory' as ReportTab, label: '4. Stock & Dead Stock', icon: Package },
+            { id: 'reorder' as ReportTab, label: '5. Wholesaler Reorder', icon: Truck },
+            { id: 'galla' as ReportTab, label: '6. Galla & Cash Flow', icon: DollarSign },
+            { id: 'returns' as ReportTab, label: '7. Returns & Audit', icon: RotateCcw },
+            { id: 'tax' as ReportTab, label: '8. HSN & GST Tax', icon: Receipt },
+            { id: 'invoices' as ReportTab, label: '9. Bill Register', icon: Layers },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -342,7 +446,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         </div>
       </div>
 
-      {/* TAB 1: PROFIT & LOSS STATEMENT (REQ-14.1 & REQ-21) */}
+      {/* =========================================================================
+          TAB 1: PROFIT & LOSS STATEMENT (REQ-14.1 & REQ-21)
+          ========================================================================= */}
       {activeTab === 'pnl' && pnlData && (
         <div className="space-y-4" data-testid="pnl-container">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
@@ -398,6 +504,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
                     -{formatINR(pnlData.damageLoss)}
                   </span>
                 </div>
+                <div className="flex justify-between py-1 pt-2 font-bold text-slate-900 dark:text-white">
+                  <span>Net P&amp;L Formula:</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                    Gross ({formatINR(pnlData.grossProfit)}) - Deductions ({formatINR(pnlData.shopOperatingExpenses + pnlData.damageLoss)})
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -421,7 +533,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         </div>
       )}
 
-      {/* TAB 2: PRODUCT-WISE MARGIN REPORT (REQ-14.2) */}
+      {/* =========================================================================
+          TAB 2: PRODUCT-WISE MARGIN REPORT (REQ-14.2)
+          ========================================================================= */}
       {activeTab === 'products' && (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden" data-testid="products-report-container">
           <div className="overflow-x-auto">
@@ -431,6 +545,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
                   <th className="p-3">Product Name</th>
                   <th className="p-3 text-right">Units Sold</th>
                   <th className="p-3 text-right">Revenue</th>
+                  <th className="p-3 text-right">COGS</th>
                   <th className="p-3 text-right">Profit Generated</th>
                   <th className="p-3 text-center">Margin %</th>
                   <th className="p-3 text-right">Remaining Stock</th>
@@ -439,7 +554,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {productsData.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-6 text-center text-slate-400 dark:text-slate-500">
+                    <td colSpan={7} className="p-6 text-center text-slate-400 dark:text-slate-500">
                       No product sales recorded in this period.
                     </td>
                   </tr>
@@ -452,6 +567,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
                       </td>
                       <td className="p-3 text-right font-medium text-slate-900 dark:text-slate-100">
                         {formatINR(p.revenue)}
+                      </td>
+                      <td className="p-3 text-right font-mono text-slate-500 dark:text-slate-400">
+                        {formatINR(p.cogs)}
                       </td>
                       <td className="p-3 text-right font-bold text-[#16a34a] dark:text-emerald-400">
                         {formatINR(p.profit)}
@@ -473,41 +591,535 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         </div>
       )}
 
-      {/* TAB 3: CUSTOMER UDHARI SUMMARY (REQ-14.3) */}
-      {activeTab === 'udhari' && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden" data-testid="udhari-report-container">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
-                <tr>
-                  <th className="p-3">Customer Name</th>
-                  <th className="p-3">WhatsApp Phone</th>
-                  <th className="p-3 text-right">Credit Limit</th>
-                  <th className="p-3 text-right">Pending Udhari</th>
-                  <th className="p-3 text-center">Aging Days</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {udhariData.map((c, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                    <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{c.name}</td>
-                    <td className="p-3 font-mono text-slate-600 dark:text-slate-400">{c.phone}</td>
-                    <td className="p-3 text-right text-slate-500 dark:text-slate-400">{formatINR(c.creditLimit)}</td>
-                    <td className={`p-3 text-right font-extrabold ${c.balance > 0 ? 'text-[#dc2626] dark:text-red-400' : 'text-[#16a34a] dark:text-emerald-400'}`}>
-                      {formatINR(c.balance)}
-                    </td>
-                    <td className="p-3 text-center text-slate-700 dark:text-slate-300">
-                      {c.balance > 0 ? `${c.agingDays}d` : '-'}
-                    </td>
+      {/* =========================================================================
+          TAB 3: CUSTOMER KHATA AGING & RECOVERY (0-15d, 16-30d, >30d) (REQ-14.3)
+          ========================================================================= */}
+      {activeTab === 'udhari' && udhariData && (
+        <div className="space-y-4" data-testid="udhari-report-container">
+          {/* Risk Summary Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Total Outstanding</span>
+              <p className="text-xl font-extrabold text-red-600 dark:text-red-400 mt-1">
+                {formatINR(udhariData.totalOutstanding)}
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">{udhariData.customers.length} Accounts</p>
+            </div>
+            <div className="bg-emerald-50/70 dark:bg-emerald-950/30 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400 uppercase">0-15 Days (Safe)</span>
+              <p className="text-xl font-extrabold text-emerald-700 dark:text-emerald-300 mt-1">
+                {formatINR(udhariData.totalIn0to15)}
+              </p>
+              <p className="text-[10px] text-emerald-600 dark:text-emerald-500">Current billing cycle</p>
+            </div>
+            <div className="bg-amber-50/70 dark:bg-amber-950/30 p-4 rounded-2xl border border-amber-200 dark:border-amber-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-amber-800 dark:text-amber-400 uppercase">16-30 Days (Follow-up)</span>
+              <p className="text-xl font-extrabold text-amber-700 dark:text-amber-300 mt-1">
+                {formatINR(udhariData.totalIn16to30)}
+              </p>
+              <p className="text-[10px] text-amber-600 dark:text-amber-500">Moderate risk</p>
+            </div>
+            <div className="bg-red-50/70 dark:bg-red-950/30 p-4 rounded-2xl border border-red-200 dark:border-red-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-red-800 dark:text-red-400 uppercase">&gt; 30 Days (Critical)</span>
+              <p className="text-xl font-extrabold text-red-700 dark:text-red-300 mt-1">
+                {formatINR(udhariData.totalInAbove30)}
+              </p>
+              <p className="text-[10px] text-red-600 dark:text-red-400">{udhariData.highRiskCount} High-risk accounts</p>
+            </div>
+          </div>
+
+          {/* Aging Table */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
+                  <tr>
+                    <th className="p-3">Customer</th>
+                    <th className="p-3">WhatsApp Phone</th>
+                    <th className="p-3 text-right">Credit Limit</th>
+                    <th className="p-3 text-right">Pending Udhari</th>
+                    <th className="p-3 text-center">Aging</th>
+                    <th className="p-3 text-center">Risk Bracket</th>
+                    <th className="p-3 text-center">Recovery Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {udhariData.customers.map((c: any, idx: number) => {
+                    const isHigh = c.recoveryStatus === 'CRITICAL_OVERDUE';
+                    const isMed = c.recoveryStatus === 'FOLLOW_UP';
+                    return (
+                      <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                        <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{c.name}</td>
+                        <td className="p-3 font-mono text-slate-600 dark:text-slate-400">{c.phone}</td>
+                        <td className="p-3 text-right text-slate-500 dark:text-slate-400">{formatINR(c.creditLimit)}</td>
+                        <td className="p-3 text-right font-extrabold text-red-600 dark:text-red-400">
+                          {formatINR(c.balance)}
+                        </td>
+                        <td className="p-3 text-center text-slate-700 dark:text-slate-300 font-bold">
+                          {c.agingDays}d
+                        </td>
+                        <td className="p-3 text-center">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              isHigh
+                                ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
+                                : isMed
+                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                            }`}
+                          >
+                            {c.riskBucket}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => sendWhatsAppReminder(c)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold transition shadow-2xs"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>Remind</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
 
-      {/* TAB 4: DAILY BILL REGISTER & VOID ACTION (REQ-14.4 & REQ-34 / AT-09) */}
+      {/* =========================================================================
+          TAB 4: STOCK VALUATION & DEAD-STOCK (45+ DAYS) (REQ-14.5)
+          ========================================================================= */}
+      {activeTab === 'inventory' && inventoryData && (
+        <div className="space-y-4" data-testid="inventory-report-container">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Locked Capital</span>
+              <p className="text-xl font-bold text-slate-900 dark:text-white mt-1">
+                {formatINR(inventoryData.totalLockedCapital)}
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">At wholesale cost price</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Shelf Retail Value</span>
+              <p className="text-xl font-bold text-slate-900 dark:text-white mt-1">
+                {formatINR(inventoryData.totalRetailValue)}
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">Estimated selling value</p>
+            </div>
+            <div className="bg-emerald-50/70 dark:bg-emerald-950/30 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400 uppercase">Potential Margin</span>
+              <p className="text-xl font-extrabold text-emerald-700 dark:text-emerald-300 mt-1">
+                {formatINR(inventoryData.potentialGrossMargin)}
+              </p>
+              <p className="text-[10px] text-emerald-600 dark:text-emerald-500">Total unrealized profit</p>
+            </div>
+            <div className="bg-red-50/70 dark:bg-red-950/30 p-4 rounded-2xl border border-red-200 dark:border-red-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-red-800 dark:text-red-400 uppercase">Dead Stock Locked</span>
+              <p className="text-xl font-extrabold text-red-700 dark:text-red-300 mt-1">
+                {formatINR(inventoryData.totalDeadStockValuation)}
+              </p>
+              <p className="text-[10px] text-red-600 dark:text-red-400">{inventoryData.deadStockCount} items (0 sales in 45+ days)</p>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
+                  <tr>
+                    <th className="p-3">Product Name</th>
+                    <th className="p-3">Category</th>
+                    <th className="p-3 text-right">Current Stock</th>
+                    <th className="p-3 text-right">Cost Price</th>
+                    <th className="p-3 text-right">Selling Price</th>
+                    <th className="p-3 text-right">Locked Capital</th>
+                    <th className="p-3 text-center">Last Sale</th>
+                    <th className="p-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {inventoryData.items.map((it: any, idx: number) => (
+                    <tr key={idx} className={it.isDeadStock ? 'bg-red-50/40 dark:bg-red-950/20' : 'hover:bg-slate-50/50 dark:hover:bg-slate-800/40'}>
+                      <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{it.name}</td>
+                      <td className="p-3 text-slate-500 dark:text-slate-400">{it.category}</td>
+                      <td className="p-3 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                        {it.currentStock} {it.unitType}
+                      </td>
+                      <td className="p-3 text-right text-slate-500 dark:text-slate-400">{formatINR(it.purchasePrice)}</td>
+                      <td className="p-3 text-right text-slate-700 dark:text-slate-300">{formatINR(it.sellingPrice)}</td>
+                      <td className="p-3 text-right font-bold text-slate-900 dark:text-slate-100">
+                        {formatINR(it.stockCost)}
+                      </td>
+                      <td className="p-3 text-center text-slate-600 dark:text-slate-400">
+                        {it.lastSoldDate ? `${it.daysSinceLastSale}d ago` : 'Never'}
+                      </td>
+                      <td className="p-3 text-center">
+                        {it.isDeadStock ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 flex items-center justify-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-red-600" />
+                            <span>Dead Stock</span>
+                          </span>
+                        ) : it.movementStatus === 'SLOW_MOVING' ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                            Slow Moving
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                            Active
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 5: SMART WHOLESALER REORDER SHEET (14-Day Velocity)
+          ========================================================================= */}
+      {activeTab === 'reorder' && reorderData && (
+        <div className="space-y-4" data-testid="reorder-report-container">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+            <div className="bg-amber-50/70 dark:bg-amber-950/30 p-4 rounded-2xl border border-amber-200 dark:border-amber-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-amber-800 dark:text-amber-400 uppercase">Items to Reorder</span>
+              <p className="text-xl font-extrabold text-amber-800 dark:text-amber-300 mt-1">
+                {reorderData.totalItemsNeedingReorder}
+              </p>
+              <p className="text-[10px] text-amber-700 dark:text-amber-500">Under threshold or &lt; 7d runway</p>
+            </div>
+            <div className="bg-blue-50/70 dark:bg-blue-950/30 p-4 rounded-2xl border border-blue-200 dark:border-blue-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-blue-800 dark:text-blue-400 uppercase">Estimated Restock Budget</span>
+              <p className="text-xl font-extrabold text-blue-800 dark:text-blue-300 mt-1">
+                {formatINR(reorderData.totalEstimatedBudget)}
+              </p>
+              <p className="text-[10px] text-blue-700 dark:text-blue-400">At wholesale purchase prices</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs col-span-2 sm:col-span-1">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Algorithm</span>
+              <p className="text-xs font-medium text-slate-700 dark:text-slate-300 mt-1 leading-snug">
+                14-Day Velocity × 14-Day Safety Buffer + Low Stock Margin
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
+                  <tr>
+                    <th className="p-3">Product Name</th>
+                    <th className="p-3">Supplier / Mandi</th>
+                    <th className="p-3 text-right">Stock</th>
+                    <th className="p-3 text-right">Velocity</th>
+                    <th className="p-3 text-center">Runway</th>
+                    <th className="p-3 text-right font-bold text-blue-600">Suggested Reorder</th>
+                    <th className="p-3 text-right">Est. Cost</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {reorderData.items.map((it: any, idx: number) => (
+                    <tr key={idx} className={it.needsReorder ? 'bg-amber-50/30 dark:bg-amber-950/20' : 'hover:bg-slate-50/50 dark:hover:bg-slate-800/40'}>
+                      <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{it.name}</td>
+                      <td className="p-3 text-slate-500 dark:text-slate-400">{it.supplierName}</td>
+                      <td className="p-3 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                        {it.currentStock} {it.unitType}
+                      </td>
+                      <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
+                        {it.velocityPerDay}/d
+                      </td>
+                      <td className="p-3 text-center font-bold">
+                        {it.daysOfStockLeft === 999 ? (
+                          <span className="text-slate-400">Adequate</span>
+                        ) : it.daysOfStockLeft <= 7 ? (
+                          <span className="text-red-600 dark:text-red-400">{it.daysOfStockLeft}d left</span>
+                        ) : (
+                          <span className="text-slate-700 dark:text-slate-300">{it.daysOfStockLeft}d left</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-right font-bold text-blue-700 dark:text-blue-400">
+                        {it.needsReorder ? `${it.suggestedReorderQty} ${it.unitType}` : '-'}
+                      </td>
+                      <td className="p-3 text-right font-bold text-slate-900 dark:text-slate-100">
+                        {it.needsReorder ? formatINR(it.estimatedCost) : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 6: DAILY GALLA SHIFT & CASH RECONCILIATION
+          ========================================================================= */}
+      {activeTab === 'galla' && gallaData && (
+        <div className="space-y-4" data-testid="galla-report-container">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Cash Sales In</span>
+              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                +{formatINR(gallaData.totalCashSales)}
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">Counter cash billing</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Khata Cash Recovered</span>
+              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                +{formatINR(gallaData.totalUdhariRecovered)}
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">Customer repayments</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Cash Expenses Out</span>
+              <p className="text-xl font-bold text-red-600 dark:text-red-400 mt-1">
+                -{formatINR(gallaData.totalExpensesOut)}
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">Galla cash paid</p>
+            </div>
+            <div className="bg-blue-50/70 dark:bg-blue-950/30 p-4 rounded-2xl border border-blue-200 dark:border-blue-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-blue-800 dark:text-blue-400 uppercase">Net Discrepancy</span>
+              <p className="text-xl font-extrabold text-blue-900 dark:text-blue-300 mt-1">
+                {formatINR(gallaData.totalDiscrepancy)}
+              </p>
+              <p className="text-[10px] text-blue-700 dark:text-blue-400">Total tally variance</p>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
+                  <tr>
+                    <th className="p-3">Shift Date</th>
+                    <th className="p-3 text-right">Opening Float</th>
+                    <th className="p-3 text-right">Cash Sales</th>
+                    <th className="p-3 text-right">Udhari In</th>
+                    <th className="p-3 text-right">Expenses Out</th>
+                    <th className="p-3 text-right">Expected Drawer</th>
+                    <th className="p-3 text-right">Actual Counted</th>
+                    <th className="p-3 text-center">Tally Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {gallaData.sessions.map((s: any, idx: number) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                      <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{s.sessionDate}</td>
+                      <td className="p-3 text-right text-slate-600 dark:text-slate-400">{formatINR(s.openingCash)}</td>
+                      <td className="p-3 text-right text-emerald-600 font-bold">{formatINR(s.cashSales)}</td>
+                      <td className="p-3 text-right text-emerald-600 font-bold">{formatINR(s.cashRecovered)}</td>
+                      <td className="p-3 text-right text-red-600 font-bold">{formatINR(s.expensesOut)}</td>
+                      <td className="p-3 text-right font-bold text-slate-900 dark:text-slate-100">{formatINR(s.expectedClosing)}</td>
+                      <td className="p-3 text-right font-bold text-slate-900 dark:text-slate-100">
+                        {s.actualCounted !== null ? formatINR(s.actualCounted) : 'OPEN'}
+                      </td>
+                      <td className="p-3 text-center">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            s.tallyStatus.includes('TALLY')
+                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                              : s.tallyStatus.includes('SHORTAGE')
+                              ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
+                              : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300'
+                          }`}
+                        >
+                          {s.tallyStatus}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 7: SALES RETURN & STOCK ADJUSTMENT AUDIT LOG
+          ========================================================================= */}
+      {activeTab === 'returns' && returnsData && (
+        <div className="space-y-4" data-testid="returns-report-container">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+            <div className="bg-red-50/70 dark:bg-red-950/30 p-4 rounded-2xl border border-red-200 dark:border-red-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-red-800 dark:text-red-400 uppercase">Credit Notes Issued</span>
+              <p className="text-xl font-extrabold text-red-700 dark:text-red-300 mt-1">
+                {returnsData.totalReturnsCount} Bills
+              </p>
+              <p className="text-[10px] text-red-600 dark:text-red-400">Total refunded: {formatINR(returnsData.totalReturnsAmount)}</p>
+            </div>
+            <div className="bg-amber-50/70 dark:bg-amber-950/30 p-4 rounded-2xl border border-amber-200 dark:border-amber-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-amber-800 dark:text-amber-400 uppercase">Damage &amp; Expired Loss</span>
+              <p className="text-xl font-extrabold text-amber-800 dark:text-amber-300 mt-1">
+                {formatINR(returnsData.totalDamageLoss)}
+              </p>
+              <p className="text-[10px] text-amber-700 dark:text-amber-500">Unsalable inventory written off</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs col-span-2 sm:col-span-1">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Stock Integrity</span>
+              <p className="text-xs font-medium text-slate-700 dark:text-slate-300 mt-1 leading-snug">
+                All returns automatically write RETURN_IN logs to restore item counts.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
+                  <tr>
+                    <th className="p-3">Type</th>
+                    <th className="p-3">CN # / Product</th>
+                    <th className="p-3">Bill Ref / Notes</th>
+                    <th className="p-3">Customer / Reason</th>
+                    <th className="p-3 text-right">Adjustment Qty</th>
+                    <th className="p-3 text-right">Impact Amount</th>
+                    <th className="p-3 text-center">Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {returnsData.returns.length === 0 && returnsData.adjustments.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-6 text-center text-slate-400 dark:text-slate-500">
+                        No returns or stock adjustments recorded in this period.
+                      </td>
+                    </tr>
+                  ) : (
+                    <>
+                      {returnsData.returns.map((r: any, idx: number) => (
+                        <tr key={`ret-${idx}`} className="bg-red-50/20 dark:bg-red-950/10">
+                          <td className="p-3">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300">
+                              Credit Note
+                            </span>
+                          </td>
+                          <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{r.creditNoteNumber}</td>
+                          <td className="p-3 font-mono text-slate-600 dark:text-slate-400">{r.invoiceNumber}</td>
+                          <td className="p-3 text-slate-700 dark:text-slate-300">
+                            {r.customerName} ({r.returnReason})
+                          </td>
+                          <td className="p-3 text-right font-mono text-slate-400">-</td>
+                          <td className="p-3 text-right font-bold text-red-600 dark:text-red-400">
+                            -{formatINR(r.amount)}
+                          </td>
+                          <td className="p-3 text-center text-slate-500">{new Date(r.date).toLocaleDateString('en-IN')}</td>
+                        </tr>
+                      ))}
+                      {returnsData.adjustments.map((a: any, idx: number) => (
+                        <tr key={`adj-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                          <td className="p-3">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                              {a.reasonType}
+                            </span>
+                          </td>
+                          <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">{a.productName}</td>
+                          <td className="p-3 text-slate-500 dark:text-slate-400">{a.notes || '-'}</td>
+                          <td className="p-3 text-slate-600 dark:text-slate-400">{a.reasonType}</td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-700 dark:text-slate-300">{a.changeQty}</td>
+                          <td className="p-3 text-right font-bold text-slate-900 dark:text-slate-100">
+                            {formatINR(a.impactCost)}
+                          </td>
+                          <td className="p-3 text-center text-slate-500">{new Date(a.createdAt).toLocaleDateString('en-IN')}</td>
+                        </tr>
+                      ))}
+                    </>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 8: HSN & GST TAX SUMMARY SHEET
+          ========================================================================= */}
+      {activeTab === 'tax' && taxData && (
+        <div className="space-y-4" data-testid="tax-report-container">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Taxable Sales</span>
+              <p className="text-xl font-bold text-slate-900 dark:text-white mt-1">
+                {formatINR(taxData.totalTaxableTurnover)}
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">Excluding tax</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">CGST (Central)</span>
+              <p className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+                {formatINR(taxData.totalCgst)}
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">50% central tax</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">SGST (State)</span>
+              <p className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+                {formatINR(taxData.totalSgst)}
+              </p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">50% state tax</p>
+            </div>
+            <div className="bg-emerald-50/70 dark:bg-emerald-950/30 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400 uppercase">Total GST Liability</span>
+              <p className="text-xl font-extrabold text-emerald-700 dark:text-emerald-300 mt-1">
+                {formatINR(taxData.totalGstAmount)}
+              </p>
+              <p className="text-[10px] text-emerald-600 dark:text-emerald-500">Total tax collected</p>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
+                  <tr>
+                    <th className="p-3">HSN Code</th>
+                    <th className="p-3">Product Category</th>
+                    <th className="p-3 text-center">GST Slab</th>
+                    <th className="p-3 text-right">Taxable Turnover</th>
+                    <th className="p-3 text-right">CGST</th>
+                    <th className="p-3 text-right">SGST</th>
+                    <th className="p-3 text-right font-bold text-blue-600">Total GST</th>
+                    <th className="p-3 text-right font-bold">Gross Invoiced Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {taxData.hsnCategories.map((c: any, idx: number) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                      <td className="p-3 font-mono font-bold text-slate-900 dark:text-slate-100">{c.hsn}</td>
+                      <td className="p-3 font-medium text-slate-700 dark:text-slate-300">{c.category}</td>
+                      <td className="p-3 text-center">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                          {c.gstRate}%
+                        </span>
+                      </td>
+                      <td className="p-3 text-right font-medium text-slate-900 dark:text-slate-100">{formatINR(c.taxableSales)}</td>
+                      <td className="p-3 text-right text-slate-600 dark:text-slate-400">{formatINR(c.cgst)}</td>
+                      <td className="p-3 text-right text-slate-600 dark:text-slate-400">{formatINR(c.sgst)}</td>
+                      <td className="p-3 text-right font-bold text-blue-600 dark:text-blue-400">{formatINR(c.totalGst)}</td>
+                      <td className="p-3 text-right font-extrabold text-slate-900 dark:text-slate-100">{formatINR(c.grossTurnover)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 9: DAILY BILL REGISTER & VOID / RETURN ACTION (REQ-14.4 & REQ-34 / AT-09)
+          ========================================================================= */}
       {activeTab === 'invoices' && (
         <div className="space-y-3" data-testid="invoices-report-container">
           {/* Bulk Invoices Action Bar */}
@@ -548,113 +1160,123 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
                         type="checkbox"
                         checked={invoicesData.length > 0 && selectedInvoiceIds.size === invoicesData.length}
                         onChange={handleToggleSelectAllInvoices}
-                        className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
-                        title="Select All"
+                        className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-blue-500"
                       />
                     </th>
                     <th className="p-3">Invoice Number</th>
-                    <th className="p-3">Time</th>
+                    <th className="p-3">Date &amp; Time</th>
+                    <th className="p-3">Payment Mode</th>
                     <th className="p-3 text-right">Grand Total</th>
-                    <th className="p-3 text-center">Mode</th>
                     <th className="p-3 text-right">Paid Now</th>
-                    <th className="p-3 text-right">Udhari</th>
+                    <th className="p-3 text-right">Udhari Added</th>
                     <th className="p-3 text-center">Status</th>
-                    <th className="p-3 text-center">Action</th>
+                    <th className="p-3 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {invoicesData.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="p-6 text-center text-slate-400 dark:text-slate-500">
-                        No invoices found for this date range.
+                        No sales invoices found for this date preset.
                       </td>
                     </tr>
                   ) : (
-                    invoicesData.map((inv) => (
-                      <tr
-                        key={inv.id}
-                        className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/40 ${
-                          selectedInvoiceIds.has(inv.id) ? 'bg-red-50/30 dark:bg-red-950/20' : ''
-                        }`}
-                      >
-                        <td className="p-3 text-center">
-                          <input
-                            type="checkbox"
-                            checked={selectedInvoiceIds.has(inv.id)}
-                            onChange={() => handleToggleSelectInvoice(inv.id)}
-                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
-                          />
-                        </td>
-                        <td className="p-3 font-mono font-bold text-blue-900 dark:text-blue-300">
-                          {inv.invoice_number}
-                        </td>
-                        <td className="p-3 text-slate-500 dark:text-slate-400 font-mono">
-                          {new Date(inv.created_at).toLocaleTimeString('en-IN', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </td>
-                        <td className="p-3 text-right font-extrabold text-slate-900 dark:text-white">
-                          {formatINR(inv.grand_total)}
-                        </td>
-                        <td className="p-3 text-center">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                    invoicesData.map((inv) => {
+                      const isSelected = selectedInvoiceIds.has(inv.id);
+                      return (
+                        <tr
+                          key={inv.id}
+                          className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/40 ${
+                            isSelected ? 'bg-blue-50/40 dark:bg-blue-950/20' : ''
+                          }`}
+                        >
+                          <td className="p-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectInvoice(inv.id)}
+                              className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-900 dark:text-slate-100">
+                            {inv.invoice_number}
+                          </td>
+                          <td className="p-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                            {new Date(inv.created_at).toLocaleDateString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </td>
+                          <td className="p-3 font-semibold text-slate-700 dark:text-slate-300">
                             {inv.payment_mode}
-                          </span>
-                        </td>
-                        <td className="p-3 text-right text-emerald-700 dark:text-emerald-400 font-bold">
-                          {formatINR(inv.amount_paid_now)}
-                        </td>
-                        <td className="p-3 text-right text-red-600 dark:text-red-400 font-bold">
-                          {formatINR(inv.udhari_added)}
-                        </td>
-                        <td className="p-3 text-center">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              inv.status === 'COMPLETED'
-                                ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
-                                : inv.status === 'RETURNED'
-                                ? 'bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300'
-                                : 'bg-red-100 dark:bg-red-950 text-red-800 dark:text-red-300'
-                            }`}
-                          >
-                            {inv.status === 'RETURNED' && inv.credit_note_number
-                              ? `RETURNED (${inv.credit_note_number})`
-                              : inv.status}
-                          </span>
-                        </td>
-                        <td className="p-3 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            {/* View Slip / Thermal Receipt */}
-                            <button
-                              type="button"
-                              onClick={() => handleViewSlip(inv)}
-                              title="View Thermal Slip / WhatsApp Share"
-                              className="p-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded-lg text-[10px] font-bold transition"
+                          </td>
+                          <td className="p-3 text-right font-bold text-slate-900 dark:text-slate-100">
+                            {formatINR(inv.grand_total)}
+                          </td>
+                          <td className="p-3 text-right font-medium text-emerald-600 dark:text-emerald-400">
+                            {formatINR(inv.amount_paid_now)}
+                          </td>
+                          <td className="p-3 text-right font-medium text-red-600 dark:text-red-400">
+                            {inv.udhari_added > 0 ? formatINR(inv.udhari_added) : '-'}
+                          </td>
+                          <td className="p-3 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                inv.status === 'COMPLETED'
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : inv.status === 'RETURNED'
+                                  ? 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300'
+                                  : 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300'
+                              }`}
                             >
-                              <Eye className="w-3.5 h-3.5" />
-                            </button>
-
-                            {/* Return / Revise Bill (Iteration 3) */}
-                            {inv.status === 'COMPLETED' ? (
+                              {inv.status === 'RETURNED'
+                                ? `RETURNED (${inv.credit_note_number || 'CN'})`
+                                : inv.status}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {/* View Receipt */}
                               <button
                                 type="button"
-                                data-testid={`return-bill-btn-${inv.id}`}
-                                onClick={() => setReturnInvoice(inv)}
-                                title="↩️ Return / Revise Bill (Issues Credit Note & Restores Stock)"
-                                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-lg text-[10px] font-bold transition flex items-center gap-1"
+                                onClick={() => handleViewSlip(inv)}
+                                className="p-1 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950 rounded-lg transition"
+                                title="View Receipt Slip"
                               >
-                                <Undo2 className="w-3 h-3" /> Return
+                                <Eye className="w-4 h-4" />
                               </button>
-                            ) : (
-                              <span className="text-[10px] font-bold text-slate-400 italic">
-                                Locked ({inv.status})
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+
+                              {/* Return / Revise Bill (Iteration 3) */}
+                              {inv.status === 'COMPLETED' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setReturnInvoice(inv)}
+                                  className="px-2 py-0.5 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-700 rounded-md text-[10px] font-bold transition flex items-center gap-1"
+                                  title="Return Items or Revise Bill via Credit Note"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  <span>Return / Revise</span>
+                                </button>
+                              )}
+
+                              {/* Void Invoice (REQ-34) */}
+                              {inv.status === 'COMPLETED' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleVoidInvoice(inv)}
+                                  className="p-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg transition"
+                                  title="Void Invoice"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -663,61 +1285,27 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         </div>
       )}
 
-      {/* TAB 5: INVENTORY VALUATION REPORT (REQ-14.5) */}
-      {activeTab === 'inventory' && inventoryData && (
-        <div className="space-y-4" data-testid="inventory-report-container">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-            <div className="bg-blue-50/70 dark:bg-blue-950/30 p-4 rounded-2xl border border-blue-200 dark:border-blue-800 shadow-2xs">
-              <span className="text-[11px] font-bold text-blue-800 dark:text-blue-400 uppercase">
-                Total Locked Capital (Wholesale Cost)
-              </span>
-              <p className="text-2xl font-extrabold text-blue-950 dark:text-blue-200 mt-1" data-testid="locked-capital">
-                {formatINR(inventoryData.totalLockedCapital)}
-              </p>
-              <p className="text-[10px] text-blue-700 dark:text-blue-400">&sum;(current_stock &times; purchase_price)</p>
-            </div>
-
-            <div className="bg-emerald-50/70 dark:bg-emerald-950/30 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-2xs">
-              <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400 uppercase">
-                Total Shelf Retail Value
-              </span>
-              <p className="text-2xl font-extrabold text-emerald-950 dark:text-emerald-200 mt-1">
-                {formatINR(inventoryData.totalSellingValue)}
-              </p>
-              <p className="text-[10px] text-emerald-700 dark:text-emerald-400">If all shelf stock is sold</p>
-            </div>
-
-            <div className="bg-purple-50/70 dark:bg-purple-950/30 p-4 rounded-2xl border border-purple-200 dark:border-purple-800 shadow-2xs">
-              <span className="text-[11px] font-bold text-purple-800 dark:text-purple-400 uppercase">
-                Potential Gross Margin in Stock
-              </span>
-              <p className="text-2xl font-extrabold text-purple-950 dark:text-purple-200 mt-1">
-                {formatINR(inventoryData.potentialGrossMargin)}
-              </p>
-              <p className="text-[10px] text-purple-700 dark:text-purple-400">Shelf gross margin potential</p>
-            </div>
-          </div>
-        </div>
+      {/* View Receipt Slip Modal */}
+      {viewReceiptInvoice && (
+        <ReceiptModal
+          isOpen={!!viewReceiptInvoice}
+          invoice={viewReceiptInvoice}
+          items={viewReceiptItems}
+          customer={viewReceiptCustomer}
+          profile={defaultProfile}
+          onClose={() => setViewReceiptInvoice(null)}
+        />
       )}
 
-      {/* Receipt Modal for Viewing/Printing/Sharing Thermal Slip */}
-      <ReceiptModal
-        isOpen={!!viewReceiptInvoice}
-        onClose={() => setViewReceiptInvoice(null)}
-        invoice={viewReceiptInvoice}
-        items={viewReceiptItems}
-        profile={defaultProfile}
-        customer={viewReceiptCustomer}
-      />
-
-      {/* Sales Return & Credit Note Modal (Iteration 3) */}
-      <SalesReturnModal
-        isOpen={!!returnInvoice}
-        onClose={() => setReturnInvoice(null)}
-        invoice={returnInvoice}
-        onSuccess={handleReturnCompleted}
-      />
+      {/* Sales Return / Credit Note & Re-Bill Modal (Iteration 3) */}
+      {returnInvoice && (
+        <SalesReturnModal
+          isOpen={!!returnInvoice}
+          invoice={returnInvoice}
+          onClose={() => setReturnInvoice(null)}
+          onSuccess={handleReturnCompleted}
+        />
+      )}
     </div>
   );
 };
-
