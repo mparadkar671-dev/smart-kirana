@@ -11,6 +11,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. SHOP PROFILE & SETTINGS
 CREATE TABLE IF NOT EXISTS shop_profile (
     id TEXT PRIMARY KEY DEFAULT 'current_shop',
+    shop_id TEXT NOT NULL DEFAULT 'current_shop',
+    invite_code TEXT UNIQUE NOT NULL DEFAULT 'KRN-4829',
     user_id UUID REFERENCES auth.users(id) DEFAULT auth.uid(),
     shop_name TEXT NOT NULL DEFAULT 'Shree Ganesh Kirana & General Store',
     owner_name TEXT NOT NULL DEFAULT 'Ramesh Patel',
@@ -20,6 +22,9 @@ CREATE TABLE IF NOT EXISTS shop_profile (
     gst_footer_note TEXT DEFAULT 'Thank you for shopping with us! Visit again.',
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_shop_profile_shop_id ON shop_profile(shop_id);
+CREATE INDEX IF NOT EXISTS idx_shop_profile_invite_code ON shop_profile(invite_code);
 
 -- 2. PRODUCTS MASTER
 DO $$ BEGIN
@@ -260,7 +265,7 @@ CREATE INDEX IF NOT EXISTS idx_store_users_user ON store_users(user_id);
 CREATE INDEX IF NOT EXISTS idx_store_users_role ON store_users(role);
 
 -- ==============================================================================
--- 10. ROW LEVEL SECURITY (RLS) POLICIES FOR STORE APP (AUTHENTICATED & ANON CLIENT)
+-- 10. ROW LEVEL SECURITY (RLS) POLICIES FOR STORE APP (STRICT TENANT ISOLATION)
 -- ==============================================================================
 ALTER TABLE shop_profile ENABLE ROW LEVEL SECURITY;
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
@@ -273,81 +278,125 @@ ALTER TABLE expenses_and_drawings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_galla_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE store_users ENABLE ROW LEVEL SECURITY;
 
-DO $$ BEGIN
-    -- Drop old restrictive authenticated-only policies if present
-    DROP POLICY IF EXISTS "Users can manage their own shop profile" ON shop_profile;
-    DROP POLICY IF EXISTS "Users can manage their own products" ON products;
-    DROP POLICY IF EXISTS "Users can manage their own inventory logs" ON inventory_logs;
-    DROP POLICY IF EXISTS "Users can manage their own customers" ON customers;
-    DROP POLICY IF EXISTS "Users can manage their own sales invoices" ON sales_invoices;
-    DROP POLICY IF EXISTS "Users can manage their own sale items" ON sale_items;
-    DROP POLICY IF EXISTS "Users can manage their own khata entries" ON khata_transactions;
-    DROP POLICY IF EXISTS "Users can manage their own expenses" ON expenses_and_drawings;
-    DROP POLICY IF EXISTS "Users can manage their own daily galla sessions" ON daily_galla_sessions;
-    DROP POLICY IF EXISTS "Users can manage store users" ON store_users;
+-- Security Definer Helpers for Tenant Scoping
+CREATE OR REPLACE FUNCTION public.get_auth_shop_ids()
+RETURNS SETOF TEXT AS $$
+    SELECT shop_id FROM public.store_users 
+    WHERE user_id = auth.uid() AND is_active = TRUE
+    UNION
+    SELECT id FROM public.shop_profile 
+    WHERE user_id = auth.uid();
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
 
-    -- Shop Profile Policies (allows sync from both verified store logins and retail counter mode)
-    CREATE POLICY "Allow store app manage shop profile" ON shop_profile
-        FOR ALL TO authenticated, anon
-        USING (true)
-        WITH CHECK (true);
+CREATE OR REPLACE FUNCTION public.get_auth_user_role(target_shop_id TEXT)
+RETURNS TEXT AS $$
+    SELECT role::text FROM public.store_users 
+    WHERE user_id = auth.uid() AND shop_id = target_shop_id AND is_active = TRUE
+    LIMIT 1;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
 
-    -- Products Master Policies
-    CREATE POLICY "Allow store app manage products" ON products
-        FOR ALL TO authenticated, anon
-        USING (true)
-        WITH CHECK (true);
-
-    -- Inventory Logs Policies
-    CREATE POLICY "Allow store app manage inventory logs" ON inventory_logs
-        FOR ALL TO authenticated, anon
-        USING (true)
-        WITH CHECK (true);
-
-    -- Customers & Khata Policies
-    CREATE POLICY "Allow store app manage customers" ON customers
-        FOR ALL TO authenticated, anon
-        USING (true)
-        WITH CHECK (true);
-
-    -- Sales Invoices Policies
-    CREATE POLICY "Allow store app manage sales invoices" ON sales_invoices
-        FOR ALL TO authenticated, anon
-        USING (true)
-        WITH CHECK (true);
-
-    -- Sale Items Policies
-    CREATE POLICY "Allow store app manage sale items" ON sale_items
-        FOR ALL TO authenticated, anon
-        USING (true)
-        WITH CHECK (true);
-
-    -- Khata Transactions Policies
-    CREATE POLICY "Allow store app manage khata entries" ON khata_transactions
-        FOR ALL TO authenticated, anon
-        USING (true)
-        WITH CHECK (true);
-
-    -- Expenses Policies
-    CREATE POLICY "Allow store app manage expenses" ON expenses_and_drawings
-        FOR ALL TO authenticated, anon
-        USING (true)
-        WITH CHECK (true);
-
-    -- Daily Galla Policies
-    CREATE POLICY "Allow store app manage daily galla sessions" ON daily_galla_sessions
-        FOR ALL TO authenticated, anon
-        USING (true)
-        WITH CHECK (true);
-
-    -- Store Users Policies
-    CREATE POLICY "Allow store app manage store users" ON store_users
-        FOR ALL TO authenticated, anon
-        USING (true)
-        WITH CHECK (true);
-EXCEPTION
-    WHEN duplicate_object THEN null;
+DO $$ 
+DECLARE
+    tbl text;
+    tables text[] := ARRAY[
+        'shop_profile', 'products', 'inventory_logs', 'customers',
+        'sales_invoices', 'sale_items', 'khata_transactions',
+        'expenses_and_drawings', 'daily_galla_sessions', 'store_users'
+    ];
+BEGIN
+    FOREACH tbl IN ARRAY tables
+    LOOP
+        EXECUTE format('DROP POLICY IF EXISTS "allow_store_app_access" ON public.%I;', tbl);
+        EXECUTE format('DROP POLICY IF EXISTS "Allow store app manage %s" ON public.%I;', tbl, tbl);
+        EXECUTE format('DROP POLICY IF EXISTS "tenant_isolated_policy" ON public.%I;', tbl);
+    END LOOP;
 END $$;
+
+-- Table-specific tenant-isolated policies:
+
+-- A. SHOP PROFILE
+CREATE POLICY "tenant_isolated_shop_profile_select" ON public.shop_profile
+    FOR SELECT TO authenticated
+    USING (id IN (SELECT public.get_auth_shop_ids()) OR user_id = auth.uid());
+
+CREATE POLICY "tenant_isolated_shop_profile_modify" ON public.shop_profile
+    FOR ALL TO authenticated
+    USING (user_id = auth.uid())
+    WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "anon_validate_invite_code" ON public.shop_profile
+    FOR SELECT TO anon
+    USING (invite_code IS NOT NULL);
+
+-- B. STORE USERS
+CREATE POLICY "tenant_isolated_store_users_select" ON public.store_users
+    FOR SELECT TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR user_id = auth.uid());
+
+CREATE POLICY "tenant_isolated_store_users_insert" ON public.store_users
+    FOR INSERT TO authenticated
+    WITH CHECK (user_id = auth.uid() OR shop_id IN (SELECT public.get_auth_shop_ids()));
+
+CREATE POLICY "tenant_isolated_store_users_modify" ON public.store_users
+    FOR UPDATE TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()))
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()));
+
+-- C. PRODUCTS MASTER
+CREATE POLICY "tenant_isolated_products" ON public.products
+    FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()))
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()));
+
+-- D. INVENTORY LOGS
+CREATE POLICY "tenant_isolated_inventory_logs" ON public.inventory_logs
+    FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()))
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()));
+
+-- E. CUSTOMERS
+CREATE POLICY "tenant_isolated_customers" ON public.customers
+    FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()))
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()));
+
+-- F. SALES INVOICES & SALE ITEMS
+CREATE POLICY "tenant_isolated_sales_invoices" ON public.sales_invoices
+    FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()))
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()));
+
+CREATE POLICY "tenant_isolated_sale_items" ON public.sale_items
+    FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()))
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()));
+
+-- G. KHATA TRANSACTIONS
+CREATE POLICY "tenant_isolated_khata_transactions" ON public.khata_transactions
+    FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()))
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()));
+
+-- H. EXPENSES & DRAWINGS (Restricted: Cashiers CANNOT access expenses)
+CREATE POLICY "tenant_isolated_expenses" ON public.expenses_and_drawings
+    FOR ALL TO authenticated
+    USING (
+        shop_id IN (SELECT public.get_auth_shop_ids()) 
+        AND public.get_auth_user_role(shop_id) IN ('OWNER', 'MANAGER', 'ACCOUNTANT')
+    )
+    WITH CHECK (
+        shop_id IN (SELECT public.get_auth_shop_ids()) 
+        AND public.get_auth_user_role(shop_id) IN ('OWNER', 'MANAGER', 'ACCOUNTANT')
+    );
+
+-- I. DAILY GALLA SESSIONS
+CREATE POLICY "tenant_isolated_daily_galla" ON public.daily_galla_sessions
+    FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()))
+    WITH CHECK (
+        shop_id IN (SELECT public.get_auth_shop_ids())
+        AND public.get_auth_user_role(shop_id) IN ('OWNER', 'MANAGER', 'ACCOUNTANT')
+    );
 
 -- ==============================================================================
 -- 11. INSTANT ACCESS / EMAIL VERIFICATION HELPER (RUN IN SQL EDITOR IF DESIRED)

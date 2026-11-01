@@ -42,10 +42,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<UserRole>('OWNER');
 
-  // Shop selection mode
-  const [shopMode, setShopMode] = useState<'existing' | 'new'>('new');
-  const [availableShops, setAvailableShops] = useState<RegisteredShop[]>([]);
-  const [selectedShopId, setSelectedShopId] = useState<string>('');
+  // Store Invite Code & Tenant Isolation (REQ: Iteration 1)
+  const [inviteCode, setInviteCode] = useState('');
+  const [verifiedStore, setVerifiedStore] = useState<{ id: string; shop_name: string; owner_name: string } | null>(null);
+  const [inviteCodeError, setInviteCodeError] = useState<string | null>(null);
+  const [isValidatingInvite, setIsValidatingInvite] = useState(false);
+
+  const [selectedShopId, setSelectedShopId] = useState<string>('current_shop');
 
   // UI state
   const [showPassword, setShowPassword] = useState(false);
@@ -55,17 +58,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      authService.getAvailableShops().then((list) => {
-        setAvailableShops(list);
-        if (list.length > 0 && !shopName) {
-          setSelectedShopId(list[0].id);
-        }
-      });
-    }
-  }, [isOpen]);
-
   if (!isOpen) return null;
 
   const passwordValidation = validatePasswordStrength(password);
@@ -74,24 +66,41 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     errorMsg?.toLowerCase().includes('awaiting approval') ||
     errorMsg?.includes('ACCESS_PENDING_APPROVAL');
 
-  const handleRoleSelect = (selectedRole: UserRole) => {
-    setRole(selectedRole);
-    if (selectedRole !== 'OWNER') {
-      setShopMode('existing');
-      if (availableShops.length > 0) {
-        const found = availableShops.find((s) => s.id === selectedShopId) || availableShops[0];
-        setShopName(found.shop_name);
-        setSelectedShopId(found.id);
+  const handleInviteCodeChange = async (rawCode: string) => {
+    const upper = rawCode.toUpperCase().trim();
+    setInviteCode(upper);
+    setInviteCodeError(null);
+    setVerifiedStore(null);
+
+    if (upper.length >= 6) {
+      setIsValidatingInvite(true);
+      try {
+        const res = await authService.validateStoreInviteCode(upper);
+        if (res.valid && res.shop) {
+          setVerifiedStore({
+            id: res.shop.id,
+            shop_name: res.shop.shop_name,
+            owner_name: res.shop.owner_name,
+          });
+          setShopName(res.shop.shop_name);
+          setSelectedShopId(res.shop.id);
+          setInviteCodeError(null);
+        } else {
+          setInviteCodeError(res.message || 'Store invite code not found.');
+        }
+      } catch {
+        setInviteCodeError('Could not verify invite code.');
+      } finally {
+        setIsValidatingInvite(false);
       }
     }
   };
 
-  const handleSelectExistingShop = (id: string) => {
-    setSelectedShopId(id);
-    const found = availableShops.find((s) => s.id === id);
-    if (found) {
-      setShopName(found.shop_name);
-      if (found.phone && !phone) setPhone(found.phone);
+  const handleRoleSelect = (selectedRole: UserRole) => {
+    setRole(selectedRole);
+    if (selectedRole === 'OWNER') {
+      setVerifiedStore(null);
+      setInviteCodeError(null);
     }
   };
 
@@ -142,20 +151,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       return;
     }
 
-    if (!shopName.trim()) {
-      setErrorMsg('Please choose or enter a store name.');
+    const isJoining = role !== 'OWNER';
+
+    if (isJoining && !inviteCode.trim()) {
+      setErrorMsg('Please enter the 6-digit Store Invite Code provided by your store owner.');
+      return;
+    }
+
+    if (!isJoining && !shopName.trim()) {
+      setErrorMsg('Please enter your store name.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const isJoining = shopMode === 'existing' || role !== 'OWNER';
       const res = await signUp(email.trim(), password, {
-        shopName: shopName.trim() || 'My Kirana Store',
+        shopName: (isJoining && verifiedStore ? verifiedStore.shop_name : shopName).trim() || 'My Kirana Store',
         ownerName: ownerName.trim() || 'Store Member',
         phone: phone.trim() || '',
         role,
-        shopId: selectedShopId || 'current_shop',
+        shopId: verifiedStore?.id || selectedShopId || 'current_shop',
+        inviteCode: isJoining ? inviteCode.trim() : undefined,
         isJoiningExisting: isJoining,
       });
 
@@ -163,7 +179,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         setTab('verify_pending');
       } else if (isJoining) {
         setSuccessMsg(
-          `Request submitted! Your request to join "${shopName}" as ${role} has been submitted for store owner approval.`
+          `Request submitted! Your request to join "${verifiedStore?.shop_name || shopName}" as ${role} has been submitted for store owner approval.`
         );
       } else {
         setSuccessMsg('Account registered successfully! Entering POS...');
@@ -440,76 +456,64 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 </div>
               </div>
 
-              {/* Store Mode: Existing Store vs New Store */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
+              {/* Store Setup: Owner enters Store Name; Staff enters Store Invite Code */}
+              {role === 'OWNER' ? (
+                <div className="space-y-1">
                   <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                    Store *
+                    Store Name *
                   </label>
-                  <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg text-[10px] font-bold">
-                    <button
-                      type="button"
-                      onClick={() => setShopMode('existing')}
-                      className={`px-1.5 py-0.5 rounded transition ${
-                        shopMode === 'existing'
-                          ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                          : 'text-slate-500'
-                      }`}
-                    >
-                      🏢 Existing Shop
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShopMode('new')}
-                      className={`px-1.5 py-0.5 rounded transition ${
-                        shopMode === 'new'
-                          ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                          : 'text-slate-500'
-                      }`}
-                    >
-                      ✨ New Shop
-                    </button>
-                  </div>
-                </div>
-
-                {shopMode === 'existing' ? (
-                  <div className="space-y-1">
-                    <div className="relative">
-                      <Building2 className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2 pointer-events-none" />
-                      <select
-                        value={selectedShopId}
-                        onChange={(e) => handleSelectExistingShop(e.target.value)}
-                        className="w-full pl-8 pr-7 py-1.5 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none font-semibold cursor-pointer appearance-none"
-                      >
-                        {availableShops.length === 0 ? (
-                          <option value="">No registered shops found - Click New</option>
-                        ) : (
-                          availableShops.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.shop_name} (Owner: {s.owner_name})
-                            </option>
-                          ))
-                        )}
-                      </select>
-                      <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2 pointer-events-none" />
-                    </div>
-                    {role !== 'OWNER' && (
-                      <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
-                        ℹ️ Joining requires owner permission. Request will be submitted to the owner.
-                      </p>
-                    )}
-                  </div>
-                ) : (
                   <input
                     type="text"
                     required
                     value={shopName}
                     onChange={(e) => setShopName(e.target.value)}
-                    placeholder="e.g. Laxi Vatsalaya store"
+                    placeholder="e.g. Laxi Vatsalaya Store"
                     className="w-full px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none"
                   />
-                )}
-              </div>
+                  <p className="text-[10px] text-slate-400">
+                    A unique 6-digit Store Invite Code will be generated for your staff.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                      Store Invite Code *
+                    </label>
+                    <span className="text-[10px] text-slate-400">Ask Store Owner</span>
+                  </div>
+                  <div className="relative">
+                    <Lock className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+                    <input
+                      type="text"
+                      required
+                      value={inviteCode}
+                      onChange={(e) => handleInviteCodeChange(e.target.value)}
+                      placeholder="e.g. KRN-4829"
+                      className="w-full pl-8 pr-7 py-1.5 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold tracking-wider uppercase outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    {isValidatingInvite && (
+                      <RefreshCw className="w-3 h-3 text-blue-500 animate-spin absolute right-2.5 top-2" />
+                    )}
+                  </div>
+
+                  {verifiedStore && (
+                    <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[10px] text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                      <span>
+                        Verified: <strong>{verifiedStore.shop_name}</strong>
+                      </span>
+                    </div>
+                  )}
+
+                  {inviteCodeError && (
+                    <div className="p-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-[10px] text-rose-700 dark:text-rose-300 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 text-rose-500 shrink-0" />
+                      <span>{inviteCodeError}</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-2">
                 <div>

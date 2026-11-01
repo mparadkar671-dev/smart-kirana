@@ -223,6 +223,11 @@ class NotificationService {
             const { data: cloudUsers } = await supabase.from('store_users').select('*');
             if (cloudUsers && cloudUsers.length > 0) {
               for (const cu of cloudUsers) {
+                const existingLocal = await db.store_users.get(cu.id);
+                // Preserve locally pending user state if not updated newer on cloud
+                if (existingLocal && existingLocal.approval_status === 'PENDING' && (!cu.updated_at || cu.updated_at <= existingLocal.created_at)) {
+                  continue;
+                }
                 await db.saveStoreUser({
                   id: cu.id,
                   user_id: cu.user_id,
@@ -232,7 +237,7 @@ class NotificationService {
                   role: cu.role,
                   shop_id: cu.shop_id || 'current_shop',
                   is_active: cu.is_active ?? true,
-                  approval_status: cu.is_active ? 'APPROVED' : 'PENDING',
+                  approval_status: cu.approval_status || (cu.is_active ? 'APPROVED' : 'PENDING'),
                   created_at: cu.created_at || now.toISOString(),
                   updated_at: cu.updated_at,
                 });
@@ -365,8 +370,8 @@ class NotificationService {
 
   public clearAll() {
     const state = this.getStoredState();
-    const allIds = this.cache.map((n) => n.id);
-    state.dismissedIds = Array.from(new Set([...state.dismissedIds, ...allIds]));
+    state.dismissedIds = [];
+    state.readIds = [];
     state.customNotifications = [];
     this.saveStoredState(state);
 

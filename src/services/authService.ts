@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { User, Session } from '@supabase/supabase-js';
-import { db } from '../db/db';
+import { db, generateInviteCode } from '../db/db';
 import { UserRole, StoreUser, RegisteredShop } from '../types';
 import { cloudSyncService } from './cloudSyncService';
 import { notificationService } from './notificationService';
@@ -73,10 +73,90 @@ export interface SignUpShopData {
   phone: string;
   role?: UserRole;
   shopId?: string;
+  inviteCode?: string;
   isJoiningExisting?: boolean;
 }
 
 export const authService = {
+  /**
+   * Validates a 6-digit store invite code (e.g. KRN-4829)
+   * Prevents leaking list of stores to unauthenticated users
+   */
+  async validateStoreInviteCode(rawCode: string): Promise<{
+    valid: boolean;
+    shop?: { id: string; shop_name: string; owner_name: string; phone?: string; invite_code: string };
+    message?: string;
+  }> {
+    const code = (rawCode || '').trim().toUpperCase();
+    if (!code) {
+      return { valid: false, message: 'Store invite code is required.' };
+    }
+
+    // 1. Check local Dexie DB
+    try {
+      const localShop = await db.getShopByInviteCode(code);
+      if (localShop) {
+        return {
+          valid: true,
+          shop: {
+            id: localShop.id,
+            shop_name: localShop.shop_name,
+            owner_name: localShop.owner_name,
+            phone: localShop.phone,
+            invite_code: localShop.invite_code || code,
+          },
+        };
+      }
+    } catch (e) {
+      console.warn('Local invite code lookup failed:', e);
+    }
+
+    // 2. Check Supabase shop_profile
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('shop_profile')
+          .select('id, shop_name, owner_name, phone, invite_code')
+          .ilike('invite_code', code)
+          .maybeSingle();
+
+        if (data && !error) {
+          return {
+            valid: true,
+            shop: {
+              id: data.id,
+              shop_name: data.shop_name,
+              owner_name: data.owner_name,
+              phone: data.phone,
+              invite_code: data.invite_code,
+            },
+          };
+        }
+      } catch (err) {
+        console.warn('Supabase invite code check failed:', err);
+      }
+    }
+
+    // Default seed fallback
+    if (code === 'KRN-4829') {
+      return {
+        valid: true,
+        shop: {
+          id: 'current_shop',
+          shop_name: 'Shree Ganesh Kirana & General Store',
+          owner_name: 'Ramesh Patel',
+          phone: '9876543210',
+          invite_code: 'KRN-4829',
+        },
+      };
+    }
+
+    return {
+      valid: false,
+      message: `Store invite code "${code}" not found. Please ask your Store Owner for the exact invite code.`,
+    };
+  },
+
   /**
    * Fetches available registered shops from cloud and local cache for staff dropdown selection
    */
@@ -156,7 +236,27 @@ export const authService = {
     const isActive = !isJoining; // Owners are active immediately; staff require owner approval
     const approvalStatus = isActive ? 'APPROVED' : 'PENDING';
 
-    // If Owner registering a new shop, update local shop profile
+    let targetShopId = shopData.shopId || 'current_shop';
+    let targetShopName = shopData.shopName || 'My Kirana Store';
+
+    // Multi-tenant isolation: non-owners must supply a valid store invite code
+    if (isJoining) {
+      if (shopData.inviteCode) {
+        const inviteCheck = await this.validateStoreInviteCode(shopData.inviteCode);
+        if (!inviteCheck.valid || !inviteCheck.shop) {
+          throw new Error(inviteCheck.message || 'Invalid Store Invite Code.');
+        }
+        targetShopId = inviteCheck.shop.id;
+        targetShopName = inviteCheck.shop.shop_name;
+      } else if (!shopData.shopId) {
+        throw new Error(
+          `Store Invite Code is required to register as ${assignedRole}. Ask your store owner for their 6-digit invite code.`
+        );
+      }
+    }
+
+    // If Owner registering a new shop, update local shop profile with new invite code
+    const ownerInviteCode = generateInviteCode();
     if (!isJoining) {
       try {
         await db.updateShopProfile({
@@ -164,6 +264,7 @@ export const authService = {
           owner_name: shopData.ownerName || 'Store Owner',
           phone: shopData.phone || '',
           upi_vpa: `${shopData.phone || 'kirana'}@upi`,
+          invite_code: ownerInviteCode,
         });
       } catch (e) {
         console.warn('Failed to save local shop profile on signup:', e);
@@ -177,7 +278,7 @@ export const authService = {
       full_name: shopData.ownerName || 'Store User',
       phone: shopData.phone || undefined,
       role: assignedRole,
-      shop_id: shopData.shopId || 'current_shop',
+      shop_id: targetShopId,
       is_active: isActive,
       approval_status: approvalStatus,
       created_at: new Date().toISOString(),
@@ -198,10 +299,11 @@ export const authService = {
       password,
       options: {
         data: {
-          shop_name: shopData.shopName,
+          shop_name: targetShopName,
           owner_name: shopData.ownerName,
           phone: shopData.phone,
           role: assignedRole,
+          shop_id: targetShopId,
           is_active: isActive,
           approval_status: approvalStatus,
         },
@@ -227,6 +329,7 @@ export const authService = {
             owner_name: shopData.ownerName || 'Store Owner',
             phone: shopData.phone || '',
             upi_vpa: `${shopData.phone || 'kirana'}@upi`,
+            invite_code: ownerInviteCode,
             updated_at: new Date().toISOString(),
           });
         } catch (err) {
@@ -242,7 +345,7 @@ export const authService = {
           full_name: shopData.ownerName || 'Store User',
           phone: shopData.phone || null,
           role: assignedRole,
-          shop_id: shopData.shopId || 'current_shop',
+          shop_id: targetShopId,
           is_active: isActive,
           created_at: localStoreUser.created_at,
           updated_at: new Date().toISOString(),
@@ -257,7 +360,7 @@ export const authService = {
           id: `staff-req-${localStoreUser.id}`,
           type: 'STAFF_REQUEST',
           title: `👤 Staff Join Request: ${shopData.ownerName || email}`,
-          message: `Requested access as ${assignedRole} for ${shopData.shopName}. Tap to approve permissions.`,
+          message: `Requested access as ${assignedRole} for ${targetShopName}. Tap to approve permissions.`,
           timestamp: new Date().toISOString(),
           isRead: false,
           priority: 'high',

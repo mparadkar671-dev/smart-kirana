@@ -5,6 +5,7 @@ export type UnitType = 'PCS' | 'KG_LOOSE' | 'LTR' | 'PACK';
 
 export interface Product {
   id: string; // UUID PK
+  shop_id?: string; // Multi-tenant Shop ID (indexed)
   name: string; // Text
   short_code: string; // Text, e.g., "PG5", "TS1"
   barcode: string; // Text
@@ -31,6 +32,7 @@ export type InventoryReason =
 
 export interface InventoryLog {
   id: string; // UUID PK
+  shop_id?: string; // Multi-tenant Shop ID (indexed)
   product_id: string; // UUID FK
   change_qty: number; // Numeric 10,3 (signed: + or -)
   reason_type: InventoryReason;
@@ -42,6 +44,7 @@ export interface InventoryLog {
 
 export interface Customer {
   id: string; // UUID PK
+  shop_id?: string; // Multi-tenant Shop ID (indexed)
   name: string; // Text
   phone: string; // Text (10-digit Indian WhatsApp number)
   address_landmark?: string | null; // Text
@@ -57,6 +60,7 @@ export type InvoiceStatus = 'COMPLETED' | 'VOIDED';
 
 export interface SalesInvoice {
   id: string; // UUID PK
+  shop_id?: string; // Multi-tenant Shop ID (indexed)
   invoice_number: string; // Text, e.g. INV-20261030-001
   customer_id: string; // UUID FK
   subtotal_amount: number; // Numeric 10,2
@@ -72,6 +76,7 @@ export interface SalesInvoice {
 
 export interface SaleItem {
   id: string; // UUID PK
+  shop_id?: string; // Multi-tenant Shop ID (indexed)
   invoice_id: string; // UUID FK
   product_id: string; // UUID FK
   product_name_snapshot: string;
@@ -86,6 +91,7 @@ export type KhataPaymentChannel = 'BILL_CREDIT' | 'CASH' | 'UPI' | 'DISCOUNT_SET
 
 export interface KhataTransaction {
   id: string; // UUID PK
+  shop_id?: string; // Multi-tenant Shop ID (indexed)
   customer_id: string; // UUID FK
   entry_type: KhataEntryType;
   amount: number; // Numeric 10,2
@@ -122,6 +128,7 @@ export interface StoreUser {
 
 export interface ExpenseAndDrawing {
   id: string; // UUID PK
+  shop_id?: string; // Multi-tenant Shop ID (indexed)
   category: ExpenseCategory;
   amount: number; // Numeric 10,2
   paid_via: ExpensePaidVia;
@@ -131,6 +138,7 @@ export interface ExpenseAndDrawing {
 
 export interface DailyGallaSession {
   id: string; // UUID PK
+  shop_id?: string; // Multi-tenant Shop ID (indexed)
   session_date: string; // Date Unique: YYYY-MM-DD
   opening_cash: number; // Numeric 10,2
   cash_sales_total: number; // Numeric 10,2
@@ -143,6 +151,8 @@ export interface DailyGallaSession {
 
 export interface ShopProfile {
   id: string; // 'current_shop'
+  shop_id?: string;
+  invite_code?: string; // 6-digit Store Invite Code, e.g. "KRN-4829"
   shop_name: string;
   owner_name: string;
   phone: string;
@@ -155,6 +165,7 @@ export interface ShopProfile {
 export const WALK_IN_CUSTOMER_ID = '0000-WALK-IN';
 export const WALK_IN_CUSTOMER_RECORD: Customer = {
   id: WALK_IN_CUSTOMER_ID,
+  shop_id: 'current_shop',
   name: 'Walk-in Customer (Cash / UPI)',
   phone: '0000000000',
   address_landmark: 'Counter Sale',

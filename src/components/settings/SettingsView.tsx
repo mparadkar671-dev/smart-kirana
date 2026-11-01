@@ -42,7 +42,9 @@ import {
   X,
   Clock,
   Building2,
+  Copy,
 } from 'lucide-react';
+import { generateInviteCode } from '../../db/db';
 
 interface SettingsViewProps {
   onDataReset?: () => void;
@@ -65,6 +67,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>(() => cloudSyncService.getStatus());
   const [isSyncingCloud, setIsSyncingCloud] = useState(false);
   const [storeUsers, setStoreUsers] = useState<StoreUser[]>([]);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [realSalesCount, setRealSalesCount] = useState(0);
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffName, setNewStaffName] = useState('');
@@ -175,9 +179,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
     });
   };
 
+  const refreshRealSalesCount = async () => {
+    try {
+      const count = await db.getRealSalesCount();
+      setRealSalesCount(count);
+    } catch {
+      setRealSalesCount(0);
+    }
+  };
+
   useEffect(() => {
-    db.getShopProfile().then((p) => setProfile(p));
+    db.getShopProfile().then(async (p) => {
+      if (p && !p.invite_code) {
+        const withCode = { ...p, invite_code: generateInviteCode() };
+        await db.updateShopProfile(withCode);
+        setProfile(withCode);
+      } else {
+        setProfile(p);
+      }
+    });
     refreshStaffList();
+    refreshRealSalesCount();
 
     const unsubscribe = cloudSyncService.subscribe((s) => {
       setCloudStatus(s);
@@ -349,6 +371,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
     ) {
       try {
         await db.clearTransactionalData();
+        await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
           text: 'Sales and khata transactions cleared. Inventory catalog preserved.',
@@ -371,6 +394,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
     ) {
       try {
         await db.clearAllRecordsToEmpty();
+        await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
           text: 'All products and records wiped! Store is now 100% clean and empty.',
@@ -389,6 +413,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
     if (confirm('Reset entire database to default initial state (25 products + initial demo customers)?')) {
       try {
         await db.resetToDemoState();
+        await refreshRealSalesCount();
         const p = await db.getShopProfile();
         setProfile(p);
         setStatusMsg({
@@ -768,6 +793,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         </div>
       )}
 
+      {/* Private 6-Digit Store Invite Code (REQ: Iteration 1 - Visible only to Store Owner) */}
+      {userRole === 'OWNER' && profile && (
+        <div className="bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-blue-500/10 rounded-2xl border border-indigo-500/30 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                Store Invite Code
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-600 text-white">
+                Owner Only
+              </span>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              Share this 6-digit code with your staff (Managers, Accountants, Cashiers). They enter it during registration to join your store securely without exposing other stores.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <div className="px-4 py-2 bg-white dark:bg-slate-900 border border-indigo-300 dark:border-indigo-700 rounded-xl text-lg font-mono font-bold tracking-widest text-indigo-700 dark:text-indigo-300 shadow-xs">
+              {profile.invite_code || 'KRN-4829'}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(profile.invite_code || 'KRN-4829');
+                setCopiedCode(true);
+                setTimeout(() => setCopiedCode(false), 2500);
+              }}
+              className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95"
+            >
+              {copiedCode ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedCode ? 'Copied!' : 'Copy Code'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 1. Shop Identity Form */}
       <form onSubmit={handleSaveProfile} className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
         <h2 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
@@ -1056,14 +1119,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         </div>
 
         <div className="flex flex-wrap gap-3 pt-2">
-          <button
-            type="button"
-            onClick={handleSeedDemoProducts}
-            className="px-4 py-2.5 border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 text-blue-900 dark:text-blue-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
-          >
-            <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-            Load 25 Sample Kirana Demo Products
-          </button>
+          {/* Automatically hidden whenever real sales invoices exist (Rule 2) */}
+          {realSalesCount === 0 && (
+            <button
+              type="button"
+              onClick={handleSeedDemoProducts}
+              className="px-4 py-2.5 border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 text-blue-900 dark:text-blue-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
+            >
+              <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              Load 25 Sample Kirana Demo Products
+            </button>
+          )}
 
           <button
             type="button"

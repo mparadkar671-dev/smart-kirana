@@ -15,6 +15,11 @@ import {
 } from '../types';
 import { INITIAL_PRODUCTS, DEFAULT_SHOP_PROFILE, INITIAL_CUSTOMERS } from './seed';
 
+export function generateInviteCode(): string {
+  const num = Math.floor(1000 + Math.random() * 9000);
+  return `KRN-${num}`;
+}
+
 export class KiranaDatabase extends Dexie {
   products!: EntityTable<Product, 'id'>;
   inventory_logs!: EntityTable<InventoryLog, 'id'>;
@@ -44,6 +49,48 @@ export class KiranaDatabase extends Dexie {
 
     this.version(2).stores({
       store_users: 'id, user_id, email, role, shop_id, created_at',
+    });
+
+    this.version(3).stores({
+      products: 'id, shop_id, barcode, short_code, name, category, is_quick_tap, updated_at',
+      inventory_logs: 'id, shop_id, product_id, reason_type, reference_id, created_at',
+      customers: 'id, shop_id, phone, name, current_udhari_balance, created_at',
+      sales_invoices: 'id, shop_id, invoice_number, customer_id, payment_mode, status, created_at',
+      sale_items: 'id, shop_id, invoice_id, product_id',
+      khata_transactions: 'id, shop_id, customer_id, entry_type, invoice_id, payment_channel, created_at',
+      expenses_and_drawings: 'id, shop_id, category, paid_via, created_at',
+      daily_galla_sessions: 'id, shop_id, &session_date, created_at',
+      shop_profile: 'id, shop_id, invite_code',
+      store_users: 'id, user_id, email, role, shop_id, created_at',
+    });
+
+    // Multi-tenant Hook: Ensure all records are always tagged with shop_id and invite code
+    const tenantTables = [
+      this.products,
+      this.inventory_logs,
+      this.customers,
+      this.sales_invoices,
+      this.sale_items,
+      this.khata_transactions,
+      this.expenses_and_drawings,
+      this.daily_galla_sessions,
+    ];
+
+    tenantTables.forEach((table) => {
+      (table as any).hook('creating', (_primKey: unknown, obj: Record<string, unknown>) => {
+        if (!obj.shop_id) {
+          obj.shop_id = 'current_shop';
+        }
+      });
+    });
+
+    (this.shop_profile as any).hook('creating', (_primKey: unknown, obj: Record<string, unknown>) => {
+      if (!obj.shop_id) {
+        obj.shop_id = 'current_shop';
+      }
+      if (!obj.invite_code) {
+        obj.invite_code = generateInviteCode();
+      }
     });
   }
 
@@ -264,6 +311,21 @@ export class KiranaDatabase extends Dexie {
 
   async getStoreUserByUserId(userId: string): Promise<StoreUser | undefined> {
     return await this.store_users.where('user_id').equals(userId).first();
+  }
+
+  /**
+   * Lookup shop profile by unique 6-digit store invite code (e.g. 'KRN-4829')
+   */
+  async getShopByInviteCode(inviteCode: string): Promise<ShopProfile | undefined> {
+    const normalized = inviteCode.trim().toUpperCase();
+    return await this.shop_profile.where('invite_code').equalsIgnoreCase(normalized).first();
+  }
+
+  /**
+   * Count total completed sales invoices (used to hide demo products button if real transactions exist)
+   */
+  async getRealSalesCount(): Promise<number> {
+    return await this.sales_invoices.count();
   }
 }
 

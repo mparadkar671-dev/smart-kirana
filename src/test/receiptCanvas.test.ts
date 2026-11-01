@@ -78,3 +78,4 @@ describe('Native Receipt Canvas Generator Suite', () => {
     expect(canvas.height).toBeGreaterThan(400);
   });
 });
+

@@ -79,6 +79,7 @@ class CloudSyncService {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: product.id,
+        shop_id: product.shop_id || 'current_shop',
         name: product.name,
         short_code: product.short_code,
         barcode: product.barcode,
@@ -129,6 +130,7 @@ class CloudSyncService {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: customer.id,
+        shop_id: customer.shop_id || 'current_shop',
         name: customer.name,
         phone: customer.phone,
         address_landmark: customer.address_landmark || null,
@@ -174,6 +176,7 @@ class CloudSyncService {
 
       const invoicePayload: Record<string, unknown> = {
         id: invoice.id,
+        shop_id: invoice.shop_id || 'current_shop',
         invoice_number: invoice.invoice_number,
         customer_id: invoice.customer_id,
         subtotal_amount: invoice.subtotal_amount,
@@ -197,6 +200,7 @@ class CloudSyncService {
         const itemsPayload = items.map((item) => {
           const itemRow: Record<string, unknown> = {
             id: item.id,
+            shop_id: item.shop_id || 'current_shop',
             invoice_id: item.invoice_id,
             product_id: item.product_id,
             product_name_snapshot: item.product_name_snapshot,
@@ -228,6 +232,7 @@ class CloudSyncService {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: tx.id,
+        shop_id: tx.shop_id || 'current_shop',
         customer_id: tx.customer_id,
         entry_type: tx.entry_type,
         amount: tx.amount,
@@ -257,6 +262,7 @@ class CloudSyncService {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: session.id,
+        shop_id: session.shop_id || 'current_shop',
         session_date: session.session_date,
         opening_cash: session.opening_cash,
         cash_sales_total: session.cash_sales_total,
@@ -286,6 +292,7 @@ class CloudSyncService {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: expense.id,
+        shop_id: expense.shop_id || 'current_shop',
         category: expense.category,
         amount: expense.amount,
         paid_via: expense.paid_via,
@@ -312,6 +319,8 @@ class CloudSyncService {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: 'current_shop',
+        shop_id: profile.shop_id || profile.id || 'current_shop',
+        invite_code: profile.invite_code || 'KRN-4829',
         shop_name: profile.shop_name,
         owner_name: profile.owner_name,
         phone: profile.phone,
@@ -418,6 +427,7 @@ class CloudSyncService {
           const rows = prods.map((p) => {
             const r: Record<string, unknown> = {
               id: p.id,
+              shop_id: p.shop_id || 'current_shop',
               name: p.name,
               short_code: p.short_code,
               barcode: p.barcode,
@@ -455,6 +465,7 @@ class CloudSyncService {
           const rows = custs.map((c) => {
             const r: Record<string, unknown> = {
               id: c.id,
+              shop_id: c.shop_id || 'current_shop',
               name: c.name,
               phone: c.phone,
               address_landmark: c.address_landmark || null,
@@ -485,6 +496,7 @@ class CloudSyncService {
           const rows = invoices.map((inv) => {
             const r: Record<string, unknown> = {
               id: inv.id,
+              shop_id: inv.shop_id || 'current_shop',
               invoice_number: inv.invoice_number,
               customer_id: inv.customer_id,
               subtotal_amount: inv.subtotal_amount,
@@ -518,6 +530,7 @@ class CloudSyncService {
           const rows = txs.map((t) => {
             const r: Record<string, unknown> = {
               id: t.id,
+              shop_id: t.shop_id || 'current_shop',
               customer_id: t.customer_id,
               entry_type: t.entry_type,
               amount: t.amount,

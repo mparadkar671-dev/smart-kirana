@@ -316,3 +316,4 @@ export const generateReceiptCanvas = (options: GenerateReceiptCanvasOptions): HT
 
   return canvas;
 };
+

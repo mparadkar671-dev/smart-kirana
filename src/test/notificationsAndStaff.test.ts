@@ -86,7 +86,6 @@ describe('Store Staff Approval & Notification Center Suite', () => {
       created_at: new Date().toISOString(),
     };
     await db.saveStoreUser(pendingStaff);
-
     const notifs = await notificationService.refreshNotifications();
     const staffRequest = notifs.find((n) => n.type === 'STAFF_REQUEST');
     expect(staffRequest).toBeDefined();

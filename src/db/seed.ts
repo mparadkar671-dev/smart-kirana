@@ -432,6 +432,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   WALK_IN_CUSTOMER_RECORD,
   {
     id: 'cust-001',
+    shop_id: 'current_shop',
     name: 'Ramesh Sharma',
     phone: '9876543210',
     address_landmark: 'House #12, Near Shiv Mandir',
@@ -443,6 +444,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   },
   {
     id: 'cust-002',
+    shop_id: 'current_shop',
     name: 'Suresh Verma (Masterji)',
     phone: '9823456781',
     address_landmark: 'Govt School Road, Quarter 4',
@@ -454,6 +456,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
   },
   {
     id: 'cust-003',
+    shop_id: 'current_shop',
     name: 'Pooja Tiwari',
     phone: '9911223344',
     address_landmark: 'Shanti Nagar, Gali No. 3',
@@ -467,6 +470,8 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 
 export const DEFAULT_SHOP_PROFILE: ShopProfile = {
   id: 'current_shop',
+  shop_id: 'current_shop',
+  invite_code: 'KRN-4829',
   shop_name: 'Shree Ganesh Kirana & General Store',
   owner_name: 'Ramesh Patel',
   phone: '9876543210',

@@ -45,11 +45,13 @@ export const AuthPage: React.FC = () => {
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<UserRole>('OWNER');
 
-  // Shop selection modes: 'existing' (dropdown of registered stores) or 'new' (enter new store)
-  const [shopMode, setShopMode] = useState<'existing' | 'new'>('new');
-  const [availableShops, setAvailableShops] = useState<RegisteredShop[]>([]);
-  const [selectedShopId, setSelectedShopId] = useState<string>('');
-  const [isLoadingShops, setIsLoadingShops] = useState(false);
+  // Store Invite Code & Tenant Isolation (REQ: Iteration 1)
+  const [inviteCode, setInviteCode] = useState('');
+  const [verifiedStore, setVerifiedStore] = useState<{ id: string; shop_name: string; owner_name: string } | null>(null);
+  const [inviteCodeError, setInviteCodeError] = useState<string | null>(null);
+  const [isValidatingInvite, setIsValidatingInvite] = useState(false);
+
+  const [selectedShopId, setSelectedShopId] = useState<string>('current_shop');
 
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -65,52 +67,41 @@ export const AuthPage: React.FC = () => {
     errorMsg?.toLowerCase().includes('awaiting approval') ||
     errorMsg?.includes('ACCESS_PENDING_APPROVAL');
 
-  useEffect(() => {
-    loadShops();
-  }, []);
+  const handleInviteCodeChange = async (rawCode: string) => {
+    const upper = rawCode.toUpperCase().trim();
+    setInviteCode(upper);
+    setInviteCodeError(null);
+    setVerifiedStore(null);
 
-  const loadShops = async () => {
-    setIsLoadingShops(true);
-    try {
-      const list = await authService.getAvailableShops();
-      setAvailableShops(list);
-      if (list.length > 0 && !shopName) {
-        setSelectedShopId(list[0].id);
-        if (role !== 'OWNER') {
-          setShopName(list[0].shop_name);
-          if (list[0].phone) setPhone(list[0].phone);
+    if (upper.length >= 6) {
+      setIsValidatingInvite(true);
+      try {
+        const res = await authService.validateStoreInviteCode(upper);
+        if (res.valid && res.shop) {
+          setVerifiedStore({
+            id: res.shop.id,
+            shop_name: res.shop.shop_name,
+            owner_name: res.shop.owner_name,
+          });
+          setShopName(res.shop.shop_name);
+          setSelectedShopId(res.shop.id);
+          setInviteCodeError(null);
+        } else {
+          setInviteCodeError(res.message || 'Store invite code not found.');
         }
+      } catch {
+        setInviteCodeError('Could not verify invite code.');
+      } finally {
+        setIsValidatingInvite(false);
       }
-    } catch (e) {
-      console.warn('Failed loading shops:', e);
-    } finally {
-      setIsLoadingShops(false);
     }
   };
 
   const handleRoleSelect = (selectedRole: UserRole) => {
     setRole(selectedRole);
     if (selectedRole === 'OWNER') {
-      // Owners can either create new or manage existing
-    } else {
-      // Staff members join an existing store
-      setShopMode('existing');
-      if (availableShops.length > 0) {
-        const found = availableShops.find((s) => s.id === selectedShopId) || availableShops[0];
-        setShopName(found.shop_name);
-        setSelectedShopId(found.id);
-      }
-    }
-  };
-
-  const handleSelectExistingShop = (id: string) => {
-    setSelectedShopId(id);
-    const found = availableShops.find((s) => s.id === id);
-    if (found) {
-      setShopName(found.shop_name);
-      if (found.phone && !phone) {
-        setPhone(found.phone);
-      }
+      setVerifiedStore(null);
+      setInviteCodeError(null);
     }
   };
 
@@ -162,20 +153,27 @@ export const AuthPage: React.FC = () => {
       return;
     }
 
-    if (!shopName.trim()) {
-      setErrorMsg('Please choose or enter a store name.');
+    const isJoining = role !== 'OWNER';
+
+    if (isJoining && !inviteCode.trim()) {
+      setErrorMsg('Please enter the 6-digit Store Invite Code provided by your store owner.');
+      return;
+    }
+
+    if (!isJoining && !shopName.trim()) {
+      setErrorMsg('Please enter your store name.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const isJoining = shopMode === 'existing' || role !== 'OWNER';
       const res = await signUp(email.trim(), password, {
-        shopName: shopName.trim() || 'My Kirana Store',
+        shopName: (isJoining && verifiedStore ? verifiedStore.shop_name : shopName).trim() || 'My Kirana Store',
         ownerName: ownerName.trim() || 'Store Member',
         phone: phone.trim() || '',
         role,
-        shopId: selectedShopId || 'current_shop',
+        shopId: verifiedStore?.id || selectedShopId || 'current_shop',
+        inviteCode: isJoining ? inviteCode.trim() : undefined,
         isJoiningExisting: isJoining,
       });
 
@@ -183,7 +181,7 @@ export const AuthPage: React.FC = () => {
         setTab('verify_pending');
       } else if (isJoining) {
         setSuccessMsg(
-          `Registration submitted! Your request to join "${shopName}" as ${role} has been submitted for store owner approval. Once approved, you can sign in with full permissions.`
+          `Registration submitted! Your request to join "${verifiedStore?.shop_name || shopName}" as ${role} has been submitted for store owner approval. Once approved, you can sign in with full permissions.`
         );
       } else {
         setSuccessMsg('Store account registered successfully! Entering POS...');
@@ -547,71 +545,12 @@ export const AuthPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Store Mode Selector: Join Existing Store vs Create New Store */}
-                  <div className="space-y-1.5 pt-1">
-                    <div className="flex items-center justify-between">
+                  {/* Multi-Tenant Store Setup: Owner registers Store Name; Staff registers with 6-Digit Store Invite Code */}
+                  {role === 'OWNER' ? (
+                    <div className="space-y-1.5 pt-1">
                       <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                        Select Store *
+                        Store Name *
                       </label>
-                      <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg text-[10px] font-bold">
-                        <button
-                          type="button"
-                          onClick={() => setShopMode('existing')}
-                          className={`px-2 py-0.5 rounded-md transition ${
-                            shopMode === 'existing'
-                              ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                              : 'text-slate-500'
-                          }`}
-                        >
-                          🏢 Existing Shop
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShopMode('new')}
-                          className={`px-2 py-0.5 rounded-md transition ${
-                            shopMode === 'new'
-                              ? 'bg-white dark:bg-slate-700 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                              : 'text-slate-500'
-                          }`}
-                        >
-                          ✨ New Shop
-                        </button>
-                      </div>
-                    </div>
-
-                    {shopMode === 'existing' ? (
-                      <div className="space-y-1.5">
-                        <div className="relative">
-                          <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
-                          <select
-                            value={selectedShopId}
-                            onChange={(e) => handleSelectExistingShop(e.target.value)}
-                            className="w-full pl-9 pr-8 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500 font-semibold appearance-none cursor-pointer"
-                          >
-                            {availableShops.length === 0 ? (
-                              <option value="">No registered shops found - Click New Shop</option>
-                            ) : (
-                              availableShops.map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  {s.shop_name} (Owner: {s.owner_name})
-                                </option>
-                              ))
-                            )}
-                          </select>
-                          <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
-                        </div>
-
-                        {/* Owner Permission & Approval Note */}
-                        {role !== 'OWNER' && (
-                          <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-[11px] text-blue-700 dark:text-blue-300 flex items-start gap-1.5">
-                            <ShieldCheck className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                            <span>
-                              <strong>Owner Permission:</strong> Access as {role} for this shop will be submitted to the store owner for one-click approval before full permissions activate.
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
                       <div className="relative">
                         <Store className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                         <input
@@ -619,12 +558,61 @@ export const AuthPage: React.FC = () => {
                           required
                           value={shopName}
                           onChange={(e) => setShopName(e.target.value)}
-                          placeholder="e.g. Laxi Vatsalaya store"
+                          placeholder="e.g. Laxi Vatsalaya Store"
                           className="w-full pl-9 pr-3 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
                         />
                       </div>
-                    )}
-                  </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        A unique 6-digit Store Invite Code will be automatically generated for your staff in Settings.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                          Store Invite Code *
+                        </label>
+                        <span className="text-[10px] text-slate-400">Ask Store Owner</span>
+                      </div>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                        <input
+                          type="text"
+                          required
+                          value={inviteCode}
+                          onChange={(e) => handleInviteCodeChange(e.target.value)}
+                          placeholder="e.g. KRN-4829"
+                          className="w-full pl-9 pr-8 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono font-bold tracking-wider uppercase outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                        {isValidatingInvite && (
+                          <RefreshCw className="w-3.5 h-3.5 text-blue-500 animate-spin absolute right-3 top-2.5" />
+                        )}
+                      </div>
+
+                      {verifiedStore && (
+                        <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-[11px] text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>
+                            <strong>Verified Store:</strong> {verifiedStore.shop_name} (Owner: {verifiedStore.owner_name})
+                          </span>
+                        </div>
+                      )}
+
+                      {inviteCodeError && (
+                        <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-[11px] text-rose-700 dark:text-rose-300 flex items-center gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                          <span>{inviteCodeError}</span>
+                        </div>
+                      )}
+
+                      <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-[11px] text-blue-700 dark:text-blue-300 flex items-start gap-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Private Multi-Tenant Access:</strong> Entering the store's private invite code connects you to that store's workspace without exposing any other stores.
+                        </span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Phone & Full Name */}
                   <div className="grid grid-cols-2 gap-2">
