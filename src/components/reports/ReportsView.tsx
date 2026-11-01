@@ -5,6 +5,14 @@ import { ReportsService, DateFilterRange } from '../../services/reportsService';
 import { GallaService } from '../../services/gallaService';
 import { ReceiptModal } from '../pos/ReceiptModal';
 import { SalesReturnModal } from '../pos/SalesReturnModal';
+import { CustomerPassbookDrawer } from '../khata/CustomerPassbookDrawer';
+import {
+  TimeWiseProfitTrendChart,
+  ProductMarginDistributionChart,
+  KhataAgingDistributionChart,
+  StockCapitalDistributionChart,
+  GallaAndTaxOverview,
+} from './ReportsDashboardCharts';
 import { formatINR } from '../../utils/math';
 import {
   BarChart3,
@@ -89,6 +97,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
   // Sales Return & Credit Note Modal State (Iteration 3)
   const [returnInvoice, setReturnInvoice] = useState<SalesInvoice | null>(null);
 
+  // Graphical Dashboard vs Tabular Audit Register Switcher
+  const [viewMode, setViewMode] = useState<'dashboard' | 'tabular'>('dashboard');
+
+  // Customer Passbook / Detailed Pending Bills Drawer State
+  const [passbookCustomer, setPassbookCustomer] = useState<Customer | null>(null);
+  const [isPassbookOpen, setIsPassbookOpen] = useState(false);
+  const [passbookInitialTab, setPassbookInitialTab] = useState<'ledger' | 'bills'>('bills');
+
   const defaultProfile: ShopProfile = shopProfile || {
     id: 'current_shop',
     shop_name: 'Smart Kirana & General Store',
@@ -126,38 +142,54 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
 
   useEffect(() => {
     loadAllReports();
-  }, [datePreset, activeTab]);
+  }, [datePreset, activeTab, viewMode]);
 
   const loadAllReports = async () => {
     setIsLoading(true);
     const range = getDateRange();
 
     try {
-      if (activeTab === 'pnl' || activeTab === 'products') {
-        const pnl = await ReportsService.getProfitAndLossData(range);
+      if (viewMode === 'dashboard') {
+        const [pnl, udh, invVal, gal, tx] = await Promise.all([
+          ReportsService.getProfitAndLossData(range),
+          ReportsService.getCustomerKhataAgingData(),
+          ReportsService.getStockValuationAndDeadStockData(),
+          ReportsService.getDailyGallaShiftAuditData(range),
+          ReportsService.getHsnTaxSummaryData(range),
+        ]);
         setPnlData(pnl);
         setProductsData(pnl.itemWise || []);
-      } else if (activeTab === 'udhari') {
-        const udh = await ReportsService.getCustomerKhataAgingData();
         setUdhariData(udh);
-      } else if (activeTab === 'inventory') {
-        const invVal = await ReportsService.getStockValuationAndDeadStockData();
         setInventoryData(invVal);
-      } else if (activeTab === 'reorder') {
-        const reord = await ReportsService.getSmartWholesalerReorderData();
-        setReorderData(reord);
-      } else if (activeTab === 'galla') {
-        const gal = await ReportsService.getDailyGallaShiftAuditData(range);
         setGallaData(gal);
-      } else if (activeTab === 'returns') {
-        const ret = await ReportsService.getSalesReturnAndStockAdjustmentData(range);
-        setReturnsData(ret);
-      } else if (activeTab === 'tax') {
-        const tx = await ReportsService.getHsnTaxSummaryData(range);
         setTaxData(tx);
-      } else if (activeTab === 'invoices') {
-        const invs = await ReportsService.getBillRegisterData(range);
-        setInvoicesData(invs);
+      } else {
+        if (activeTab === 'pnl' || activeTab === 'products') {
+          const pnl = await ReportsService.getProfitAndLossData(range);
+          setPnlData(pnl);
+          setProductsData(pnl.itemWise || []);
+        } else if (activeTab === 'udhari') {
+          const udh = await ReportsService.getCustomerKhataAgingData();
+          setUdhariData(udh);
+        } else if (activeTab === 'inventory') {
+          const invVal = await ReportsService.getStockValuationAndDeadStockData();
+          setInventoryData(invVal);
+        } else if (activeTab === 'reorder') {
+          const reord = await ReportsService.getSmartWholesalerReorderData();
+          setReorderData(reord);
+        } else if (activeTab === 'galla') {
+          const gal = await ReportsService.getDailyGallaShiftAuditData(range);
+          setGallaData(gal);
+        } else if (activeTab === 'returns') {
+          const ret = await ReportsService.getSalesReturnAndStockAdjustmentData(range);
+          setReturnsData(ret);
+        } else if (activeTab === 'tax') {
+          const tx = await ReportsService.getHsnTaxSummaryData(range);
+          setTaxData(tx);
+        } else if (activeTab === 'invoices') {
+          const invs = await ReportsService.getBillRegisterData(range);
+          setInvoicesData(invs);
+        }
       }
     } finally {
       setIsLoading(false);
@@ -334,6 +366,32 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
     window.open(`https://wa.me/91${customer.phone}?text=${text}`, '_blank');
   };
 
+  const handleOpenCustomerBills = async (customerId: string) => {
+    const cust = await db.customers.get(customerId);
+    if (cust) {
+      setPassbookCustomer(cust);
+      setPassbookInitialTab('bills');
+      setIsPassbookOpen(true);
+    }
+  };
+
+  const getDatePresetLabel = (): string => {
+    switch (datePreset) {
+      case 'TODAY':
+        return 'Today';
+      case 'YESTERDAY':
+        return 'Yesterday';
+      case 'THIS_WEEK':
+        return 'Past 7 Days';
+      case 'THIS_MONTH':
+        return 'This Month';
+      case 'ALL':
+        return 'All Time';
+      default:
+        return 'Selected Period';
+    }
+  };
+
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
       {/* Top Header & Master Vyapar Excel Download */}
@@ -384,10 +442,159 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         </div>
       </div>
 
-      {/* Date Range Presets & Report Tabs Navigation */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-slate-200 dark:border-slate-800 pb-2">
-        {/* All 8 Report Tabs */}
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0" data-testid="report-tabs">
+      {/* View Mode Toggle & Date Range Presets */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        {/* View Mode Switcher */}
+        <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-bold" data-testid="reports-view-mode-toggle">
+          <button
+            type="button"
+            data-testid="view-mode-dashboard"
+            onClick={() => setViewMode('dashboard')}
+            className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
+              viewMode === 'dashboard'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>📊 Graphical Dashboard</span>
+          </button>
+          <button
+            type="button"
+            data-testid="view-mode-tabular"
+            onClick={() => setViewMode('tabular')}
+            className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
+              viewMode === 'tabular'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>📋 Tabular Audit Register</span>
+          </button>
+        </div>
+
+        {/* Date Filter Segmented Switcher */}
+        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs" data-testid="date-preset-filter">
+          <Calendar className="w-3.5 h-3.5 text-slate-400 ml-1.5 mr-0.5" />
+          {[
+            { id: 'TODAY' as DatePreset, label: 'Today' },
+            { id: 'YESTERDAY' as DatePreset, label: 'Yesterday' },
+            { id: 'THIS_WEEK' as DatePreset, label: 'Week' },
+            { id: 'THIS_MONTH' as DatePreset, label: 'Month' },
+            { id: 'ALL' as DatePreset, label: 'All' },
+          ].map((btn) => (
+            <button
+              key={btn.id}
+              type="button"
+              onClick={() => setDatePreset(btn.id)}
+              className={`px-2.5 py-1 rounded-lg font-bold transition ${
+                datePreset === btn.id
+                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              {btn.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* =========================================================================
+          GRAPHICAL VISUAL DASHBOARD SUITE
+          ========================================================================= */}
+      {viewMode === 'dashboard' && (
+        <div className="space-y-5" data-testid="graphical-dashboard-container">
+          {/* Executive Overview KPI Tiles */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">
+                Sales Revenue
+              </span>
+              <p className="text-xl font-black text-slate-900 dark:text-white mt-1" data-testid="dash-sales-revenue">
+                {formatINR(pnlData?.salesRevenue || 0)}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">{pnlData?.invoiceCount || 0} Bills ({getDatePresetLabel()})</p>
+            </div>
+
+            <div className="bg-emerald-50/70 dark:bg-emerald-950/30 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400 uppercase">
+                True Net Profit
+              </span>
+              <p className="text-xl font-black text-emerald-700 dark:text-emerald-300 mt-1" data-testid="dash-net-profit">
+                {formatINR(pnlData?.trueNetProfit || 0)}
+              </p>
+              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
+                {pnlData?.salesRevenue > 0
+                  ? `${((pnlData.trueNetProfit / pnlData.salesRevenue) * 100).toFixed(1)}% margin`
+                  : '0.0% margin'}
+              </p>
+            </div>
+
+            <div className="bg-red-50/70 dark:bg-red-950/30 p-4 rounded-2xl border border-red-200 dark:border-red-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-red-800 dark:text-red-400 uppercase">
+                Market Khata Debt
+              </span>
+              <p className="text-xl font-black text-[#dc2626] dark:text-red-400 mt-1" data-testid="dash-market-debt">
+                {formatINR(udhariData?.totalOutstanding || 0)}
+              </p>
+              <p className="text-[10px] text-red-600 dark:text-red-400 mt-0.5">
+                {udhariData?.highRiskCount || 0} Overdue accounts (&gt;30d)
+              </p>
+            </div>
+
+            <div className="bg-purple-50/70 dark:bg-purple-950/30 p-4 rounded-2xl border border-purple-200 dark:border-purple-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-purple-800 dark:text-purple-400 uppercase">
+                Dead-Stock Exposure
+              </span>
+              <p className="text-xl font-black text-purple-900 dark:text-purple-300 mt-1" data-testid="dash-dead-stock">
+                {formatINR(inventoryData?.totalDeadStockValuation || 0)}
+              </p>
+              <p className="text-[10px] text-purple-600 dark:text-purple-400 mt-0.5">
+                {inventoryData?.deadStockCount || 0} items dormant 45+ days
+              </p>
+            </div>
+          </div>
+
+          {/* Time-Wise Sales & True Profit Trend Chart */}
+          <TimeWiseProfitTrendChart
+            billWiseInvoices={pnlData?.billWise}
+            dateRangeLabel={getDatePresetLabel()}
+          />
+
+          {/* Two-Column Visual Grid: Product Margins & Khata Aging Donut */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <ProductMarginDistributionChart items={productsData} />
+            <KhataAgingDistributionChart
+              totalOutstanding={udhariData?.totalOutstanding}
+              totalIn0to15={udhariData?.totalIn0to15}
+              totalIn16to30={udhariData?.totalIn16to30}
+              totalInAbove30={udhariData?.totalInAbove30}
+              highRiskCount={udhariData?.highRiskCount}
+            />
+          </div>
+
+          {/* Two-Column Visual Grid: Inventory Working Capital & Galla/Tax Flow */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <StockCapitalDistributionChart
+              items={inventoryData?.items}
+              totalLockedCapital={inventoryData?.totalLockedCapital}
+              totalDeadStockValuation={inventoryData?.totalDeadStockValuation}
+              deadStockCount={inventoryData?.deadStockCount}
+            />
+            <GallaAndTaxOverview
+              totalExpectedCash={gallaData?.totalExpectedCash}
+              totalActualCash={gallaData?.totalActualCash}
+              totalDiscrepancy={gallaData?.totalDiscrepancy}
+              taxBreakdown={taxData?.breakdown}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Tab Navigation for Tabular Audit Register */}
+      {viewMode === 'tabular' && (
+        <div className="flex items-center gap-1.5 overflow-x-auto w-full pb-1 border-b border-slate-200 dark:border-slate-800" data-testid="report-tabs">
           {[
             { id: 'pnl' as ReportTab, label: '1. P&L & Margins', icon: TrendingUp },
             { id: 'products' as ReportTab, label: '2. Product Performance', icon: ShoppingBag },
@@ -419,38 +626,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
             );
           })}
         </div>
-
-        {/* Date Filter Segmented Switcher */}
-        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs" data-testid="date-preset-filter">
-          <Calendar className="w-3.5 h-3.5 text-slate-400 ml-1.5 mr-0.5" />
-          {[
-            { id: 'TODAY' as DatePreset, label: 'Today' },
-            { id: 'YESTERDAY' as DatePreset, label: 'Yesterday' },
-            { id: 'THIS_WEEK' as DatePreset, label: 'Week' },
-            { id: 'THIS_MONTH' as DatePreset, label: 'Month' },
-            { id: 'ALL' as DatePreset, label: 'All' },
-          ].map((btn) => (
-            <button
-              key={btn.id}
-              type="button"
-              onClick={() => setDatePreset(btn.id)}
-              className={`px-2.5 py-1 rounded-lg font-bold transition ${
-                datePreset === btn.id
-                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-              }`}
-            >
-              {btn.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      )}
 
       {/* =========================================================================
           TAB 1: PROFIT & LOSS STATEMENT (REQ-14.1 & REQ-21)
           ========================================================================= */}
-      {activeTab === 'pnl' && pnlData && (
+      {viewMode === 'tabular' && activeTab === 'pnl' && pnlData && (
         <div className="space-y-4" data-testid="pnl-container">
+          {/* Time-Wise Sales & True Profit Trend Chart */}
+          <TimeWiseProfitTrendChart
+            billWiseInvoices={pnlData?.billWise}
+            dateRangeLabel={getDatePresetLabel()}
+          />
+
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
               <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Sales Revenue</span>
@@ -536,8 +724,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       {/* =========================================================================
           TAB 2: PRODUCT-WISE MARGIN REPORT (REQ-14.2)
           ========================================================================= */}
-      {activeTab === 'products' && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden" data-testid="products-report-container">
+      {viewMode === 'tabular' && activeTab === 'products' && (
+        <div className="space-y-4" data-testid="products-report-container">
+          <ProductMarginDistributionChart items={productsData} />
+
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase font-semibold">
@@ -589,13 +780,22 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
             </table>
           </div>
         </div>
+      </div>
       )}
 
       {/* =========================================================================
           TAB 3: CUSTOMER KHATA AGING & RECOVERY (0-15d, 16-30d, >30d) (REQ-14.3)
           ========================================================================= */}
-      {activeTab === 'udhari' && udhariData && (
+      {viewMode === 'tabular' && activeTab === 'udhari' && udhariData && (
         <div className="space-y-4" data-testid="udhari-report-container">
+          {/* Khata Credit Aging Donut Chart */}
+          <KhataAgingDistributionChart
+            totalOutstanding={udhariData?.totalOutstanding}
+            totalIn0to15={udhariData?.totalIn0to15}
+            totalIn16to30={udhariData?.totalIn16to30}
+            totalInAbove30={udhariData?.totalInAbove30}
+            highRiskCount={udhariData?.highRiskCount}
+          />
           {/* Risk Summary Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
@@ -672,14 +872,26 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
                           </span>
                         </td>
                         <td className="p-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => sendWhatsAppReminder(c)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold transition shadow-2xs"
-                          >
-                            <Send className="w-3 h-3" />
-                            <span>Remind</span>
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              data-testid={`view-bills-btn-${c.id}`}
+                              onClick={() => handleOpenCustomerBills(c.id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 rounded-lg text-[10px] font-bold transition border border-amber-200 dark:border-amber-800 shadow-2xs"
+                              title="View Customer's Detailed Unpaid Bills & Line Items"
+                            >
+                              <span>🧾 View Bills</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => sendWhatsAppReminder(c)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold transition shadow-2xs"
+                            >
+                              <Send className="w-3 h-3" />
+                              <span>Remind</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -694,8 +906,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       {/* =========================================================================
           TAB 4: STOCK VALUATION & DEAD-STOCK (45+ DAYS) (REQ-14.5)
           ========================================================================= */}
-      {activeTab === 'inventory' && inventoryData && (
+      {viewMode === 'tabular' && activeTab === 'inventory' && inventoryData && (
         <div className="space-y-4" data-testid="inventory-report-container">
+          {/* Stock Capital & Dead Stock Allocation Chart */}
+          <StockCapitalDistributionChart
+            items={inventoryData?.items}
+            totalLockedCapital={inventoryData?.totalLockedCapital}
+            totalDeadStockValuation={inventoryData?.totalDeadStockValuation}
+            deadStockCount={inventoryData?.deadStockCount}
+          />
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
               <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Locked Capital</span>
@@ -787,7 +1006,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       {/* =========================================================================
           TAB 5: SMART WHOLESALER REORDER SHEET (14-Day Velocity)
           ========================================================================= */}
-      {activeTab === 'reorder' && reorderData && (
+      {viewMode === 'tabular' && activeTab === 'reorder' && reorderData && (
         <div className="space-y-4" data-testid="reorder-report-container">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
             <div className="bg-amber-50/70 dark:bg-amber-950/30 p-4 rounded-2xl border border-amber-200 dark:border-amber-800 shadow-2xs">
@@ -864,8 +1083,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       {/* =========================================================================
           TAB 6: DAILY GALLA SHIFT & CASH RECONCILIATION
           ========================================================================= */}
-      {activeTab === 'galla' && gallaData && (
+      {viewMode === 'tabular' && activeTab === 'galla' && gallaData && (
         <div className="space-y-4" data-testid="galla-report-container">
+          {/* Galla Drawer Cash Overview */}
+          <GallaAndTaxOverview
+            totalExpectedCash={gallaData?.totalExpectedCash}
+            totalActualCash={gallaData?.totalActualCash}
+            totalDiscrepancy={gallaData?.totalDiscrepancy}
+          />
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
               <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Cash Sales In</span>
@@ -949,7 +1174,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       {/* =========================================================================
           TAB 7: SALES RETURN & STOCK ADJUSTMENT AUDIT LOG
           ========================================================================= */}
-      {activeTab === 'returns' && returnsData && (
+      {viewMode === 'tabular' && activeTab === 'returns' && returnsData && (
         <div className="space-y-4" data-testid="returns-report-container">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
             <div className="bg-red-50/70 dark:bg-red-950/30 p-4 rounded-2xl border border-red-200 dark:border-red-800 shadow-2xs">
@@ -1045,8 +1270,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       {/* =========================================================================
           TAB 8: HSN & GST TAX SUMMARY SHEET
           ========================================================================= */}
-      {activeTab === 'tax' && taxData && (
+      {viewMode === 'tabular' && activeTab === 'tax' && taxData && (
         <div className="space-y-4" data-testid="tax-report-container">
+          {/* GST Tax Slabs Breakdown Chart */}
+          <GallaAndTaxOverview taxBreakdown={taxData?.breakdown} />
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
             <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
               <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">Taxable Sales</span>
@@ -1120,7 +1347,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       {/* =========================================================================
           TAB 9: DAILY BILL REGISTER & VOID / RETURN ACTION (REQ-14.4 & REQ-34 / AT-09)
           ========================================================================= */}
-      {activeTab === 'invoices' && (
+      {viewMode === 'tabular' && activeTab === 'invoices' && (
         <div className="space-y-3" data-testid="invoices-report-container">
           {/* Bulk Invoices Action Bar */}
           {selectedInvoiceIds.size > 0 && (
@@ -1306,6 +1533,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
           onSuccess={handleReturnCompleted}
         />
       )}
+
+      {/* Customer Detailed Pending Bills & Passbook Drawer */}
+      <CustomerPassbookDrawer
+        isOpen={isPassbookOpen}
+        onClose={() => setIsPassbookOpen(false)}
+        customer={passbookCustomer}
+        shopProfile={defaultProfile}
+        initialTab={passbookInitialTab}
+        onDataChanged={() => {
+          loadAllReports();
+          if (onDataChanged) onDataChanged();
+        }}
+      />
     </div>
   );
 };

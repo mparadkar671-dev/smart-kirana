@@ -39,6 +39,7 @@ export const KhataView: React.FC<KhataViewProps> = ({
   // Selected customer for passbook drawer
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [isPassbookOpen, setIsPassbookOpen] = useState(false);
+  const [drawerInitialTab, setDrawerInitialTab] = useState<'ledger' | 'bills'>('ledger');
 
   // Quick Jama Modal from table
   const [jamaCustomer, setJamaCustomer] = useState<Customer | null>(null);
@@ -121,6 +122,13 @@ export const KhataView: React.FC<KhataViewProps> = ({
 
   const handleOpenPassbook = (c: Customer) => {
     setSelectedCustomer(c);
+    setDrawerInitialTab('ledger');
+    setIsPassbookOpen(true);
+  };
+
+  const handleOpenBills = (c: Customer) => {
+    setSelectedCustomer(c);
+    setDrawerInitialTab('bills');
     setIsPassbookOpen(true);
   };
 
@@ -481,6 +489,17 @@ export const KhataView: React.FC<KhataViewProps> = ({
                               Passbook
                             </button>
 
+                            {/* Detailed Pending Bills Trigger */}
+                            <button
+                              type="button"
+                              data-testid={`bills-btn-${cust.id}`}
+                              onClick={() => handleOpenBills(cust)}
+                              title="View Customer's Detailed Unpaid Bills & Line Items"
+                              className="px-2 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 rounded-lg text-xs font-semibold transition flex items-center gap-1"
+                            >
+                              🧾 Bills
+                            </button>
+
                             {/* Direct WhatsApp Nudge */}
                             <button
                               type="button"
@@ -533,6 +552,7 @@ export const KhataView: React.FC<KhataViewProps> = ({
         onClose={() => setIsPassbookOpen(false)}
         customer={selectedCustomer}
         shopProfile={shopProfile}
+        initialTab={drawerInitialTab}
         onDataChanged={() => {
           loadTodayJama();
           if (onRefresh) onRefresh();

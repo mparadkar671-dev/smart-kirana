@@ -5,6 +5,8 @@ import {
   DailyGallaSession,
   ShopProfile,
   KhataPaymentChannel,
+  SalesInvoice,
+  SaleItem,
 } from '../types';
 import { roundCurrency, formatINR } from '../utils/math';
 import jsPDF from 'jspdf';
@@ -323,6 +325,123 @@ export class KhataService {
         await db.khata_transactions.where({ customer_id: id }).delete();
       }
     });
+  }
+
+  /**
+   * Fetches customer-wise pending / credit bills with itemized details
+   */
+  static async getCustomerPendingBills(customerId: string): Promise<{
+    invoice: SalesInvoice;
+    items: SaleItem[];
+    udhariAmount: number;
+  }[]> {
+    const invoices = await db.sales_invoices
+      .where({ customer_id: customerId })
+      .toArray();
+
+    // Active bills where Udhari was added and bill is not voided
+    const creditBills = invoices
+      .filter((inv) => inv.status !== 'VOIDED' && inv.udhari_added > 0)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    const result: {
+      invoice: SalesInvoice;
+      items: SaleItem[];
+      udhariAmount: number;
+    }[] = [];
+
+    for (const inv of creditBills) {
+      const items = await db.sale_items.where({ invoice_id: inv.id }).toArray();
+      result.push({
+        invoice: inv,
+        items,
+        udhariAmount: inv.udhari_added,
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Generates WhatsApp message for a single detailed pending bill with items
+   */
+  static generateCustomerBillWhatsAppLink(params: {
+    customer: Customer;
+    bill: { invoice: SalesInvoice; items: SaleItem[]; udhariAmount: number };
+    shopProfile: ShopProfile;
+  }): string {
+    const { customer, bill, shopProfile } = params;
+    const cleanPhone = this.cleanIndianPhone(customer.phone);
+    const balanceStr = customer.current_udhari_balance.toFixed(2);
+    const shopName = shopProfile.shop_name;
+    const upiLink = `upi://pay?pa=${encodeURIComponent(shopProfile.upi_vpa)}&pn=${encodeURIComponent(
+      shopName
+    )}&am=${bill.udhariAmount.toFixed(2)}&cu=INR`;
+
+    const billDate = new Date(bill.invoice.created_at).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+
+    let msg = `🧾 *Bill Details: ${bill.invoice.invoice_number}*\n`;
+    msg += `🏬 *${shopName}*\n\n`;
+    msg += `Namaste *${customer.name}* ji,\n`;
+    msg += `Here is your itemized bill details from *${billDate}*:\n\n`;
+    msg += `📦 *Items Purchased:*\n`;
+
+    bill.items.forEach((item, idx) => {
+      msg += `${idx + 1}. ${item.product_name_snapshot} - ${item.qty} x ₹${item.unit_selling_price.toFixed(2)} = ₹${item.line_total.toFixed(2)}\n`;
+    });
+
+    msg += `\n💵 *Bill Total:* ₹${bill.invoice.grand_total.toFixed(2)}\n`;
+    if (bill.invoice.amount_paid_now > 0) {
+      msg += `✅ *Paid at Counter:* ₹${bill.invoice.amount_paid_now.toFixed(2)}\n`;
+    }
+    msg += `⏳ *Added to Khata:* ₹${bill.udhariAmount.toFixed(2)}\n`;
+    msg += `\n💰 *Total Outstanding Balance:* ₹${balanceStr}\n\n`;
+    msg += `📲 *Pay this bill instantly via UPI:*\n${upiLink}\n\n`;
+    msg += `Thank you for shopping with us! 🙏`;
+
+    return `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(msg)}`;
+  }
+
+  /**
+   * Generates WhatsApp message summarizing all pending bills with dates and amounts
+   */
+  static generateAllPendingBillsWhatsAppLink(params: {
+    customer: Customer;
+    bills: { invoice: SalesInvoice; items: SaleItem[]; udhariAmount: number }[];
+    shopProfile: ShopProfile;
+  }): string {
+    const { customer, bills, shopProfile } = params;
+    const cleanPhone = this.cleanIndianPhone(customer.phone);
+    const balanceStr = customer.current_udhari_balance.toFixed(2);
+    const shopName = shopProfile.shop_name;
+    const upiLink = `upi://pay?pa=${encodeURIComponent(shopProfile.upi_vpa)}&pn=${encodeURIComponent(
+      shopName
+    )}&am=${balanceStr}&cu=INR`;
+
+    let msg = `📋 *Detailed Khata Bills Statement*\n`;
+    msg += `🏬 *${shopName}*\n\n`;
+    msg += `Namaste *${customer.name}* ji,\n`;
+    msg += `Here is the breakdown of your *${bills.length} pending credit bill(s)*:\n\n`;
+
+    bills.forEach((b, idx) => {
+      const dt = new Date(b.invoice.created_at).toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+      });
+      msg += `${idx + 1}. *${b.invoice.invoice_number}* (${dt})\n`;
+      msg += `   Items: ${b.items.map((i) => `${i.product_name_snapshot} (${i.qty})`).join(', ')}\n`;
+      msg += `   Udhari: ₹${b.udhariAmount.toFixed(2)}\n\n`;
+    });
+
+    msg += `💰 *Total Pending Khata Balance: ₹${balanceStr}*\n\n`;
+    msg += `📲 *Pay total balance via 1-tap UPI:*\n${upiLink}\n\n`;
+    msg += `Thank you for your continued patronage! 🙏`;
+
+    return `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(msg)}`;
   }
 }
 
