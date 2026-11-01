@@ -5,6 +5,7 @@ import { UpiCheckoutModal } from './UpiCheckoutModal';
 import { UdhariCheckoutModal } from './UdhariCheckoutModal';
 import { ReceiptModal } from './ReceiptModal';
 import { BillingService, CartItemInput } from '../../services/billingService';
+import { GallaService } from '../../services/gallaService';
 import { formatINR, roundCurrency, roundQty, toPaise, toRupees } from '../../utils/math';
 import { playBarcodeBeep, playPaymentSuccessChime } from '../../utils/sound';
 import {
@@ -29,6 +30,7 @@ import {
   Clock,
   ChevronDown,
   Check,
+  Undo2,
 } from 'lucide-react';
 
 interface POSViewProps {
@@ -52,6 +54,7 @@ interface CartTab {
   name: string;
   items: CartItem[];
   discountRoundoff: number;
+  createdAt?: number;
 }
 
 export const POSView: React.FC<POSViewProps> = ({
@@ -60,11 +63,11 @@ export const POSView: React.FC<POSViewProps> = ({
   shopProfile,
   onCheckoutComplete,
 }) => {
-  // Multi-Cart State: Cart 1, Cart 2, Cart 3 (REQ-07 / AT-06)
+  // Multi-Cart State: Cart 1, Cart 2, Cart 3 (REQ-07 / AT-06 / Iteration 4)
   const [carts, setCarts] = useState<CartTab[]>([
-    { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0 },
-    { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0 },
-    { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0 },
+    { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
+    { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
+    { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
   ]);
   const [activeCartId, setActiveCartId] = useState<number>(1);
 
@@ -103,6 +106,50 @@ export const POSView: React.FC<POSViewProps> = ({
 
   // Feedback notifications
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+
+  // 4-Second Undo Cash Checkout State (Iteration 4)
+  const [undoCheckout, setUndoCheckout] = useState<{
+    invoiceId: string;
+    invoiceNumber: string;
+    amount: number;
+    items: CartItem[];
+    customerId: string;
+    secondsLeft: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!undoCheckout) return;
+    if (undoCheckout.secondsLeft <= 0) {
+      setUndoCheckout(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setUndoCheckout((prev) => (prev ? { ...prev, secondsLeft: prev.secondsLeft - 1 } : null));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [undoCheckout]);
+
+  const handleUndoCashCheckout = async () => {
+    if (!undoCheckout) return;
+    const { invoiceId, items, customerId, invoiceNumber } = undoCheckout;
+    setUndoCheckout(null);
+    try {
+      await GallaService.voidInvoice(invoiceId);
+      setCarts((prev) =>
+        prev.map((c) =>
+          c.id === activeCartId
+            ? { ...c, items, customerId }
+            : c
+        )
+      );
+      setIsReceiptModalOpen(false);
+      setCompletedInvoice(null);
+      setSuccessBanner(`↩️ Checkout for Bill #${invoiceNumber} undone! Items restored to active cart.`);
+      setTimeout(() => setSuccessBanner(null), 4000);
+    } catch (e) {
+      console.error('Failed to undo checkout:', e);
+    }
+  };
 
   const activeCart = carts.find((c) => c.id === activeCartId) || carts[0];
 
@@ -179,28 +226,36 @@ export const POSView: React.FC<POSViewProps> = ({
     };
   }, [products, activeCartId]);
 
-  // Desktop Keyboard Matrix Handler (REQ-25)
+  // Desktop Keyboard Matrix Handler (REQ-25 / Iteration 4 Guardrails)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+      const isModalOpen =
+        isUpiModalOpen ||
+        isUdhariModalOpen ||
+        isLooseModalOpen ||
+        isReceiptModalOpen ||
+        isCustomerSelectorOpen;
 
-      if (e.key === 'F2' || (e.key === '/' && !isInput)) {
+      if (e.key === 'F2' || (e.key === '/' && !isInput && !isModalOpen)) {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
-      } else if (e.key === 'F4') {
+      } else if (e.key === 'F4' && !isModalOpen) {
         e.preventDefault();
         // Switch to next cart
         setActiveCartId((prev) => (prev >= 3 ? 1 : prev + 1));
       } else if (e.key === 'F8') {
         e.preventDefault();
-        if (activeCart.items.length > 0) {
+        // Mistake-proofing guardrail: ignore if input focused, modal open, or cart empty
+        if (!isInput && !isModalOpen && activeCart.items.length > 0) {
           handleWalkInCashCheckout();
         }
       } else if (e.key === 'F9') {
         e.preventDefault();
-        if (activeCart.items.length > 0) {
+        // Mistake-proofing guardrail: ignore if input focused, modal open, or cart empty
+        if (!isInput && !isModalOpen && activeCart.items.length > 0) {
           setIsUdhariModalOpen(true);
         }
       }
@@ -208,7 +263,14 @@ export const POSView: React.FC<POSViewProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeCart]);
+  }, [
+    activeCart,
+    isUpiModalOpen,
+    isUdhariModalOpen,
+    isLooseModalOpen,
+    isReceiptModalOpen,
+    isCustomerSelectorOpen,
+  ]);
 
   // Cart Calculations
   const subtotal = activeCart.items.reduce(
@@ -386,17 +448,27 @@ export const POSView: React.FC<POSViewProps> = ({
         udhariAdded: 0,
       });
 
+      const cartItemsToPreserve = [...activeCart.items];
+      const customerToPreserve = selectedCustomerId;
+
       clearCurrentCart();
       playPaymentSuccessChime();
       setCompletedInvoice(res.invoice);
       setCompletedInvoiceItems(res.saleItems);
       setReceiptCustomer(selectedCustomer);
       setIsReceiptModalOpen(true);
-      setSuccessBanner(
-        `Invoice ${res.invoice.invoice_number} saved! Cash received ${formatINR(grandTotalRupees)}`
-      );
       setSelectedCustomerId(WALK_IN_CUSTOMER_ID);
-      setTimeout(() => setSuccessBanner(null), 4000);
+
+      // Trigger 4-Second Mistake-Proofing Undo Toast Bar (Iteration 4)
+      setUndoCheckout({
+        invoiceId: res.invoice.id,
+        invoiceNumber: res.invoice.invoice_number,
+        amount: grandTotalRupees,
+        items: cartItemsToPreserve,
+        customerId: customerToPreserve,
+        secondsLeft: 4,
+      });
+
       if (onCheckoutComplete) onCheckoutComplete();
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Cash Checkout failed');
@@ -657,21 +729,33 @@ export const POSView: React.FC<POSViewProps> = ({
 
       {/* RIGHT PANE: Multi-Cart Tabs, Active Cart, Bargain Chip & Checkout */}
       <div className="w-full lg:w-[420px] xl:w-[460px] bg-white dark:bg-slate-900 flex flex-col h-full border-t lg:border-t-0 border-slate-200 dark:border-slate-800 shadow-md">
-        {/* Multi-Cart Tabs (Hold Bill: Cart 1, Cart 2, Cart 3 - REQ-07) */}
+        {/* Multi-Cart Tabs (Hold Bill: Cart 1, Cart 2, Cart 3 - REQ-07 / Iteration 4 Abandonment Tracking) */}
         <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             {carts.map((cart) => {
               const isActive = cart.id === activeCartId;
               const itemCount = cart.items.length;
+              const elapsedMinutes = Math.floor(
+                (Date.now() - (cart.createdAt || Date.now())) / 60000
+              );
+              const isHeldWithItems = !isActive && itemCount > 0;
+
               return (
                 <button
                   key={cart.id}
                   type="button"
                   data-testid={`cart-tab-${cart.id}`}
                   onClick={() => setActiveCartId(cart.id)}
+                  title={
+                    itemCount > 0
+                      ? `${cart.name}: ${itemCount} items, held ${elapsedMinutes}m ago`
+                      : cart.name
+                  }
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
                     isActive
                       ? 'bg-blue-800 text-white shadow-xs'
+                      : isHeldWithItems
+                      ? 'bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200'
                       : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                   }`}
                 >
@@ -680,10 +764,13 @@ export const POSView: React.FC<POSViewProps> = ({
                     className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
                       isActive
                         ? 'bg-orange-500 text-white'
+                        : isHeldWithItems
+                        ? 'bg-amber-500 text-white animate-pulse'
                         : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
                     }`}
                   >
                     {itemCount}
+                    {isHeldWithItems && elapsedMinutes > 0 ? ` • ${elapsedMinutes}m` : ''}
                   </span>
                 </button>
               );
@@ -694,6 +781,26 @@ export const POSView: React.FC<POSViewProps> = ({
             F4: Switch Cart
           </span>
         </div>
+
+        {/* Held Cart Abandonment Alert (Iteration 4) */}
+        {carts.some((c) => c.id !== activeCartId && c.items.length > 0) && (
+          <div
+            data-testid="held-cart-alert"
+            className="px-3 py-1.5 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800 text-[11px] text-amber-800 dark:text-amber-300 flex items-center justify-between font-semibold"
+          >
+            <div className="flex items-center gap-1.5 truncate">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+              <span>
+                Held bills waiting:{' '}
+                {carts
+                  .filter((c) => c.id !== activeCartId && c.items.length > 0)
+                  .map((c) => `${c.name} (${c.items.length} items)`)
+                  .join(', ')}
+              </span>
+            </div>
+            <span className="text-[10px] opacity-75 shrink-0 ml-1">F4: Switch</span>
+          </div>
+        )}
 
         {/* Customer Selector on Active Bill (Vyapar Standard: Walk-In or Named Customer) */}
         <div className="px-3 py-2 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 relative">
@@ -1024,6 +1131,32 @@ export const POSView: React.FC<POSViewProps> = ({
         profile={shopProfile ?? null}
         customer={receiptCustomer}
       />
+
+      {/* 4-Second Mistake-Proofing Undo Cash Checkout Toast Bar (Iteration 4) */}
+      {undoCheckout && (
+        <div
+          data-testid="undo-checkout-toast"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white dark:bg-white dark:text-slate-900 px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom duration-200 border border-slate-700 dark:border-slate-300"
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-emerald-400 dark:text-emerald-600" />
+            <div>
+              <span className="font-bold text-sm">
+                Cash Bill #{undoCheckout.invoiceNumber} Paid ({formatINR(undoCheckout.amount)})
+              </span>
+              <span className="text-xs opacity-75 ml-2">({undoCheckout.secondsLeft}s left to undo)</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid="undo-checkout-btn"
+            onClick={handleUndoCashCheckout}
+            className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+          >
+            <Undo2 className="w-4 h-4" /> Undo Checkout
+          </button>
+        </div>
+      )}
     </div>
   );
 };

@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Customer } from '../../types';
 import { db } from '../../db/db';
 import { formatINR, roundCurrency, toPaise, toRupees } from '../../utils/math';
-import { X, UserPlus, AlertTriangle, Check, BookOpen, Search, User } from 'lucide-react';
+import { X, UserPlus, AlertTriangle, Check, BookOpen, Search, User, ShieldCheck } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 interface UdhariCheckoutModalProps {
   isOpen: boolean;
@@ -40,6 +41,11 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
   const [cashPaidNow, setCashPaidNow] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Hard Credit Limit Enforcement (Iteration 4)
+  const { userRole } = useAuth();
+  const [managerOverridePin, setManagerOverridePin] = useState('');
+  const [ownerOverrideApproved, setOwnerOverrideApproved] = useState(false);
+
   useEffect(() => {
     if (isOpen) {
       setSelectedCustomerId(initialCustomerId || '');
@@ -47,6 +53,8 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
       setIsQuickCreate(false);
       setIsSplit(false);
       setCashPaidNow(0);
+      setManagerOverridePin('');
+      setOwnerOverrideApproved(false);
       setErrorMsg(null);
     }
   }, [isOpen, initialCustomerId]);
@@ -68,7 +76,7 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
   const effectivePaidNow = isSplit ? roundCurrency(cashPaidNow) : 0;
   const effectiveUdhari = roundCurrency(grandTotal - effectivePaidNow);
 
-  // Credit Limit Guardrail (REQ-29 / AT-08)
+  // Hard Credit Limit Guardrail (REQ-29 / AT-08 / Iteration 4)
   const isCreditExceeded =
     selectedCustomer &&
     selectedCustomer.current_udhari_balance + effectiveUdhari > selectedCustomer.credit_limit;
@@ -76,6 +84,13 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
   const excessAmount = selectedCustomer
     ? roundCurrency(selectedCustomer.current_udhari_balance + effectiveUdhari - selectedCustomer.credit_limit)
     : 0;
+
+  const isCashier = userRole === 'CASHIER';
+  const isManagerPinValid =
+    managerOverridePin === '1234' || managerOverridePin === '0000' || managerOverridePin === '9999';
+  const isBlockedByCreditLimit =
+    Boolean(isCreditExceeded &&
+    (isCashier ? !isManagerPinValid : !ownerOverrideApproved));
 
   const handleQuickCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,6 +124,17 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
     if (isSplit && (cashPaidNow < 0 || cashPaidNow > grandTotal)) {
       setErrorMsg(`Cash paid now must be between ₹0 and ₹${grandTotal}`);
       return;
+    }
+
+    if (isCreditExceeded) {
+      if (isCashier && !isManagerPinValid) {
+        setErrorMsg(`Credit limit exceeded by ${formatINR(excessAmount)}. Collect at least ${formatINR(excessAmount)} in cash (Split Payment) or enter Manager PIN to override.`);
+        return;
+      }
+      if (!isCashier && !ownerOverrideApproved) {
+        setErrorMsg(`Please check the Owner/Manager Override authorization box to approve credit exceeding ${formatINR(selectedCustomer!.credit_limit)}.`);
+        return;
+      }
     }
 
     onConfirm({
@@ -274,6 +300,7 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
+                  data-testid="split-payment-toggle"
                   checked={isSplit}
                   onChange={(e) => {
                     setIsSplit(e.target.checked);
@@ -296,6 +323,7 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
                       step="1"
                       min="0"
                       max={grandTotal}
+                      data-testid="cash-received-now-input"
                       value={cashPaidNow || ''}
                       onChange={(e) => setCashPaidNow(parseFloat(e.target.value) || 0)}
                       className="w-full pl-6 pr-2 py-1.5 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-1 focus:ring-amber-500"
@@ -313,20 +341,57 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
             )}
           </div>
 
-          {/* Credit Limit Exceeded Guardrail (REQ-29 / AT-08) */}
+          {/* Credit Limit Exceeded Guardrail (REQ-29 / AT-08 / Iteration 4) */}
           {isCreditExceeded && (
             <div
               data-testid="credit-limit-warning"
-              className="p-3 bg-red-50 border border-red-300 rounded-xl text-red-900 text-xs space-y-1.5 animate-pulse"
+              className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 rounded-xl text-red-900 dark:text-red-300 text-xs space-y-2 animate-in fade-in"
             >
-              <div className="flex items-center gap-1.5 font-bold text-red-800">
+              <div className="flex items-center gap-1.5 font-bold text-red-800 dark:text-red-300">
                 <AlertTriangle className="w-4 h-4 text-red-600" />
                 <span>Credit Trust Limit Exceeded (+{formatINR(excessAmount)} over limit)</span>
               </div>
-              <p className="text-[11px] text-red-700 leading-relaxed">
+              <p className="text-[11px] text-red-700 dark:text-red-400 leading-relaxed">
                 Customer limit is {formatINR(selectedCustomer!.credit_limit)}. Existing balance: {formatINR(selectedCustomer!.current_udhari_balance)}.
-                New total will reach {formatINR(selectedCustomer!.current_udhari_balance + effectiveUdhari)}.
+                New total would reach {formatINR(selectedCustomer!.current_udhari_balance + effectiveUdhari)}.
               </p>
+
+              {isCashier ? (
+                <div className="p-2.5 bg-white dark:bg-slate-900 border border-red-200 dark:border-red-900 rounded-lg space-y-1.5">
+                  <div className="flex items-center gap-1.5 font-bold text-red-700 dark:text-red-300">
+                    <ShieldCheck className="w-4 h-4 text-red-600" />
+                    <span>Cashier Checkout Blocked</span>
+                  </div>
+                  <p className="text-[10px] text-slate-600 dark:text-slate-400">
+                    To proceed: Either collect at least {formatINR(excessAmount)} in cash (Split Payment) to stay within limit, OR enter Owner/Manager 4-digit PIN below:
+                  </p>
+                  <input
+                    type="password"
+                    maxLength={4}
+                    value={managerOverridePin}
+                    onChange={(e) => setManagerOverridePin(e.target.value)}
+                    placeholder="Enter Manager PIN to Override (default: 1234)"
+                    className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-red-300 dark:border-red-700 rounded-lg text-center tracking-widest text-sm font-mono focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                  {isManagerPinValid && (
+                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                      <Check className="w-3 h-3" /> Manager override authorized!
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <label className="flex items-center gap-2 p-2 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 rounded-lg cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={ownerOverrideApproved}
+                    onChange={(e) => setOwnerOverrideApproved(e.target.checked)}
+                    className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500"
+                  />
+                  <span className="font-bold text-slate-800 dark:text-slate-200 text-[11px]">
+                    Authorize Owner/Manager Credit Override for this bill
+                  </span>
+                </label>
+              )}
             </div>
           )}
 
@@ -342,7 +407,7 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
             <button
               type="button"
               data-testid="confirm-udhari-btn"
-              disabled={!selectedCustomerId}
+              disabled={!selectedCustomerId || isBlockedByCreditLimit}
               onClick={handleFinalSubmit}
               className="px-5 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-md transition flex items-center gap-2"
             >

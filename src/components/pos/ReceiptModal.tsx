@@ -66,8 +66,22 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         qrCanvasElement: qrEl,
       });
     } catch (err) {
-      console.error('Failed to generate receipt canvas:', err);
-      return null;
+      console.warn('Fallback: generating receipt canvas without QR element:', err);
+      try {
+        return generateReceiptCanvas({
+          invoice,
+          items: safeItems,
+          profile,
+          customer,
+          previousBalance,
+          currentKhataBalance,
+          udhariAddedThisBill,
+          qrCanvasElement: null,
+        });
+      } catch (e) {
+        console.error('Failed to generate receipt canvas:', e);
+        return null;
+      }
     }
   };
 
@@ -194,13 +208,14 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       console.warn('Native share failed, falling back to WhatsApp Web URL:', shareErr);
     }
 
-    // Desktop WhatsApp Web fallback: Copy image to clipboard, download image, and open WhatsApp chat
+    // Desktop WhatsApp Web combo: Copy 560px thermal PNG to clipboard and open WhatsApp Web
     handleCopyImage();
     const encoded = encodeURIComponent(msg);
     const waUrl = phoneWithCountry
-      ? `https://wa.me/${phoneWithCountry}?text=${encoded}`
-      : `https://wa.me/?text=${encoded}`;
+      ? `https://web.whatsapp.com/send?phone=${phoneWithCountry}&text=${encoded}`
+      : `https://web.whatsapp.com/send?text=${encoded}`;
     window.open(waUrl, '_blank');
+    setCopyFeedback('✓ Bill image copied! Paste (Ctrl+V) in WhatsApp Web');
   };
 
   const upiLink = profile?.upi_vpa

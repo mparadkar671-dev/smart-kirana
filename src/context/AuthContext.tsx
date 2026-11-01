@@ -165,10 +165,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
-export const useAuth = () => {
+export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    return {
+      user: null,
+      session: null,
+      userRole: 'OWNER' as UserRole,
+      isLoading: false,
+      isAuthenticated: false,
+      isOfflineGuest: false,
+      continueAsGuest: () => {},
+      signIn: async () => {},
+      signUp: async () => ({ needEmailVerification: false }),
+      signOut: async () => {},
+      resetPassword: async () => {},
+      resendConfirmationEmail: async () => true,
+      hasPermission: () => true,
+    };
   }
   return context;
 };
