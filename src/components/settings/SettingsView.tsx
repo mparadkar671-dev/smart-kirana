@@ -43,6 +43,9 @@ import {
   Clock,
   Building2,
   Copy,
+  ShieldAlert,
+  ChevronDown,
+  KeyRound,
 } from 'lucide-react';
 import { generateInviteCode } from '../../db/db';
 
@@ -75,6 +78,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   const [newStaffPhone, setNewStaffPhone] = useState('');
   const [newStaffRole, setNewStaffRole] = useState<UserRole>('CASHIER');
   const [staffActionLoading, setStaffActionLoading] = useState<string | null>(null);
+
+  // Security & Danger Vault State (Iteration 6)
+  const [isDangerVaultOpen, setIsDangerVaultOpen] = useState(false);
+  const [pendingDangerAction, setPendingDangerAction] = useState<
+    'CLEAR_TRANSACTIONS' | 'WIPE_EMPTY' | 'RESET_DEMO' | null
+  >(null);
+  const [dangerPin, setDangerPin] = useState('');
+  const [dangerConfirmText, setDangerConfirmText] = useState('');
+  const [isExecutingDangerAction, setIsExecutingDangerAction] = useState(false);
+  const [dangerError, setDangerError] = useState<string | null>(null);
 
   const refreshStaffList = async () => {
     try {
@@ -363,71 +376,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
     }
   };
 
-  const handleClearTransactions = async () => {
-    if (
-      confirm(
-        'Are you sure you want to clear all sales invoices, khata transactions, and daily galla records? Products and inventory master will remain intact.'
-      )
-    ) {
-      try {
+  const handleExecuteDangerAction = async () => {
+    if (!pendingDangerAction) return;
+
+    if (!hasPermission('DATA_WIPE')) {
+      setDangerError('Restricted: Only Store Owner can execute destructive database operations.');
+      return;
+    }
+
+    if (dangerPin !== '1234' && (!profile?.phone || dangerPin !== profile.phone.slice(-4))) {
+      setDangerError('Invalid Security PIN. Please enter correct Owner PIN (default: 1234).');
+      return;
+    }
+
+    if (dangerConfirmText.trim().toUpperCase() !== 'CONFIRM') {
+      setDangerError('You must type exact keyword "CONFIRM" to authorize.');
+      return;
+    }
+
+    setIsExecutingDangerAction(true);
+    setDangerError(null);
+
+    try {
+      // 1. Automatic Emergency JSON Backup Download Immediately BEFORE Wipe (REQ: Iteration 6)
+      await BackupService.downloadJsonBackup();
+
+      // 2. Perform Selected Destructive Action
+      if (pendingDangerAction === 'CLEAR_TRANSACTIONS') {
         await db.clearTransactionalData();
         await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
-          text: 'Sales and khata transactions cleared. Inventory catalog preserved.',
+          text: 'Emergency JSON backup downloaded. Sales & khata transactions cleared. Catalog preserved.',
         });
-        if (onDataReset) onDataReset();
-      } catch (e: unknown) {
-        setStatusMsg({
-          type: 'error',
-          text: 'Failed to clear transactions: ' + (e instanceof Error ? e.message : String(e)),
-        });
-      }
-    }
-  };
-
-  const handleClearAllToEmpty = async () => {
-    if (
-      confirm(
-        '⚠️ DANGER: Completely wipe ALL products, customers, and transactions to start with a 100% EMPTY database? This cannot be undone.'
-      )
-    ) {
-      try {
+      } else if (pendingDangerAction === 'WIPE_EMPTY') {
         await db.clearAllRecordsToEmpty();
         await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
-          text: 'All products and records wiped! Store is now 100% clean and empty.',
+          text: 'Emergency JSON backup downloaded. All products and records wiped! Store is 100% clean and empty.',
         });
-        if (onDataReset) onDataReset();
-      } catch (e: unknown) {
-        setStatusMsg({
-          type: 'error',
-          text: 'Failed to wipe database: ' + (e instanceof Error ? e.message : String(e)),
-        });
-      }
-    }
-  };
-
-  const handleResetToDemo = async () => {
-    if (confirm('Reset entire database to default initial state (25 products + initial demo customers)?')) {
-      try {
+      } else if (pendingDangerAction === 'RESET_DEMO') {
         await db.resetToDemoState();
         await refreshRealSalesCount();
         const p = await db.getShopProfile();
         setProfile(p);
         setStatusMsg({
           type: 'success',
-          text: 'Database successfully reset to demo state.',
-        });
-        if (onDataReset) onDataReset();
-      } catch (e: unknown) {
-        setStatusMsg({
-          type: 'error',
-          text: 'Failed to reset demo state: ' + (e instanceof Error ? e.message : String(e)),
+          text: 'Emergency JSON backup downloaded. Database successfully reset to demo state.',
         });
       }
+
+      setPendingDangerAction(null);
+      setDangerPin('');
+      setDangerConfirmText('');
+      if (onDataReset) onDataReset();
+    } catch (e: unknown) {
+      setDangerError('Wipe operation failed: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setIsExecutingDangerAction(false);
     }
+  };
+
+  const handleClearTransactions = async () => {
+    setIsDangerVaultOpen(true);
+    setPendingDangerAction('CLEAR_TRANSACTIONS');
+    setDangerError(null);
+  };
+
+  const handleClearAllToEmpty = async () => {
+    setIsDangerVaultOpen(true);
+    setPendingDangerAction('WIPE_EMPTY');
+    setDangerError(null);
+  };
+
+  const handleResetToDemo = async () => {
+    setIsDangerVaultOpen(true);
+    setPendingDangerAction('RESET_DEMO');
+    setDangerError(null);
   };
 
   const handleExportBackup = async () => {
@@ -1104,62 +1130,186 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         </div>
       </div>
 
-      {/* Database Management & Store Reset */}
-      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2">
-            <Trash2 className="w-5 h-5 text-slate-600 dark:text-slate-400" />
-            Database Management &amp; Store Reset
-          </h2>
-          {!hasPermission('DATA_WIPE') && (
-            <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 font-semibold">
-              <Lock className="w-3.5 h-3.5" /> Restricted (Owner Only)
-            </span>
-          )}
+      {/* Security & Danger Vault (Owner Protected) (Iteration 6) */}
+      <div
+        className="rounded-2xl border-2 border-red-500/80 bg-red-50/20 dark:bg-red-950/20 p-5 space-y-4 shadow-sm transition-all"
+        data-testid="danger-vault-container"
+      >
+        <div className="flex items-center justify-between border-b border-red-200 dark:border-red-900/50 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-xl">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-red-900 dark:text-red-200 flex items-center gap-2">
+                Security &amp; Danger Vault (Owner Protected)
+              </h2>
+              <p className="text-xs text-red-700/80 dark:text-red-400/80">
+                Permanent database wipe, transaction reset, and factory restore operations
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid="toggle-danger-vault-btn"
+            onClick={() => {
+              setIsDangerVaultOpen(!isDangerVaultOpen);
+              setPendingDangerAction(null);
+              setDangerError(null);
+            }}
+            className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+          >
+            <Lock className="w-3.5 h-3.5" />
+            <span>{isDangerVaultOpen ? 'Close Vault' : 'Open Vault'}</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isDangerVaultOpen ? 'rotate-180' : ''}`} />
+          </button>
         </div>
 
-        <div className="flex flex-wrap gap-3 pt-2">
-          {/* Automatically hidden whenever real sales invoices exist (Rule 2) */}
-          {realSalesCount === 0 && (
+        {/* Action Buttons - Always in DOM for accessibility, expanded view gives full details */}
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-3 pt-1">
+            {/* Automatically hidden whenever real sales invoices exist (Rule 2) */}
+            {realSalesCount === 0 && (
+              <button
+                type="button"
+                onClick={handleSeedDemoProducts}
+                className="px-4 py-2.5 border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 text-blue-900 dark:text-blue-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
+              >
+                <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                Load 25 Sample Kirana Demo Products
+              </button>
+            )}
+
             <button
               type="button"
-              onClick={handleSeedDemoProducts}
-              className="px-4 py-2.5 border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 text-blue-900 dark:text-blue-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
+              onClick={handleClearTransactions}
+              disabled={!hasPermission('DATA_WIPE')}
+              className="px-4 py-2.5 border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-900 dark:text-amber-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
             >
-              <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-              Load 25 Sample Kirana Demo Products
+              <Trash2 className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+              Clear Sales &amp; Transactions (Keep Products)
             </button>
+
+            <button
+              type="button"
+              onClick={handleClearAllToEmpty}
+              disabled={!hasPermission('DATA_WIPE')}
+              className="px-4 py-2.5 border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-900 dark:text-red-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
+            >
+              <Trash2 className="w-4 h-4 text-red-600" />
+              ⚠️ Wipe All Records (100% Empty Fresh Store)
+            </button>
+
+            <button
+              type="button"
+              onClick={handleResetToDemo}
+              disabled={!hasPermission('DATA_WIPE')}
+              className="px-4 py-2.5 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-800 dark:text-slate-200 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition disabled:opacity-40"
+            >
+              <RotateCcw className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+              Full Demo Reset (25 Products + Demo Customers)
+            </button>
+          </div>
+
+          {/* Expanded PIN & "CONFIRM" Guardrail (Iteration 6) */}
+          {isDangerVaultOpen && pendingDangerAction && (
+            <div
+              className="p-4 bg-white dark:bg-slate-900 border-2 border-red-500 rounded-xl space-y-3 animate-in fade-in duration-200"
+              data-testid="danger-guardrail-panel"
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <span className="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-wider">
+                    Target Destructive Action:
+                  </span>
+                  <p className="text-sm font-extrabold text-slate-900 dark:text-white">
+                    {pendingDangerAction === 'CLEAR_TRANSACTIONS' && 'Clear Sales, Invoices & Khata Transactions (Preserve Products)'}
+                    {pendingDangerAction === 'WIPE_EMPTY' && 'Wipe All Records (100% Empty Fresh Store)'}
+                    {pendingDangerAction === 'RESET_DEMO' && 'Reset Entire Database to 25 Sample Kirana Products'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPendingDangerAction(null)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 rounded-lg text-xs text-red-800 dark:text-red-300 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  Mandatory Multi-Factor Guardrail:
+                </p>
+                <p>
+                  1. An automatic emergency JSON disaster backup will be downloaded immediately before wipe runs.
+                </p>
+                <p>
+                  2. Enter Owner Security PIN (Default: <strong>1234</strong>) AND type exact keyword <strong>CONFIRM</strong> to authorize.
+                </p>
+              </div>
+
+              {dangerError && (
+                <div className="p-2.5 bg-red-100 text-red-800 rounded-lg text-xs font-bold" data-testid="danger-vault-error">
+                  {dangerError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Owner Security PIN:
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="password"
+                      data-testid="danger-vault-pin-input"
+                      placeholder="Enter Owner PIN (1234)"
+                      value={dangerPin}
+                      onChange={(e) => setDangerPin(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                    <KeyRound className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Type "CONFIRM" to Authorize:
+                  </label>
+                  <input
+                    type="text"
+                    data-testid="danger-vault-confirm-input"
+                    placeholder='Type "CONFIRM"'
+                    value={dangerConfirmText}
+                    onChange={(e) => setDangerConfirmText(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono font-bold text-slate-900 dark:text-white uppercase focus:outline-none focus:ring-2 focus:ring-red-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPendingDangerAction(null)}
+                  className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-bold transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  data-testid="danger-vault-execute-btn"
+                  disabled={isExecutingDangerAction}
+                  onClick={handleExecuteDangerAction}
+                  className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs disabled:opacity-40"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isExecutingDangerAction ? 'Creating Backup & Wiping...' : 'Authorize & Execute Wipe'}</span>
+                </button>
+              </div>
+            </div>
           )}
-
-          <button
-            type="button"
-            onClick={handleClearTransactions}
-            disabled={!hasPermission('DATA_WIPE')}
-            className="px-4 py-2.5 border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-900 dark:text-amber-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
-          >
-            <Trash2 className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-            Clear Sales &amp; Transactions (Keep Products)
-          </button>
-
-          <button
-            type="button"
-            onClick={handleClearAllToEmpty}
-            disabled={!hasPermission('DATA_WIPE')}
-            className="px-4 py-2.5 border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-900 dark:text-red-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
-          >
-            <Trash2 className="w-4 h-4 text-red-600" />
-            ⚠️ Wipe All Records (100% Empty Fresh Store)
-          </button>
-
-          <button
-            type="button"
-            onClick={handleResetToDemo}
-            disabled={!hasPermission('DATA_WIPE')}
-            className="px-4 py-2.5 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-800 dark:text-slate-200 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition disabled:opacity-40"
-          >
-            <RotateCcw className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-            Full Demo Reset (25 Products + Demo Customers)
-          </button>
         </div>
       </div>
     </div>
