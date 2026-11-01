@@ -6,6 +6,8 @@ import {
   ExpensePaidVia,
   SalesInvoice,
   PaymentMode,
+  InventoryLog,
+  KhataTransaction,
 } from '../types';
 import { roundCurrency, toPaise, toRupees } from '../utils/math';
 
@@ -95,6 +97,7 @@ export class GallaService {
 
     const expense: ExpenseAndDrawing = {
       id: `exp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      shop_id: 'current_shop',
       category: params.category,
       amount: expAmount,
       paid_via: params.paidVia,
@@ -104,8 +107,12 @@ export class GallaService {
 
     let session: DailyGallaSession | undefined;
 
-    await db.transaction('rw', [db.expenses_and_drawings, db.daily_galla_sessions], async () => {
+    await db.transaction('rw', [db.expenses_and_drawings, db.daily_galla_sessions, db.sync_outbox], async () => {
       await db.expenses_and_drawings.add(expense);
+      await db.queueSync(
+        { table_name: 'expenses_and_drawings', operation: 'INSERT', payload: expense as unknown as Record<string, unknown>, shop_id: expense.shop_id },
+        db.sync_outbox
+      );
 
       if (params.paidVia === 'CASH_GALLA') {
         const currentSession = await db.daily_galla_sessions
@@ -130,6 +137,10 @@ export class GallaService {
             expected_closing_cash: newExpected,
             discrepancy,
           });
+          await db.queueSync(
+            { table_name: 'daily_galla_sessions', operation: 'UPDATE', payload: { id: currentSession.id, cash_expenses_out: newExpenses, expected_closing_cash: newExpected, discrepancy }, shop_id: expense.shop_id },
+            db.sync_outbox
+          );
 
           session = {
             ...currentSession,
@@ -154,7 +165,7 @@ export class GallaService {
   ): Promise<DailyGallaSession> {
     let updated!: DailyGallaSession;
 
-    await db.transaction('rw', db.daily_galla_sessions, async () => {
+    await db.transaction('rw', [db.daily_galla_sessions, db.sync_outbox], async () => {
       const session = await db.daily_galla_sessions.where({ session_date: sessionDate }).first();
       if (!session) throw new Error(`No galla session found for date: ${sessionDate}`);
 
@@ -165,6 +176,10 @@ export class GallaService {
         actual_counted_cash: actual,
         discrepancy,
       });
+      await db.queueSync(
+        { table_name: 'daily_galla_sessions', operation: 'UPDATE', payload: { id: session.id, actual_counted_cash: actual, discrepancy }, shop_id: session.shop_id },
+        db.sync_outbox
+      );
 
       updated = { ...session, actual_counted_cash: actual, discrepancy };
     });
@@ -189,6 +204,7 @@ export class GallaService {
         db.customers,
         db.khata_transactions,
         db.daily_galla_sessions,
+        db.sync_outbox,
       ],
       async () => {
         const invoice = await db.sales_invoices.get(invoiceId);
@@ -197,6 +213,10 @@ export class GallaService {
 
         // 1. Mark status VOIDED
         await db.sales_invoices.update(invoiceId, { status: 'VOIDED' });
+        await db.queueSync(
+          { table_name: 'sales_invoices', operation: 'UPDATE', payload: { id: invoiceId, status: 'VOIDED' }, shop_id: invoice.shop_id },
+          db.sync_outbox
+        );
         voidedInvoice = { ...invoice, status: 'VOIDED' };
 
         // 2. Fetch sale items and restore stock (RETURN_IN)
@@ -211,9 +231,14 @@ export class GallaService {
               current_stock: restoredStock,
               updated_at: nowIso,
             });
+            await db.queueSync(
+              { table_name: 'products', operation: 'UPDATE', payload: { id: item.product_id, current_stock: restoredStock, updated_at: nowIso }, shop_id: invoice.shop_id },
+              db.sync_outbox
+            );
 
-            await db.inventory_logs.add({
+            const returnLog: InventoryLog = {
               id: `log-return-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+              shop_id: invoice.shop_id || 'current_shop',
               product_id: item.product_id,
               change_qty: item.qty,
               reason_type: 'RETURN_IN',
@@ -221,7 +246,12 @@ export class GallaService {
               reference_id: invoiceId,
               notes: `Void rollback for invoice ${invoice.invoice_number}`,
               created_at: nowIso,
-            });
+            };
+            await db.inventory_logs.add(returnLog);
+            await db.queueSync(
+              { table_name: 'inventory_logs', operation: 'INSERT', payload: returnLog as unknown as Record<string, unknown>, shop_id: returnLog.shop_id },
+              db.sync_outbox
+            );
           }
         }
 
@@ -235,9 +265,14 @@ export class GallaService {
             await db.customers.update(invoice.customer_id, {
               current_udhari_balance: reversedBalance,
             });
+            await db.queueSync(
+              { table_name: 'customers', operation: 'UPDATE', payload: { id: invoice.customer_id, current_udhari_balance: reversedBalance }, shop_id: invoice.shop_id },
+              db.sync_outbox
+            );
 
-            await db.khata_transactions.add({
+            const voidKhataTx: KhataTransaction = {
               id: `khata-void-${Date.now()}`,
+              shop_id: invoice.shop_id || 'current_shop',
               customer_id: invoice.customer_id,
               entry_type: 'CREDIT_JAMA_RECEIVED',
               amount: invoice.udhari_added,
@@ -246,7 +281,12 @@ export class GallaService {
               running_balance_after: reversedBalance,
               notes: `Void reversal for invoice ${invoice.invoice_number}`,
               created_at: nowIso,
-            });
+            };
+            await db.khata_transactions.add(voidKhataTx);
+            await db.queueSync(
+              { table_name: 'khata_transactions', operation: 'INSERT', payload: voidKhataTx as unknown as Record<string, unknown>, shop_id: voidKhataTx.shop_id },
+              db.sync_outbox
+            );
           }
         }
 
@@ -268,6 +308,10 @@ export class GallaService {
               cash_sales_total: newSales,
               expected_closing_cash: newExpected,
             });
+            await db.queueSync(
+              { table_name: 'daily_galla_sessions', operation: 'UPDATE', payload: { id: session.id, cash_sales_total: newSales, expected_closing_cash: newExpected }, shop_id: invoice.shop_id },
+              db.sync_outbox
+            );
           }
         }
       }

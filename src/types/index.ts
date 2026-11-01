@@ -210,4 +210,20 @@ export interface AppNotification {
   actionData?: Record<string, unknown>;
 }
 
+export type SyncOperation = 'INSERT' | 'UPDATE' | 'DELETE';
+export type SyncOutboxStatus = 'PENDING' | 'SYNCED' | 'FAILED';
+
+export interface SyncOutboxItem {
+  id: string; // UUID PK
+  table_name: string; // e.g. 'products', 'customers', 'sales_invoices', 'inventory_logs', etc.
+  operation: SyncOperation;
+  payload: Record<string, unknown>;
+  shop_id: string;
+  created_at: string; // ISO Timestamp
+  retry_count: number;
+  status: SyncOutboxStatus;
+  error_message?: string | null;
+}
+
+
 

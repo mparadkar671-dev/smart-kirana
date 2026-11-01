@@ -58,7 +58,7 @@ export class KhataService {
 
     await db.transaction(
       'rw',
-      [db.customers, db.khata_transactions, db.daily_galla_sessions],
+      [db.customers, db.khata_transactions, db.daily_galla_sessions, db.sync_outbox],
       async () => {
         const customer = await db.customers.get(input.customerId);
         if (!customer) throw new Error(`Customer not found: ${input.customerId}`);
@@ -74,9 +74,14 @@ export class KhataService {
           current_udhari_balance: newBalance,
           oldest_unpaid_date: updatedOldestDate,
         });
+        await db.queueSync(
+          { table_name: 'customers', operation: 'UPDATE', payload: { id: input.customerId, current_udhari_balance: newBalance, oldest_unpaid_date: updatedOldestDate }, shop_id: customer.shop_id },
+          db.sync_outbox
+        );
 
         newTx = {
           id: `khata-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          shop_id: customer.shop_id || 'current_shop',
           customer_id: input.customerId,
           entry_type: 'CREDIT_JAMA_RECEIVED',
           amount: payAmount,
@@ -89,6 +94,10 @@ export class KhataService {
           created_at: nowIso,
         };
         await db.khata_transactions.add(newTx);
+        await db.queueSync(
+          { table_name: 'khata_transactions', operation: 'INSERT', payload: newTx as unknown as Record<string, unknown>, shop_id: newTx.shop_id },
+          db.sync_outbox
+        );
 
         // If Cash, atomically increment Cash Udhari Recovered in daily galla drawer
         if (input.paymentChannel === 'CASH') {
@@ -103,9 +112,14 @@ export class KhataService {
               cash_udhari_recovered: newRecovered,
               expected_closing_cash: newExpected,
             });
+            await db.queueSync(
+              { table_name: 'daily_galla_sessions', operation: 'UPDATE', payload: { id: session.id, cash_udhari_recovered: newRecovered, expected_closing_cash: newExpected }, shop_id: customer.shop_id },
+              db.sync_outbox
+            );
           } else {
             const newSession: DailyGallaSession = {
               id: `galla-${Date.now()}`,
+              shop_id: customer.shop_id || 'current_shop',
               session_date: todayDate,
               opening_cash: 0,
               cash_sales_total: 0,
@@ -116,6 +130,10 @@ export class KhataService {
               discrepancy: null,
             };
             await db.daily_galla_sessions.add(newSession);
+            await db.queueSync(
+              { table_name: 'daily_galla_sessions', operation: 'INSERT', payload: newSession as unknown as Record<string, unknown>, shop_id: customer.shop_id },
+              db.sync_outbox
+            );
           }
         }
 

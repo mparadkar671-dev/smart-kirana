@@ -1,15 +1,17 @@
 import { supabase } from '../lib/supabase';
-import { db } from '../db/db';
+import { db, requestStoragePersistence } from '../db/db';
 import {
   Product,
   Customer,
   SalesInvoice,
   SaleItem,
   KhataTransaction,
+  InventoryLog,
   DailyGallaSession,
   ExpenseAndDrawing,
   ShopProfile,
   StoreUser,
+  SyncOutboxItem,
 } from '../types';
 
 export interface CloudSyncStatus {
@@ -30,6 +32,25 @@ class CloudSyncService {
   };
 
   private listeners: Set<SyncStatusListener> = new Set();
+
+  constructor() {
+    this.initOnlineListener();
+  }
+
+  private initOnlineListener() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        this.setStatus({ status: 'syncing', message: 'Network restored. Flushing sync outbox...' });
+        this.flushOutbox();
+      });
+      // Request persistent storage durability
+      requestStoragePersistence().then((res) => {
+        if (res.persisted) {
+          console.log('IndexedDB storage durability guaranteed (navigator.storage.persist).');
+        }
+      });
+    }
+  }
 
   public subscribe(listener: SyncStatusListener) {
     this.listeners.add(listener);
@@ -718,12 +739,64 @@ class CloudSyncService {
         console.warn('Pull store users failed:', e);
       }
 
+      // 5. Pull Inventory Logs (Append-Only Delta Ledger)
+      try {
+        const { data: logs, error } = await supabase.from('inventory_logs').select('*');
+        if (error) throw new Error(error.message);
+        if (logs && logs.length > 0) {
+          for (const l of logs) {
+            await db.inventory_logs.put({
+              id: l.id,
+              shop_id: l.shop_id || 'current_shop',
+              product_id: l.product_id,
+              change_qty: Number(l.change_qty) || 0,
+              reason_type: l.reason_type,
+              unit_cost_at_time: Number(l.unit_cost_at_time) || 0,
+              reference_id: l.reference_id || null,
+              notes: l.notes || '',
+              created_at: l.created_at || new Date().toISOString(),
+            });
+            pulledCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Pull inventory logs failed:', e);
+      }
+
+      // 6. Pull Khata Transactions (Append-Only Ledger)
+      try {
+        const { data: txs, error } = await supabase.from('khata_transactions').select('*');
+        if (error) throw new Error(error.message);
+        if (txs && txs.length > 0) {
+          for (const t of txs) {
+            await db.khata_transactions.put({
+              id: t.id,
+              shop_id: t.shop_id || 'current_shop',
+              customer_id: t.customer_id,
+              entry_type: t.entry_type,
+              amount: Number(t.amount) || 0,
+              payment_channel: t.payment_channel,
+              invoice_id: t.invoice_id || null,
+              running_balance_after: Number(t.running_balance_after) || 0,
+              notes: t.notes || '',
+              created_at: t.created_at || new Date().toISOString(),
+            });
+            pulledCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Pull khata transactions failed:', e);
+      }
+
+      // 7. ACID Reconciliation: Recompute stock & udhari deterministically from deltas
+      await db.reconcileAllStockAndBalances();
+
       const now = new Date().toISOString();
       this.setStatus({
         isSyncing: false,
         lastSyncedAt: now,
         status: 'synced',
-        message: `Cloud sync complete! Pulled ${pulledCount} items from Supabase.`,
+        message: `Cloud sync complete! Pulled ${pulledCount} items and reconciled ledger deltas.`,
       });
 
       return { success: true, pulledCount, errors };
@@ -736,6 +809,60 @@ class CloudSyncService {
       });
       return { success: false, pulledCount, errors: [msg] };
     }
+  }
+
+  /**
+   * Outbox Processor: Sequentially flushes pending local mutations to Supabase cloud
+   */
+  async flushOutbox(): Promise<{ processedCount: number; errors: string[] }> {
+    if (!supabase) {
+      return { processedCount: 0, errors: ['Supabase client not configured'] };
+    }
+
+    const pendingItems = await db.sync_outbox
+      .where('status')
+      .equals('PENDING')
+      .sortBy('created_at');
+
+    if (pendingItems.length === 0) {
+      return { processedCount: 0, errors: [] };
+    }
+
+    let processedCount = 0;
+    const errors: string[] = [];
+
+    for (const item of pendingItems) {
+      try {
+        if (item.operation === 'INSERT' || item.operation === 'UPDATE') {
+          const { error } = await supabase.from(item.table_name).upsert(item.payload, { onConflict: 'id' });
+          if (error) throw new Error(error.message);
+        } else if (item.operation === 'DELETE') {
+          const targetId = item.payload.id as string;
+          if (targetId) {
+            const { error } = await supabase.from(item.table_name).delete().eq('id', targetId);
+            if (error) throw new Error(error.message);
+          }
+        }
+
+        // Mark as SYNCED
+        await db.sync_outbox.update(item.id, {
+          status: 'SYNCED',
+          error_message: null,
+        });
+        processedCount++;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`Table ${item.table_name} (${item.id}): ${msg}`);
+        const nextRetries = (item.retry_count || 0) + 1;
+        await db.sync_outbox.update(item.id, {
+          retry_count: nextRetries,
+          error_message: msg,
+          status: nextRetries >= 10 ? 'FAILED' : 'PENDING',
+        });
+      }
+    }
+
+    return { processedCount, errors };
   }
 }
 

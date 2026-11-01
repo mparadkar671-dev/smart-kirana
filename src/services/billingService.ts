@@ -99,6 +99,7 @@ export class BillingService {
 
       const saleItem: SaleItem = {
         id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        shop_id: 'current_shop',
         invoice_id: invoiceId,
         product_id: item.product.id,
         product_name_snapshot: item.product.name,
@@ -111,6 +112,7 @@ export class BillingService {
 
       const log: InventoryLog = {
         id: `log-sale-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        shop_id: 'current_shop',
         product_id: item.product.id,
         change_qty: -itemQty,
         reason_type: 'SALE_OUT',
@@ -129,6 +131,7 @@ export class BillingService {
 
     const invoice: SalesInvoice = {
       id: invoiceId,
+      shop_id: 'current_shop',
       invoice_number: invoiceNumber,
       customer_id: params.customerId,
       subtotal_amount: subtotal,
@@ -155,13 +158,24 @@ export class BillingService {
         db.customers,
         db.khata_transactions,
         db.daily_galla_sessions,
+        db.sync_outbox,
       ],
       async () => {
         // 1. Insert Sales Invoice
         await db.sales_invoices.add(invoice);
+        await db.queueSync(
+          { table_name: 'sales_invoices', operation: 'INSERT', payload: invoice as unknown as Record<string, unknown>, shop_id: invoice.shop_id },
+          db.sync_outbox
+        );
 
         // 2. Insert Sale Items
         await db.sale_items.bulkAdd(saleItems);
+        for (const it of saleItems) {
+          await db.queueSync(
+            { table_name: 'sale_items', operation: 'INSERT', payload: it as unknown as Record<string, unknown>, shop_id: it.shop_id },
+            db.sync_outbox
+          );
+        }
 
         // 3. Update Product Stocks
         for (const update of stockUpdates) {
@@ -169,10 +183,20 @@ export class BillingService {
             current_stock: update.newStock,
             updated_at: nowIso,
           });
+          await db.queueSync(
+            { table_name: 'products', operation: 'UPDATE', payload: { id: update.id, current_stock: update.newStock, updated_at: nowIso }, shop_id: invoice.shop_id },
+            db.sync_outbox
+          );
         }
 
         // 4. Append to Inventory Logs
         await db.inventory_logs.bulkAdd(inventoryLogs);
+        for (const l of inventoryLogs) {
+          await db.queueSync(
+            { table_name: 'inventory_logs', operation: 'INSERT', payload: l as unknown as Record<string, unknown>, shop_id: l.shop_id },
+            db.sync_outbox
+          );
+        }
 
         // 5. Update Customer Khata if Udhari was added
         if (udhari > 0 && params.customerId !== WALK_IN_CUSTOMER_ID) {
@@ -186,9 +210,14 @@ export class BillingService {
             current_udhari_balance: newBalance,
             oldest_unpaid_date: oldestDate,
           });
+          await db.queueSync(
+            { table_name: 'customers', operation: 'UPDATE', payload: { id: params.customerId, current_udhari_balance: newBalance, oldest_unpaid_date: oldestDate }, shop_id: invoice.shop_id },
+            db.sync_outbox
+          );
 
           const khataTx: KhataTransaction = {
             id: `khata-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            shop_id: invoice.shop_id,
             customer_id: params.customerId,
             entry_type: 'DEBIT_UDHARI_GIVEN',
             amount: udhari,
@@ -199,6 +228,10 @@ export class BillingService {
             created_at: nowIso,
           };
           await db.khata_transactions.add(khataTx);
+          await db.queueSync(
+            { table_name: 'khata_transactions', operation: 'INSERT', payload: khataTx as unknown as Record<string, unknown>, shop_id: khataTx.shop_id },
+            db.sync_outbox
+          );
 
           updatedCustomer = {
             ...cust,
@@ -225,10 +258,15 @@ export class BillingService {
               cash_sales_total: newCashSales,
               expected_closing_cash: newExpected,
             });
+            await db.queueSync(
+              { table_name: 'daily_galla_sessions', operation: 'UPDATE', payload: { id: gallaSession.id, cash_sales_total: newCashSales, expected_closing_cash: newExpected }, shop_id: invoice.shop_id },
+              db.sync_outbox
+            );
           } else {
             // Auto-create initial session if not opened yet
             const newSession: DailyGallaSession = {
               id: `galla-${Date.now()}`,
+              shop_id: invoice.shop_id,
               session_date: todayDate,
               opening_cash: 0,
               cash_sales_total: paidNow,
@@ -239,6 +277,10 @@ export class BillingService {
               discrepancy: null,
             };
             await db.daily_galla_sessions.add(newSession);
+            await db.queueSync(
+              { table_name: 'daily_galla_sessions', operation: 'INSERT', payload: newSession as unknown as Record<string, unknown>, shop_id: invoice.shop_id },
+              db.sync_outbox
+            );
           }
         }
       }

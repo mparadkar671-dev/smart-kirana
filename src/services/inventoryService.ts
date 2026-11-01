@@ -186,7 +186,7 @@ export class InventoryService {
     let updatedProduct!: Product;
     let newLog!: InventoryLog;
 
-    await db.transaction('rw', [db.products, db.inventory_logs], async () => {
+    await db.transaction('rw', [db.products, db.inventory_logs, db.sync_outbox], async () => {
       const product = await db.products.get(params.productId);
       if (!product) throw new Error(`Product not found: ${params.productId}`);
 
@@ -207,9 +207,14 @@ export class InventoryService {
       }
 
       await db.products.update(params.productId, updates);
+      await db.queueSync(
+        { table_name: 'products', operation: 'UPDATE', payload: { id: params.productId, ...updates }, shop_id: product.shop_id },
+        db.sync_outbox
+      );
 
       newLog = {
         id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        shop_id: product.shop_id || 'current_shop',
         product_id: params.productId,
         change_qty: roundQty(params.qty),
         reason_type: 'PURCHASE_IN',
@@ -220,6 +225,10 @@ export class InventoryService {
       };
 
       await db.inventory_logs.add(newLog);
+      await db.queueSync(
+        { table_name: 'inventory_logs', operation: 'INSERT', payload: newLog as unknown as Record<string, unknown>, shop_id: newLog.shop_id },
+        db.sync_outbox
+      );
       updatedProduct = { ...product, ...updates };
     });
 
@@ -243,7 +252,7 @@ export class InventoryService {
     let newLog!: InventoryLog;
     let newExpense: ExpenseAndDrawing | undefined;
 
-    await db.transaction('rw', [db.products, db.inventory_logs, db.expenses_and_drawings], async () => {
+    await db.transaction('rw', [db.products, db.inventory_logs, db.expenses_and_drawings, db.sync_outbox], async () => {
       const product = await db.products.get(params.productId);
       if (!product) throw new Error(`Product not found: ${params.productId}`);
 
@@ -253,6 +262,10 @@ export class InventoryService {
         current_stock: newStock,
         updated_at: new Date().toISOString(),
       });
+      await db.queueSync(
+        { table_name: 'products', operation: 'UPDATE', payload: { id: params.productId, current_stock: newStock }, shop_id: product.shop_id },
+        db.sync_outbox
+      );
 
       let linkedExpenseId: string | null = null;
 
@@ -262,6 +275,7 @@ export class InventoryService {
         linkedExpenseId = `exp-home-${Date.now()}`;
         newExpense = {
           id: linkedExpenseId,
+          shop_id: product.shop_id || 'current_shop',
           category: 'HOME_SELF_USE_GOODS',
           amount: homeValuation,
           paid_via: 'INVENTORY_DEDUCTION',
@@ -269,10 +283,15 @@ export class InventoryService {
           created_at: new Date().toISOString(),
         };
         await db.expenses_and_drawings.add(newExpense);
+        await db.queueSync(
+          { table_name: 'expenses_and_drawings', operation: 'INSERT', payload: newExpense as unknown as Record<string, unknown>, shop_id: newExpense.shop_id },
+          db.sync_outbox
+        );
       }
 
       newLog = {
         id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        shop_id: product.shop_id || 'current_shop',
         product_id: params.productId,
         change_qty: roundQty(-params.qty),
         reason_type: params.reasonType,
@@ -283,6 +302,10 @@ export class InventoryService {
       };
 
       await db.inventory_logs.add(newLog);
+      await db.queueSync(
+        { table_name: 'inventory_logs', operation: 'INSERT', payload: newLog as unknown as Record<string, unknown>, shop_id: newLog.shop_id },
+        db.sync_outbox
+      );
       updatedProduct = { ...product, current_stock: newStock, updated_at: new Date().toISOString() };
     });
 
