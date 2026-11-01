@@ -56,7 +56,21 @@ export interface Customer {
 }
 
 export type PaymentMode = 'CASH' | 'UPI' | 'UDHARI_FULL' | 'SPLIT_PARTIAL';
-export type InvoiceStatus = 'COMPLETED' | 'VOIDED';
+export type InvoiceStatus = 'COMPLETED' | 'VOIDED' | 'RETURNED';
+export type SalesReturnReason = 'CUSTOMER_RETURN' | 'BILLING_MISTAKE' | 'RATE_ADJUSTMENT' | string;
+
+export interface CreditNote {
+  id: string; // UUID PK
+  shop_id: string;
+  credit_note_number: string; // CN-XXXX
+  original_invoice_id: string;
+  original_invoice_number: string;
+  customer_id: string;
+  return_reason: SalesReturnReason;
+  total_amount: number;
+  refund_mode: 'CASH' | 'UDHARI_CREDIT' | 'UPI' | 'STORE_CREDIT';
+  created_at: string;
+}
 
 export interface SalesInvoice {
   id: string; // UUID PK
@@ -71,6 +85,9 @@ export interface SalesInvoice {
   amount_paid_now: number; // Numeric 10,2
   udhari_added: number; // Numeric 10,2
   status: InvoiceStatus;
+  return_reason?: SalesReturnReason;
+  credit_note_number?: string;
+  returned_at?: string;
   created_at: string; // ISO Timestamp
 }
 

@@ -124,6 +124,61 @@ export const POSView: React.FC<POSViewProps> = ({
         .slice(0, 8)
     : [];
 
+  // 1-Click Re-Bill Listener: Loads cloned items from Sales Return into Active Cart
+  useEffect(() => {
+    const handleCartCloned = () => {
+      const stored = localStorage.getItem('smart_kirana_reloaded_cart');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          localStorage.removeItem('smart_kirana_reloaded_cart');
+          if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+            // Reconstruct cart items
+            const newCartItems: CartItem[] = [];
+            for (const item of parsed.items) {
+              const matchedProd = products.find((p) => p.id === item.productId);
+              if (matchedProd) {
+                newCartItems.push({
+                  id: `item-clone-${item.productId}-${Date.now()}`,
+                  product: matchedProd,
+                  qty: item.qty,
+                  unit_purchase_cost: item.purchaseCost,
+                  unit_selling_price: item.sellingPrice,
+                  line_total: item.lineTotal,
+                });
+              }
+            }
+
+            if (newCartItems.length > 0) {
+              setCarts((prev) =>
+                prev.map((c) =>
+                  c.id === activeCartId
+                    ? {
+                        ...c,
+                        items: newCartItems,
+                        customerId: parsed.customerId || WALK_IN_CUSTOMER_ID,
+                      }
+                    : c
+                )
+              );
+              setSuccessBanner(`↩️ Loaded ${newCartItems.length} items from returned bill ready for re-billing!`);
+              setTimeout(() => setSuccessBanner(null), 5000);
+            }
+          }
+        } catch (e) {
+          console.warn('Error reading reloaded cart:', e);
+        }
+      }
+    };
+
+    window.addEventListener('smart_kirana_cart_cloned', handleCartCloned);
+    handleCartCloned();
+
+    return () => {
+      window.removeEventListener('smart_kirana_cart_cloned', handleCartCloned);
+    };
+  }, [products, activeCartId]);
+
   // Desktop Keyboard Matrix Handler (REQ-25)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
