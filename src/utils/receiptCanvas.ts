@@ -108,14 +108,18 @@ export const generateReceiptCanvas = (options: GenerateReceiptCanvasOptions): HT
   ctx.textAlign = 'left';
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 14px "Courier New", monospace';
-  ctx.fillText(`Invoice: #${invoice.invoice_number}`, padding, y);
+  ctx.fillText(`Invoice: #${invoice.invoice_number || 'N/A'}`, padding, y);
 
   ctx.textAlign = 'right';
   ctx.fillStyle = '#475569';
   ctx.font = '13px "Courier New", monospace';
-  const billDate = new Date(invoice.created_at);
-  const dateStr = billDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-  const timeStr = billDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  const billDate = invoice.created_at ? new Date(invoice.created_at) : new Date();
+  const dateStr = !isNaN(billDate.getTime())
+    ? billDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    : 'Today';
+  const timeStr = !isNaN(billDate.getTime())
+    ? billDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+    : '';
   ctx.fillText(`${dateStr} ${timeStr}`, width - padding, y);
   y += 20;
 
@@ -155,22 +159,30 @@ export const generateReceiptCanvas = (options: GenerateReceiptCanvasOptions): HT
   // 5. ITEM ROWS
   ctx.font = '13px "Courier New", monospace';
   for (const item of items) {
+    if (!item) continue;
     ctx.textAlign = 'left';
     ctx.fillStyle = '#0f172a';
-    const name =
-      item.product_name_snapshot.length > 22
-        ? item.product_name_snapshot.slice(0, 20) + '..'
-        : item.product_name_snapshot;
+    const rawName = String(
+      item.product_name_snapshot ||
+      (item as any).product_name ||
+      (item as any).name ||
+      'Kirana Item'
+    );
+    const name = rawName.length > 22 ? rawName.slice(0, 20) + '..' : rawName;
     ctx.fillText(name, padding, y);
+
+    const qty = Number(item.qty) || 0;
+    const rate = Number(item.unit_selling_price) || 0;
+    const lineTotal = Number(item.line_total) || 0;
 
     ctx.textAlign = 'right';
     ctx.fillStyle = '#334155';
-    ctx.fillText(String(item.qty), padding + 260, y);
-    ctx.fillText(`₹${item.unit_selling_price}`, padding + 370, y);
+    ctx.fillText(String(qty), padding + 260, y);
+    ctx.fillText(`₹${rate}`, padding + 370, y);
 
     ctx.fillStyle = '#0f172a';
     ctx.font = 'bold 13px "Courier New", monospace';
-    ctx.fillText(`₹${formatRupees(item.line_total)}`, width - padding, y);
+    ctx.fillText(`₹${formatRupees(lineTotal)}`, width - padding, y);
     ctx.font = '13px "Courier New", monospace';
     y += 26;
   }
@@ -243,18 +255,22 @@ export const generateReceiptCanvas = (options: GenerateReceiptCanvasOptions): HT
     ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
     ctx.fillText('CUSTOMER KHATA STATEMENT', padding + 8, y + 12);
 
+    const prevBal = Number(previousBalance) || 0;
+    const addedBal = Number(udhariAddedThisBill) || 0;
+    const currBal = Number(currentKhataBalance) || 0;
+
     ctx.font = '12px "Courier New", monospace';
     ctx.fillStyle = '#475569';
     ctx.fillText('Previous Khata Balance:', padding + 8, y + 32);
     ctx.textAlign = 'right';
-    ctx.fillText(`₹${formatRupees(previousBalance)}`, width - padding - 8, y + 32);
+    ctx.fillText(`₹${formatRupees(prevBal)}`, width - padding - 8, y + 32);
 
-    if (udhariAddedThisBill > 0) {
+    if (addedBal > 0) {
       ctx.textAlign = 'left';
       ctx.fillStyle = '#e11d48';
       ctx.fillText('This Bill Udhari:', padding + 8, y + 50);
       ctx.textAlign = 'right';
-      ctx.fillText(`+₹${formatRupees(udhariAddedThisBill)}`, width - padding - 8, y + 50);
+      ctx.fillText(`+₹${formatRupees(addedBal)}`, width - padding - 8, y + 50);
       y += 18;
     }
 
@@ -263,8 +279,8 @@ export const generateReceiptCanvas = (options: GenerateReceiptCanvasOptions): HT
     ctx.fillStyle = '#0f172a';
     ctx.fillText('Total Outstanding Balance:', padding + 8, y + 52);
     ctx.textAlign = 'right';
-    ctx.fillStyle = currentKhataBalance > 0 ? '#b91c1c' : '#15803d';
-    ctx.fillText(`₹${formatRupees(currentKhataBalance)}`, width - padding - 8, y + 52);
+    ctx.fillStyle = currBal > 0 ? '#b91c1c' : '#15803d';
+    ctx.fillText(`₹${formatRupees(currBal)}`, width - padding - 8, y + 52);
 
     y += 76;
   }

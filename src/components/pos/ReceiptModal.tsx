@@ -91,13 +91,17 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const handleDownloadImage = async () => {
     setIsExporting(true);
     try {
-      const canvas = await captureReceiptCanvas();
-      if (!canvas) return;
+      const canvas = captureReceiptCanvas();
+      if (!canvas) {
+        setCopyFeedback('Could not generate bill image');
+        setTimeout(() => setCopyFeedback(null), 3000);
+        return;
+      }
 
       const image = canvas.toDataURL('image/png');
       const link = document.createElement('a');
       link.href = image;
-      link.download = `Bill_${invoice.invoice_number}.png`;
+      link.download = `Bill_${invoice.invoice_number || 'receipt'}.png`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -106,7 +110,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       setTimeout(() => setCopyFeedback(null), 3000);
     } catch (e) {
       console.error('Failed to export bill image:', e);
-      setCopyFeedback('Could not generate bill image'); setTimeout(() => setCopyFeedback(null), 3000);
+      setCopyFeedback('Could not generate bill image');
+      setTimeout(() => setCopyFeedback(null), 3000);
     } finally {
       setIsExporting(false);
     }
@@ -118,28 +123,36 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const handleCopyImage = async () => {
     setIsExporting(true);
     try {
-      const canvas = await captureReceiptCanvas();
-      if (!canvas) return;
+      const canvas = captureReceiptCanvas();
+      if (!canvas) {
+        setCopyFeedback('Could not generate bill image');
+        setTimeout(() => setCopyFeedback(null), 3000);
+        return;
+      }
 
-      canvas.toBlob(async (blob) => {
-        if (!blob) return;
+      let copied = false;
+      if (typeof window !== 'undefined' && navigator.clipboard && typeof ClipboardItem !== 'undefined') {
         try {
-          if (navigator.clipboard && 'write' in navigator.clipboard) {
+          const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+          if (blob) {
             await navigator.clipboard.write([
               new ClipboardItem({ 'image/png': blob }),
             ]);
+            copied = true;
             setCopyFeedback('✓ Copied Image! Paste (Ctrl+V) in WhatsApp');
-          } else {
-            // Fallback to downloading
-            await handleDownloadImage();
+            setTimeout(() => setCopyFeedback(null), 3500);
           }
-        } catch {
-          await handleDownloadImage();
+        } catch (clipErr) {
+          console.warn('Clipboard image write skipped (permissions/context):', clipErr);
         }
-        setTimeout(() => setCopyFeedback(null), 3500);
-      }, 'image/png');
+      }
+
+      // If clipboard copy wasn't supported or permitted, download image directly
+      if (!copied) {
+        await handleDownloadImage();
+      }
     } catch (e) {
-      console.error('Copy image failed:', e);
+      console.error('Copy image failed, falling back to download:', e);
       await handleDownloadImage();
     } finally {
       setIsExporting(false);
@@ -155,14 +168,21 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     const phoneWithCountry = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
 
     const lines = safeItems
-      .map((i) => `• ${i.product_name_snapshot} (${i.qty} x ₹${i.unit_selling_price}) = ₹${i.line_total}`)
+      .map((i) => {
+        const name = i.product_name_snapshot || (i as any).product_name || (i as any).name || 'Item';
+        return `• ${name} (${i.qty} x ₹${i.unit_selling_price}) = ₹${formatRupees(i.line_total)}`;
+      })
       .join('\n');
 
     let msg = `🧾 *${profile?.shop_name || 'Smart Kirana & General Store'}*\n`;
     msg += `📍 ${profile?.address || 'Main Market'}\n`;
     msg += `📞 Contact: ${profile?.phone || ''}\n\n`;
-    msg += `📄 *Tax Invoice / Bill: #${invoice.invoice_number}*\n`;
-    msg += `📅 Date: ${new Date(invoice.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} ${new Date(invoice.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}\n`;
+    msg += `📄 *Tax Invoice / Bill: #${invoice.invoice_number || 'N/A'}*\n`;
+    const invDate = invoice.created_at ? new Date(invoice.created_at) : new Date();
+    const dateFormatted = !isNaN(invDate.getTime())
+      ? `${invDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} ${invDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
+      : 'Today';
+    msg += `📅 Date: ${dateFormatted}\n`;
     msg += `👤 Customer: ${customer?.name || 'Walk-in Customer'}\n\n`;
     msg += `🛒 *Bill Items:*\n${lines}\n\n`;
     msg += `💰 *Bill Net Total: ₹${formatRupees(invoice.grand_total)}*\n`;
@@ -189,14 +209,14 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
 
     // Try Web Share API with image file if supported (Mobile phones / tablets)
     try {
-      const canvas = await captureReceiptCanvas();
-      if (canvas && navigator.share && navigator.canShare) {
+      const canvas = captureReceiptCanvas();
+      if (canvas && typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
         const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
         if (blob) {
-          const file = new File([blob], `Bill_${invoice.invoice_number}.png`, { type: 'image/png' });
+          const file = new File([blob], `Bill_${invoice.invoice_number || 'receipt'}.png`, { type: 'image/png' });
           if (navigator.canShare({ files: [file] })) {
             await navigator.share({
-              title: `Bill #${invoice.invoice_number}`,
+              title: `Bill #${invoice.invoice_number || 'receipt'}`,
               text: msg,
               files: [file],
             });
@@ -205,15 +225,22 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         }
       }
     } catch (shareErr) {
-      console.warn('Native share failed, falling back to WhatsApp Web URL:', shareErr);
+      console.warn('Native share failed, falling back to WhatsApp link:', shareErr);
     }
 
-    // Desktop WhatsApp Web combo: Copy 560px thermal PNG to clipboard and open WhatsApp Web
-    handleCopyImage();
+    // Attempt image copy to clipboard or download so user has image ready
+    try {
+      await handleCopyImage();
+    } catch {
+      // non-blocking
+    }
+
+    const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const encoded = encodeURIComponent(msg);
-    const waUrl = phoneWithCountry
-      ? `https://web.whatsapp.com/send?phone=${phoneWithCountry}&text=${encoded}`
-      : `https://web.whatsapp.com/send?text=${encoded}`;
+    const waUrl = isMobile
+      ? (phoneWithCountry ? `https://wa.me/${phoneWithCountry}?text=${encoded}` : `https://wa.me/?text=${encoded}`)
+      : (phoneWithCountry ? `https://web.whatsapp.com/send?phone=${phoneWithCountry}&text=${encoded}` : `https://web.whatsapp.com/send?text=${encoded}`);
+
     window.open(waUrl, '_blank');
     setCopyFeedback('✓ Bill image copied! Paste (Ctrl+V) in WhatsApp Web');
   };

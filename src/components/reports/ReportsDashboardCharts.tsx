@@ -800,3 +800,4 @@ export const GallaAndTaxOverview: React.FC<GallaAndTaxOverviewProps> = ({
     </div>
   );
 };
+
