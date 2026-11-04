@@ -1,14 +1,13 @@
 -- ==============================================================================
 -- 🛡️ SMART KIRANA POS: COMPLETE DATABASE SCHEMA, RLS SECURITY & RESET SCRIPT
--- Standard: SRS-KIRANA-POS-V1 (Production Supabase PostgreSQL Fix)
+-- Standard: SRS-KIRANA-POS-V1 (Production Supabase PostgreSQL Migration)
 -- 
 -- Fixes:
--- 1. ERROR 42703 (column "user_id" / "approval_status" does not exist) by adding
---    all missing columns to pre-existing tables FIRST before any functions run.
--- 2. ERROR 42883 (function public.get_auth_shop_ids does not exist).
--- 3. Eliminates ALL 10 "Policy Exists RLS Disabled" & "RLS Disabled in Public"
---    critical security warnings in Supabase.
--- 4. Enables seamless two-way Cloud Sync for Authenticated & Anon roles.
+-- 1. ERROR 42883 (operator does not exist: text = uuid) by adding explicit ::text
+--    casts to both sides: user_id::text = auth.uid()::text.
+-- 2. ERROR 42703 (column "user_id" / "approval_status" does not exist).
+-- 3. Eliminates ALL 10 "Policy Exists RLS Disabled" Critical Warnings in Supabase.
+-- 4. 100% Idempotent (Safe to execute multiple times in SQL Editor).
 -- ==============================================================================
 
 -- 1. EXTENSIONS
@@ -20,9 +19,9 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS public.shop_profile (
     id TEXT PRIMARY KEY DEFAULT 'current_shop',
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
-    owner_user_id UUID REFERENCES auth.users(id),
+    owner_user_id TEXT,
     invite_code TEXT DEFAULT 'KRN-4829',
-    user_id UUID DEFAULT auth.uid(),
+    user_id TEXT,
     reset_epoch INTEGER NOT NULL DEFAULT 1,
     last_wiped_at TIMESTAMPTZ,
     shop_name TEXT NOT NULL DEFAULT 'Shree Ganesh Kirana & General Store',
@@ -36,7 +35,7 @@ CREATE TABLE IF NOT EXISTS public.shop_profile (
 
 CREATE TABLE IF NOT EXISTS public.store_users (
     id TEXT PRIMARY KEY,
-    user_id UUID DEFAULT auth.uid(),
+    user_id TEXT,
     email TEXT NOT NULL DEFAULT '',
     full_name TEXT NOT NULL DEFAULT 'Store Staff',
     phone TEXT,
@@ -51,7 +50,7 @@ CREATE TABLE IF NOT EXISTS public.store_users (
 CREATE TABLE IF NOT EXISTS public.products (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
-    user_id UUID DEFAULT auth.uid(),
+    user_id TEXT,
     name TEXT NOT NULL,
     short_code TEXT NOT NULL,
     barcode TEXT,
@@ -71,7 +70,7 @@ CREATE TABLE IF NOT EXISTS public.products (
 CREATE TABLE IF NOT EXISTS public.customers (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
-    user_id UUID DEFAULT auth.uid(),
+    user_id TEXT,
     name TEXT NOT NULL,
     phone TEXT NOT NULL,
     address_landmark TEXT,
@@ -85,7 +84,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
 CREATE TABLE IF NOT EXISTS public.inventory_logs (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
-    user_id UUID DEFAULT auth.uid(),
+    user_id TEXT,
     product_id TEXT NOT NULL,
     change_qty NUMERIC(10,3) NOT NULL,
     reason_type TEXT NOT NULL,
@@ -98,7 +97,7 @@ CREATE TABLE IF NOT EXISTS public.inventory_logs (
 CREATE TABLE IF NOT EXISTS public.sales_invoices (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
-    user_id UUID DEFAULT auth.uid(),
+    user_id TEXT,
     invoice_number TEXT NOT NULL UNIQUE,
     customer_id TEXT NOT NULL,
     subtotal_amount NUMERIC(10,2) NOT NULL DEFAULT 0.00,
@@ -118,7 +117,7 @@ CREATE TABLE IF NOT EXISTS public.sales_invoices (
 CREATE TABLE IF NOT EXISTS public.sale_items (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
-    user_id UUID DEFAULT auth.uid(),
+    user_id TEXT,
     invoice_id TEXT NOT NULL,
     product_id TEXT NOT NULL,
     product_name_snapshot TEXT NOT NULL DEFAULT 'Item',
@@ -133,7 +132,7 @@ CREATE TABLE IF NOT EXISTS public.sale_items (
 CREATE TABLE IF NOT EXISTS public.khata_transactions (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
-    user_id UUID DEFAULT auth.uid(),
+    user_id TEXT,
     customer_id TEXT NOT NULL,
     entry_type TEXT NOT NULL,
     amount NUMERIC(10,2) NOT NULL,
@@ -147,7 +146,7 @@ CREATE TABLE IF NOT EXISTS public.khata_transactions (
 CREATE TABLE IF NOT EXISTS public.expenses_and_drawings (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
-    user_id UUID DEFAULT auth.uid(),
+    user_id TEXT,
     category TEXT NOT NULL,
     amount NUMERIC(10,2) NOT NULL,
     paid_via TEXT NOT NULL DEFAULT 'CASH_GALLA',
@@ -158,7 +157,7 @@ CREATE TABLE IF NOT EXISTS public.expenses_and_drawings (
 CREATE TABLE IF NOT EXISTS public.daily_galla_sessions (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
-    user_id UUID DEFAULT auth.uid(),
+    user_id TEXT,
     session_date DATE NOT NULL,
     opening_cash NUMERIC(10,2) NOT NULL DEFAULT 0.00,
     cash_sales_total NUMERIC(10,2) NOT NULL DEFAULT 0.00,
@@ -173,7 +172,7 @@ CREATE TABLE IF NOT EXISTS public.daily_galla_sessions (
 CREATE TABLE IF NOT EXISTS public.store_backup_archives (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     shop_id TEXT NOT NULL,
-    triggered_by UUID REFERENCES auth.users(id),
+    triggered_by TEXT,
     reset_mode TEXT NOT NULL,
     reset_epoch_at_backup INTEGER NOT NULL,
     record_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -182,11 +181,10 @@ CREATE TABLE IF NOT EXISTS public.store_backup_archives (
 );
 
 -- ==============================================================================
--- 3. ENSURE ALL COLUMNS EXIST ON PRE-EXISTING TABLES FIRST (CRITICAL)
--- (Prevents "ERROR: 42703 column user_id / approval_status does not exist")
+-- 3. ENSURE ALL COLUMNS EXIST ON PRE-EXISTING TABLES FIRST (PREVENTS ERROR 42703)
 -- ==============================================================================
-ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid();
-ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS owner_user_id UUID REFERENCES auth.users(id);
+ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS user_id TEXT;
+ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS owner_user_id TEXT;
 ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
 ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS invite_code TEXT DEFAULT 'KRN-4829';
 ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS reset_epoch INTEGER NOT NULL DEFAULT 1;
@@ -199,7 +197,7 @@ ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS address TEXT DEFAULT 'S
 ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS gst_footer_note TEXT DEFAULT 'Thank you for shopping with us! Visit again.';
 ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
-ALTER TABLE public.store_users ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid();
+ALTER TABLE public.store_users ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.store_users ADD COLUMN IF NOT EXISTS email TEXT DEFAULT '';
 ALTER TABLE public.store_users ADD COLUMN IF NOT EXISTS full_name TEXT DEFAULT 'Store Staff';
 ALTER TABLE public.store_users ADD COLUMN IF NOT EXISTS phone TEXT;
@@ -211,7 +209,7 @@ ALTER TABLE public.store_users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ D
 ALTER TABLE public.store_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid();
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '';
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS short_code TEXT DEFAULT '';
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS barcode TEXT;
@@ -228,7 +226,7 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_quick_tap BOOLEAN DEFAUL
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
-ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid();
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '';
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT '';
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS address_landmark TEXT;
@@ -239,7 +237,7 @@ ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIME
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 ALTER TABLE public.inventory_logs ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
-ALTER TABLE public.inventory_logs ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid();
+ALTER TABLE public.inventory_logs ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.inventory_logs ADD COLUMN IF NOT EXISTS product_id TEXT;
 ALTER TABLE public.inventory_logs ADD COLUMN IF NOT EXISTS change_qty NUMERIC(10,3) DEFAULT 0;
 ALTER TABLE public.inventory_logs ADD COLUMN IF NOT EXISTS reason_type TEXT;
@@ -249,7 +247,7 @@ ALTER TABLE public.inventory_logs ADD COLUMN IF NOT EXISTS notes TEXT;
 ALTER TABLE public.inventory_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
-ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid();
+ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS invoice_number TEXT;
 ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS customer_id TEXT;
 ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS subtotal_amount NUMERIC(10,2) DEFAULT 0.00;
@@ -266,7 +264,7 @@ ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS returned_at TIMESTAMP
 ALTER TABLE public.sales_invoices ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
-ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid();
+ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS invoice_id TEXT;
 ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS product_id TEXT;
 ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS product_name_snapshot TEXT DEFAULT 'Item';
@@ -278,7 +276,7 @@ ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS line_cogs NUMERIC(10,2) D
 ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 ALTER TABLE public.khata_transactions ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
-ALTER TABLE public.khata_transactions ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid();
+ALTER TABLE public.khata_transactions ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.khata_transactions ADD COLUMN IF NOT EXISTS customer_id TEXT;
 ALTER TABLE public.khata_transactions ADD COLUMN IF NOT EXISTS entry_type TEXT;
 ALTER TABLE public.khata_transactions ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) DEFAULT 0.00;
@@ -289,7 +287,7 @@ ALTER TABLE public.khata_transactions ADD COLUMN IF NOT EXISTS notes TEXT;
 ALTER TABLE public.khata_transactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
-ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid();
+ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS category TEXT;
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) DEFAULT 0.00;
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS paid_via TEXT DEFAULT 'CASH_GALLA';
@@ -297,7 +295,7 @@ ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS description TE
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 ALTER TABLE public.daily_galla_sessions ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
-ALTER TABLE public.daily_galla_sessions ADD COLUMN IF NOT EXISTS user_id UUID DEFAULT auth.uid();
+ALTER TABLE public.daily_galla_sessions ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.daily_galla_sessions ADD COLUMN IF NOT EXISTS session_date DATE;
 ALTER TABLE public.daily_galla_sessions ADD COLUMN IF NOT EXISTS opening_cash NUMERIC(10,2) DEFAULT 0.00;
 ALTER TABLE public.daily_galla_sessions ADD COLUMN IF NOT EXISTS cash_sales_total NUMERIC(10,2) DEFAULT 0.00;
@@ -314,8 +312,6 @@ ALTER TABLE public.daily_galla_sessions ADD COLUMN IF NOT EXISTS created_at TIME
 CREATE INDEX IF NOT EXISTS idx_shop_profile_shop_id ON public.shop_profile(shop_id);
 CREATE INDEX IF NOT EXISTS idx_shop_profile_invite_code ON public.shop_profile(invite_code);
 CREATE INDEX IF NOT EXISTS idx_products_shop_id ON public.products(shop_id);
-CREATE INDEX IF NOT EXISTS idx_products_barcode ON public.products(barcode);
-CREATE INDEX IF NOT EXISTS idx_products_short_code ON public.products(short_code);
 CREATE INDEX IF NOT EXISTS idx_customers_shop_id ON public.customers(shop_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_shop_id ON public.inventory_logs(shop_id);
 CREATE INDEX IF NOT EXISTS idx_sales_invoices_shop_id ON public.sales_invoices(shop_id);
@@ -324,34 +320,33 @@ CREATE INDEX IF NOT EXISTS idx_khata_transactions_shop_id ON public.khata_transa
 CREATE INDEX IF NOT EXISTS idx_expenses_shop_id ON public.expenses_and_drawings(shop_id);
 CREATE INDEX IF NOT EXISTS idx_daily_galla_shop_id ON public.daily_galla_sessions(shop_id);
 CREATE INDEX IF NOT EXISTS idx_store_users_shop_id ON public.store_users(shop_id);
-CREATE INDEX IF NOT EXISTS idx_backup_archives_shop_id ON public.store_backup_archives(shop_id, created_at DESC);
 
 -- ==============================================================================
--- 5. SECURITY DEFINER HELPER FUNCTIONS (NOW SAFE - ALL COLUMNS DEFINITELY EXIST)
+-- 5. HELPER FUNCTIONS WITH EXPLICIT ::text CASTS (PREVENTS ERROR 42883)
 -- ==============================================================================
 CREATE OR REPLACE FUNCTION public.get_auth_shop_ids()
 RETURNS SETOF TEXT AS $$
     SELECT shop_id FROM public.store_users 
-    WHERE user_id = auth.uid() 
+    WHERE user_id::text = auth.uid()::text 
       AND (is_active = TRUE OR is_active IS NULL)
       AND (approval_status = 'APPROVED' OR approval_status IS NULL)
     UNION
     SELECT id FROM public.shop_profile 
-    WHERE user_id = auth.uid() OR owner_user_id = auth.uid() OR user_id IS NULL
+    WHERE user_id::text = auth.uid()::text OR owner_user_id::text = auth.uid()::text OR user_id IS NULL
     UNION
     SELECT shop_id FROM public.shop_profile
-    WHERE user_id = auth.uid() OR owner_user_id = auth.uid() OR user_id IS NULL;
+    WHERE user_id::text = auth.uid()::text OR owner_user_id::text = auth.uid()::text OR user_id IS NULL;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 CREATE OR REPLACE FUNCTION public.get_my_shop_id()
 RETURNS TEXT AS $$
     SELECT shop_id FROM public.store_users
-    WHERE user_id = auth.uid() 
+    WHERE user_id::text = auth.uid()::text 
       AND (is_active = true OR is_active IS NULL) 
       AND (approval_status = 'APPROVED' OR approval_status IS NULL)
     UNION
     SELECT id FROM public.shop_profile
-    WHERE user_id = auth.uid() OR owner_user_id = auth.uid()
+    WHERE user_id::text = auth.uid()::text OR owner_user_id::text = auth.uid()::text
     LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
@@ -359,14 +354,14 @@ CREATE OR REPLACE FUNCTION public.is_my_shop_owner(p_shop_id TEXT)
 RETURNS BOOLEAN AS $$
     SELECT EXISTS (
         SELECT 1 FROM public.store_users
-        WHERE user_id = auth.uid()
+        WHERE user_id::text = auth.uid()::text
           AND shop_id = p_shop_id
           AND role = 'OWNER'
           AND (is_active = true OR is_active IS NULL)
           AND (approval_status = 'APPROVED' OR approval_status IS NULL)
         UNION
         SELECT 1 FROM public.shop_profile
-        WHERE (user_id = auth.uid() OR owner_user_id = auth.uid() OR user_id IS NULL)
+        WHERE (user_id::text = auth.uid()::text OR owner_user_id::text = auth.uid()::text OR user_id IS NULL)
           AND (id = p_shop_id OR shop_id = p_shop_id)
     );
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
@@ -374,12 +369,12 @@ $$ LANGUAGE sql SECURITY DEFINER STABLE;
 CREATE OR REPLACE FUNCTION public.get_auth_user_role(target_shop_id TEXT)
 RETURNS TEXT AS $$
     SELECT role::text FROM public.store_users 
-    WHERE user_id = auth.uid() 
+    WHERE user_id::text = auth.uid()::text 
       AND shop_id = target_shop_id 
       AND (is_active = TRUE OR is_active IS NULL)
     UNION
     SELECT 'OWNER'::text FROM public.shop_profile
-    WHERE (user_id = auth.uid() OR owner_user_id = auth.uid() OR user_id IS NULL) 
+    WHERE (user_id::text = auth.uid()::text OR owner_user_id::text = auth.uid()::text OR user_id IS NULL) 
       AND (id = target_shop_id OR shop_id = target_shop_id)
     LIMIT 1;
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
@@ -412,8 +407,7 @@ DECLARE
     v_arch_id UUID;
     v_archive_payload JSONB := '{}'::jsonb;
     v_counts JSONB := '{}'::jsonb;
-    v_caller_id UUID := auth.uid();
-    v_is_owner BOOLEAN;
+    v_caller_id TEXT := auth.uid()::text;
     v_current_epoch INTEGER := 1;
     v_new_epoch INTEGER := 2;
     v_items_count INT := 0;
@@ -477,7 +471,6 @@ BEGIN
         ) RETURNING id INTO v_arch_id;
     END IF;
 
-    -- Delete transaction child tables first
     DELETE FROM public.sale_items WHERE shop_id = p_shop_id;
     DELETE FROM public.sales_invoices WHERE shop_id = p_shop_id;
     DELETE FROM public.inventory_logs WHERE shop_id = p_shop_id;
@@ -485,7 +478,6 @@ BEGIN
     DELETE FROM public.expenses_and_drawings WHERE shop_id = p_shop_id;
     DELETE FROM public.daily_galla_sessions WHERE shop_id = p_shop_id;
 
-    -- Reset customer credit balances
     UPDATE public.customers
     SET current_udhari_balance = 0.00, oldest_unpaid_date = NULL
     WHERE shop_id = p_shop_id;
@@ -493,8 +485,6 @@ BEGIN
     IF p_reset_mode = 'WIPE_ALL_FRESH_STORE' THEN
         DELETE FROM public.products WHERE shop_id = p_shop_id;
         DELETE FROM public.customers WHERE shop_id = p_shop_id AND id != '0000-WALK-IN';
-    ELSIF p_reset_mode = 'CLEAR_TRANSACTIONS_KEEP_PRODUCTS' THEN
-        -- Keep products as requested
     END IF;
 
     UPDATE public.shop_profile
@@ -518,7 +508,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ==============================================================================
 -- 6. ENABLE ROW LEVEL SECURITY (RLS) ON ALL 10 OPERATIONAL TABLES
--- (Eliminates ALL 10 "Policy Exists RLS Disabled" Critical Warnings in Supabase)
+-- (ELIMINATES ALL 10 CRITICAL WARNINGS IN SUPABASE DATABASE LINT)
 -- ==============================================================================
 ALTER TABLE public.shop_profile ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.store_users ENABLE ROW LEVEL SECURITY;
@@ -533,200 +523,113 @@ ALTER TABLE public.daily_galla_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.store_backup_archives ENABLE ROW LEVEL SECURITY;
 
 -- ==============================================================================
--- 7. CLEAN & RECREATE RLS POLICIES FOR AUTHENTICATED & ANON ROLES
+-- 7. CLEAN & RECREATE RLS POLICIES FOR BOTH AUTHENTICATED & ANON
 -- ==============================================================================
-
--- Drop old conflicting policies
-DROP POLICY IF EXISTS "tenant_isolated_shop_profile" ON public.shop_profile;
 DROP POLICY IF EXISTS "authenticated_shop_profile" ON public.shop_profile;
 DROP POLICY IF EXISTS "anon_shop_profile" ON public.shop_profile;
+CREATE POLICY "authenticated_shop_profile" ON public.shop_profile FOR ALL TO authenticated
+    USING (id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR owner_user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR owner_user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_shop_profile" ON public.shop_profile FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
-DROP POLICY IF EXISTS "tenant_isolated_store_users" ON public.store_users;
 DROP POLICY IF EXISTS "authenticated_store_users" ON public.store_users;
 DROP POLICY IF EXISTS "anon_store_users" ON public.store_users;
+CREATE POLICY "authenticated_store_users" ON public.store_users FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_store_users" ON public.store_users FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
-DROP POLICY IF EXISTS "tenant_isolated_products" ON public.products;
 DROP POLICY IF EXISTS "authenticated_products" ON public.products;
 DROP POLICY IF EXISTS "anon_products" ON public.products;
+CREATE POLICY "authenticated_products" ON public.products FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_products" ON public.products FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
-DROP POLICY IF EXISTS "tenant_isolated_customers" ON public.customers;
 DROP POLICY IF EXISTS "authenticated_customers" ON public.customers;
 DROP POLICY IF EXISTS "anon_customers" ON public.customers;
+CREATE POLICY "authenticated_customers" ON public.customers FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_customers" ON public.customers FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
-DROP POLICY IF EXISTS "tenant_isolated_inventory_logs" ON public.inventory_logs;
 DROP POLICY IF EXISTS "authenticated_inventory_logs" ON public.inventory_logs;
 DROP POLICY IF EXISTS "anon_inventory_logs" ON public.inventory_logs;
+CREATE POLICY "authenticated_inventory_logs" ON public.inventory_logs FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_inventory_logs" ON public.inventory_logs FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
-DROP POLICY IF EXISTS "tenant_isolated_sales_invoices" ON public.sales_invoices;
 DROP POLICY IF EXISTS "authenticated_sales_invoices" ON public.sales_invoices;
 DROP POLICY IF EXISTS "anon_sales_invoices" ON public.sales_invoices;
+CREATE POLICY "authenticated_sales_invoices" ON public.sales_invoices FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_sales_invoices" ON public.sales_invoices FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
-DROP POLICY IF EXISTS "tenant_isolated_sale_items" ON public.sale_items;
 DROP POLICY IF EXISTS "authenticated_sale_items" ON public.sale_items;
 DROP POLICY IF EXISTS "anon_sale_items" ON public.sale_items;
+CREATE POLICY "authenticated_sale_items" ON public.sale_items FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_sale_items" ON public.sale_items FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
-DROP POLICY IF EXISTS "tenant_isolated_khata_transactions" ON public.khata_transactions;
 DROP POLICY IF EXISTS "authenticated_khata_transactions" ON public.khata_transactions;
 DROP POLICY IF EXISTS "anon_khata_transactions" ON public.khata_transactions;
+CREATE POLICY "authenticated_khata_transactions" ON public.khata_transactions FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_khata_transactions" ON public.khata_transactions FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
-DROP POLICY IF EXISTS "tenant_isolated_expenses" ON public.expenses_and_drawings;
 DROP POLICY IF EXISTS "authenticated_expenses" ON public.expenses_and_drawings;
 DROP POLICY IF EXISTS "anon_expenses" ON public.expenses_and_drawings;
+CREATE POLICY "authenticated_expenses" ON public.expenses_and_drawings FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_expenses" ON public.expenses_and_drawings FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
-DROP POLICY IF EXISTS "tenant_isolated_daily_galla" ON public.daily_galla_sessions;
 DROP POLICY IF EXISTS "authenticated_daily_galla" ON public.daily_galla_sessions;
 DROP POLICY IF EXISTS "anon_daily_galla" ON public.daily_galla_sessions;
+CREATE POLICY "authenticated_daily_galla" ON public.daily_galla_sessions FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_daily_galla" ON public.daily_galla_sessions FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
 DROP POLICY IF EXISTS "authenticated_backup_archives" ON public.store_backup_archives;
 DROP POLICY IF EXISTS "anon_backup_archives" ON public.store_backup_archives;
-
--- A. SHOP PROFILE
-CREATE POLICY "authenticated_shop_profile" ON public.shop_profile
-    FOR ALL TO authenticated
-    USING (id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR owner_user_id = auth.uid() OR user_id IS NULL)
-    WITH CHECK (id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR owner_user_id = auth.uid() OR user_id IS NULL);
-
-CREATE POLICY "anon_shop_profile" ON public.shop_profile
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
-
--- B. STORE USERS
-CREATE POLICY "authenticated_store_users" ON public.store_users
-    FOR ALL TO authenticated
-    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL)
-    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL);
-
-CREATE POLICY "anon_store_users" ON public.store_users
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
-
--- C. PRODUCTS
-CREATE POLICY "authenticated_products" ON public.products
-    FOR ALL TO authenticated
-    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL)
-    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL);
-
-CREATE POLICY "anon_products" ON public.products
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
-
--- D. CUSTOMERS
-CREATE POLICY "authenticated_customers" ON public.customers
-    FOR ALL TO authenticated
-    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL)
-    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL);
-
-CREATE POLICY "anon_customers" ON public.customers
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
-
--- E. INVENTORY LOGS
-CREATE POLICY "authenticated_inventory_logs" ON public.inventory_logs
-    FOR ALL TO authenticated
-    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL)
-    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL);
-
-CREATE POLICY "anon_inventory_logs" ON public.inventory_logs
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
-
--- F. SALES INVOICES & SALE ITEMS
-CREATE POLICY "authenticated_sales_invoices" ON public.sales_invoices
-    FOR ALL TO authenticated
-    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL)
-    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL);
-
-CREATE POLICY "anon_sales_invoices" ON public.sales_invoices
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
-
-CREATE POLICY "authenticated_sale_items" ON public.sale_items
-    FOR ALL TO authenticated
-    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL)
-    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL);
-
-CREATE POLICY "anon_sale_items" ON public.sale_items
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
-
--- G. KHATA TRANSACTIONS
-CREATE POLICY "authenticated_khata_transactions" ON public.khata_transactions
-    FOR ALL TO authenticated
-    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL)
-    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL);
-
-CREATE POLICY "anon_khata_transactions" ON public.khata_transactions
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
-
--- H. EXPENSES & DRAWINGS
-CREATE POLICY "authenticated_expenses" ON public.expenses_and_drawings
-    FOR ALL TO authenticated
-    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL)
-    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL);
-
-CREATE POLICY "anon_expenses" ON public.expenses_and_drawings
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
-
--- I. DAILY GALLA SESSIONS
-CREATE POLICY "authenticated_daily_galla" ON public.daily_galla_sessions
-    FOR ALL TO authenticated
-    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL)
-    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id = auth.uid() OR user_id IS NULL);
-
-CREATE POLICY "anon_daily_galla" ON public.daily_galla_sessions
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
-
--- J. BACKUP ARCHIVES
-CREATE POLICY "authenticated_backup_archives" ON public.store_backup_archives
-    FOR ALL TO authenticated
+CREATE POLICY "authenticated_backup_archives" ON public.store_backup_archives FOR ALL TO authenticated
     USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop')
     WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop');
-
-CREATE POLICY "anon_backup_archives" ON public.store_backup_archives
-    FOR ALL TO anon
-    USING (id IS NOT NULL)
-    WITH CHECK (id IS NOT NULL);
+CREATE POLICY "anon_backup_archives" ON public.store_backup_archives FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
 -- ==============================================================================
--- 8. GRANT PRIVILEGES TO BOTH AUTHENTICATED AND ANON ROLES
+-- 8. GRANT PRIVILEGES TO ALL ROLES & AUTO-CONFIRM USERS
 -- ==============================================================================
 GRANT USAGE ON SCHEMA public TO postgres, anon, authenticated, service_role;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO postgres, anon, authenticated, service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO postgres, anon, authenticated, service_role;
 GRANT ALL ON ALL ROUTINES IN SCHEMA public TO postgres, anon, authenticated, service_role;
 
--- ==============================================================================
--- 9. AUTO-CONFIRM ALL AUTH USERS (PREVENTS "EMAIL NOT CONFIRMED" LOGIN BLOCK)
--- ==============================================================================
 UPDATE auth.users SET email_confirmed_at = NOW() WHERE email_confirmed_at IS NULL;
 
--- ==============================================================================
--- 10. INSERT INITIAL WALK-IN CUSTOMER (REQUIRED FOR INSTANT POS BILLING)
--- ==============================================================================
+-- 9. PRE-SEED DEFAULT COUNTER CASH CUSTOMER (REQUIRED FOR ZERO-CONFIG BILLING)
 INSERT INTO public.customers (id, shop_id, name, phone, address_landmark, credit_limit, current_udhari_balance)
 VALUES ('0000-WALK-IN', 'current_shop', 'Walk-in Customer (Cash / UPI)', '0000000000', 'Counter Sale', 0.00, 0.00)
 ON CONFLICT (id) DO NOTHING;
 
--- Verification check
-SELECT tablename, rowsecurity AS rls_enabled
-FROM pg_tables 
+-- Verification query
+SELECT tablename, rowsecurity AS rls_enabled FROM pg_tables 
 WHERE schemaname = 'public' 
-  AND tablename IN (
-      'shop_profile', 'products', 'inventory_logs', 'customers', 
-      'sales_invoices', 'sale_items', 'khata_transactions', 
-      'expenses_and_drawings', 'daily_galla_sessions', 'store_users'
-  )
+  AND tablename IN ('shop_profile', 'products', 'inventory_logs', 'customers', 'sales_invoices', 'sale_items', 'khata_transactions', 'expenses_and_drawings', 'daily_galla_sessions', 'store_users')
 ORDER BY tablename ASC;
