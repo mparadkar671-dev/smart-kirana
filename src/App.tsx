@@ -83,29 +83,21 @@ const MainApp: React.FC = () => {
         <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-blue-800 text-white p-3 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md border-b border-blue-700 select-none">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-orange-500 rounded-lg text-white shrink-0">
-              <Sparkles className="w-5 h-5" />
+              <PlusCircle className="w-5 h-5" />
             </div>
             <div>
-              <div className="font-bold text-sm">Welcome! Your Kirana Store is fresh and empty.</div>
+              <div className="font-bold text-sm">Welcome! Your Kirana Store is fresh and ready.</div>
               <div className="text-xs text-blue-200">
-                You have 0 products. Add your own items or explore with sample Indian grocery data.
+                Your inventory is currently empty. Tap &quot;+ Add Product&quot; to begin adding your store items.
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setActiveTab('inventory')}
-              className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs"
+              className="px-3.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs"
             >
-              <PlusCircle className="w-3.5 h-3.5" /> Add Product
-            </button>
-            <button
-              onClick={async () => {
-                await db.seedDemoProducts();
-              }}
-              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-orange-400" /> Load 25 Sample Items
+              <PlusCircle className="w-3.5 h-3.5" /> + Add Product
             </button>
           </div>
         </div>

@@ -46,6 +46,7 @@ import {
   ShieldAlert,
   ChevronDown,
   KeyRound,
+  FlaskConical,
 } from 'lucide-react';
 import { generateInviteCode } from '../../db/db';
 
@@ -88,6 +89,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   const [dangerConfirmText, setDangerConfirmText] = useState('');
   const [isExecutingDangerAction, setIsExecutingDangerAction] = useState(false);
   const [dangerError, setDangerError] = useState<string | null>(null);
+  const [showDemoTools, setShowDemoTools] = useState(false);
 
   const refreshStaffList = async () => {
     try {
@@ -1176,18 +1178,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         {/* Action Buttons - Always in DOM for accessibility, expanded view gives full details */}
         <div className="space-y-4">
           <div className="flex flex-wrap gap-3 pt-1">
-            {/* Automatically hidden whenever real sales invoices exist (Rule 2) */}
-            {realSalesCount === 0 && (
-              <button
-                type="button"
-                onClick={handleSeedDemoProducts}
-                className="px-4 py-2.5 border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 text-blue-900 dark:text-blue-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition"
-              >
-                <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                Load 25 Sample Kirana Demo Products
-              </button>
-            )}
-
             <button
               type="button"
               onClick={handleClearTransactions}
@@ -1206,16 +1196,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
             >
               <Trash2 className="w-4 h-4 text-red-600" />
               ⚠️ Wipe All Records (100% Empty Fresh Store)
-            </button>
-
-            <button
-              type="button"
-              onClick={handleResetToDemo}
-              disabled={!hasPermission('DATA_WIPE')}
-              className="px-4 py-2.5 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-800 dark:text-slate-200 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition disabled:opacity-40"
-            >
-              <RotateCcw className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-              Full Demo Reset (25 Products + Demo Customers)
             </button>
           </div>
 
@@ -1319,6 +1299,69 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Developer & Testing Sandbox (Demo Products - Hidden & Collapsed by Default) */}
+      <div className="bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 space-y-3 transition-colors">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
+            <div className="p-2 bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 rounded-xl">
+              <FlaskConical className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                Developer &amp; Testing Sandbox
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Hidden demo product seeding tools (for software evaluation only)
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid="toggle-sandbox-btn"
+            onClick={() => setShowDemoTools(!showDemoTools)}
+            className="px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-300 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 transition shadow-2xs"
+          >
+            {showDemoTools ? 'Hide Sandbox' : 'Show Sandbox'}
+          </button>
+        </div>
+
+        {showDemoTools && (
+          <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3 animate-in fade-in">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-slate-600 dark:text-slate-400">
+                <span className="font-bold block text-slate-900 dark:text-white">Load 25 Sample Kirana Products</span>
+                Seeds 25 realistic Indian Kirana products (sugar, salt, oils, biscuits, grains) to test billing without entering manual catalog items.
+              </div>
+              <button
+                type="button"
+                data-testid="load-demo-products-btn"
+                onClick={handleSeedDemoProducts}
+                className="px-4 py-2 border border-purple-300 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-900 dark:text-purple-200 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shrink-0 shadow-2xs"
+              >
+                <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                <span>Load 25 Sample Kirana Demo Products</span>
+              </button>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-200/60 dark:border-slate-800/60">
+              <div className="text-xs text-slate-600 dark:text-slate-400">
+                <span className="font-bold block text-slate-900 dark:text-white">Full Demo Reset (25 Products + Demo Customers)</span>
+                Resets the store back to initial developer demonstration state with demo inventory and customers.
+              </div>
+              <button
+                type="button"
+                onClick={handleResetToDemo}
+                disabled={!hasPermission('DATA_WIPE')}
+                className="px-4 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition shrink-0 shadow-2xs disabled:opacity-40"
+              >
+                <RotateCcw className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                <span>Full Demo Reset (25 Products + Demo Customers)</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
