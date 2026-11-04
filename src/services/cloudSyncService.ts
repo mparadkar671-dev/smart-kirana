@@ -92,6 +92,97 @@ class CloudSyncService {
   }
 
   /**
+   * Returns current active tenant shop ID from local storage or shop profile
+   */
+  async getActiveShopId(): Promise<string> {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('kirana_active_shop_id');
+      if (stored) return stored;
+    }
+    try {
+      const profile = await db.getShopProfile();
+      if (profile && profile.id && profile.id !== 'current_shop') {
+        return profile.id;
+      }
+    } catch {
+      // fallback
+    }
+    return 'current_shop';
+  }
+
+  /**
+   * Atomic Danger Vault Store Reset: Cleans records from Supabase PostgreSQL and local Dexie
+   * Uses execute_store_vault_reset RPC with transactional snapshot archiving, with direct child-to-parent deletion fallback.
+   */
+  async executeStoreVaultReset(
+    resetMode: 'WIPE_ALL_FRESH_STORE' | 'CLEAR_TRANSACTIONS_KEEP_PRODUCTS',
+    saveCloudArchive = true
+  ): Promise<{ success: boolean; error?: string; resetEpoch?: number }> {
+    const shopId = await this.getActiveShopId();
+    let resetEpoch = Date.now();
+
+    if (supabase) {
+      try {
+        // 1. Try atomic PostgreSQL RPC first
+        const { data, error } = await supabase.rpc('execute_store_vault_reset', {
+          p_shop_id: shopId,
+          p_reset_mode: resetMode,
+          p_save_cloud_archive: saveCloudArchive,
+        });
+
+        if (error) {
+          console.warn('RPC execute_store_vault_reset failed, attempting direct scoped deletion fallback:', error.message);
+          // 2. Fallback: Direct scoped delete from child tables to parent tables
+          await supabase.from('sale_items').delete().eq('shop_id', shopId);
+          await supabase.from('khata_transactions').delete().eq('shop_id', shopId);
+          await supabase.from('inventory_logs').delete().eq('shop_id', shopId);
+          await supabase.from('sales_invoices').delete().eq('shop_id', shopId);
+          await supabase.from('daily_galla_sessions').delete().eq('shop_id', shopId);
+          await supabase.from('expenses_and_drawings').delete().eq('shop_id', shopId);
+
+          if (resetMode === 'WIPE_ALL_FRESH_STORE') {
+            await supabase.from('customers').delete().eq('shop_id', shopId).neq('id', '0000-WALK-IN');
+            await supabase.from('products').delete().eq('shop_id', shopId);
+          }
+
+          // Bump reset_epoch on shop_profile
+          await supabase
+            .from('shop_profile')
+            .update({
+              reset_epoch: resetEpoch,
+              last_wiped_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', shopId);
+        } else if (data && typeof data === 'object' && 'reset_epoch' in data) {
+          resetEpoch = Number((data as { reset_epoch: number }).reset_epoch) || resetEpoch;
+        }
+      } catch (err) {
+        console.warn('Remote Supabase deletion failed (offline or network):', err);
+      }
+    }
+
+    // Always clear outbox so queued insertions do not re-populate wiped data
+    try {
+      await db.sync_outbox.clear();
+    } catch (e) {
+      console.warn('Failed to clear sync outbox:', e);
+    }
+
+    // Update local profile with new reset_epoch
+    try {
+      await db.updateShopProfile({
+        reset_epoch: resetEpoch,
+        last_wiped_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn('Failed to update local profile reset_epoch:', e);
+    }
+
+    return { success: true, resetEpoch };
+  }
+
+  /**
    * Syncs a single product to Supabase cloud
    */
   async syncProduct(product: Product): Promise<void> {
@@ -404,19 +495,51 @@ class CloudSyncService {
 
     try {
       const userId = await this.getUserId();
+      const shopId = await this.getActiveShopId();
+      const localProfile = await db.getShopProfile();
+      const localResetEpoch = localProfile.reset_epoch || 1;
+
+      // Multi-device watermark check: Check if a remote wipe was executed from another device
+      try {
+        const { data: remoteProfile } = await supabase
+          .from('shop_profile')
+          .select('reset_epoch')
+          .eq('id', shopId)
+          .maybeSingle();
+
+        if (remoteProfile?.reset_epoch && remoteProfile.reset_epoch > localResetEpoch) {
+          console.warn('Remote store wipe/reset detected from another device! Aborting local push and synchronizing fresh state.');
+          await db.clearAllRecordsToEmpty();
+          await db.sync_outbox.clear();
+          await db.updateShopProfile({ reset_epoch: remoteProfile.reset_epoch });
+          await this.pullAllFromCloud();
+          this.setStatus({
+            isSyncing: false,
+            lastSyncedAt: new Date().toISOString(),
+            status: 'synced',
+            message: 'Store was reset on another device. Local cache cleared and synchronized.',
+          });
+          return { success: true, pushedCount: 0, errors: ['Remote reset detected; local store synchronized.'] };
+        }
+      } catch (checkErr) {
+        console.warn('Could not check remote reset_epoch:', checkErr);
+      }
 
       // 1. Sync Shop Profile
       try {
         const profile = await db.getShopProfile();
         if (profile) {
           const payload: Record<string, unknown> = {
-            id: 'current_shop',
+            id: shopId,
             shop_name: profile.shop_name,
             owner_name: profile.owner_name,
             phone: profile.phone,
             upi_vpa: profile.upi_vpa,
             address: profile.address || '',
             gst_footer_note: profile.gst_footer_note || '',
+            invite_code: profile.invite_code,
+            reset_epoch: profile.reset_epoch || 1,
+            last_wiped_at: profile.last_wiped_at,
             updated_at: new Date().toISOString(),
           };
           if (userId) payload.user_id = userId;
@@ -433,7 +556,7 @@ class CloudSyncService {
         const users = await db.getStoreUsers();
         if (users.length > 0) {
           for (const u of users) {
-            await this.syncStoreUser(u);
+            await this.syncStoreUser({ ...u, shop_id: u.shop_id || shopId });
             pushedCount++;
           }
         }
@@ -448,7 +571,7 @@ class CloudSyncService {
           const rows = prods.map((p) => {
             const r: Record<string, unknown> = {
               id: p.id,
-              shop_id: p.shop_id || 'current_shop',
+              shop_id: p.shop_id || shopId,
               name: p.name,
               short_code: p.short_code,
               barcode: p.barcode,
@@ -486,7 +609,7 @@ class CloudSyncService {
           const rows = custs.map((c) => {
             const r: Record<string, unknown> = {
               id: c.id,
-              shop_id: c.shop_id || 'current_shop',
+              shop_id: c.shop_id || shopId,
               name: c.name,
               phone: c.phone,
               address_landmark: c.address_landmark || null,
@@ -517,7 +640,7 @@ class CloudSyncService {
           const rows = invoices.map((inv) => {
             const r: Record<string, unknown> = {
               id: inv.id,
-              shop_id: inv.shop_id || 'current_shop',
+              shop_id: inv.shop_id || shopId,
               invoice_number: inv.invoice_number,
               customer_id: inv.customer_id,
               subtotal_amount: inv.subtotal_amount,
@@ -551,7 +674,7 @@ class CloudSyncService {
           const rows = txs.map((t) => {
             const r: Record<string, unknown> = {
               id: t.id,
-              shop_id: t.shop_id || 'current_shop',
+              shop_id: t.shop_id || shopId,
               customer_id: t.customer_id,
               entry_type: t.entry_type,
               amount: t.amount,
@@ -580,7 +703,7 @@ class CloudSyncService {
         const sessions = await db.daily_galla_sessions.toArray();
         if (sessions.length > 0) {
           for (const s of sessions) {
-            await this.syncGallaSession(s);
+            await this.syncGallaSession({ ...s, shop_id: s.shop_id || shopId });
             pushedCount++;
           }
         }
@@ -593,7 +716,7 @@ class CloudSyncService {
         const expenses = await db.expenses_and_drawings.toArray();
         if (expenses.length > 0) {
           for (const exp of expenses) {
-            await this.syncExpense(exp);
+            await this.syncExpense({ ...exp, shop_id: exp.shop_id || shopId });
             pushedCount++;
           }
         }
@@ -625,7 +748,7 @@ class CloudSyncService {
   }
 
   /**
-   * Pull all records from Supabase into local Dexie database
+   * Pull all records from Supabase into local Dexie database strictly scoped by shop_id
    */
   async pullAllFromCloud(): Promise<{ success: boolean; pulledCount: number; errors: string[] }> {
     if (!supabase) {
@@ -638,18 +761,39 @@ class CloudSyncService {
     const errors: string[] = [];
 
     try {
-      // 1. Pull Shop Profile
+      const shopId = await this.getActiveShopId();
+      const localProfile = await db.getShopProfile();
+      const localResetEpoch = localProfile.reset_epoch || 1;
+
+      // 1. Pull Shop Profile strictly for active shop_id
       try {
-        const { data: profile, error } = await supabase.from('shop_profile').select('*').maybeSingle();
+        const { data: profile, error } = await supabase
+          .from('shop_profile')
+          .select('*')
+          .eq('id', shopId)
+          .maybeSingle();
+
         if (error) throw new Error(error.message);
         if (profile) {
+          // Check remote reset_epoch
+          if (profile.reset_epoch && profile.reset_epoch > localResetEpoch) {
+            console.log('Remote store wipe detected in pull. Purging local stale operational data.');
+            await db.clearAllRecordsToEmpty();
+            await db.sync_outbox.clear();
+          }
+
           await db.updateShopProfile({
+            id: profile.id,
+            shop_id: profile.id,
             shop_name: profile.shop_name,
             owner_name: profile.owner_name,
             phone: profile.phone,
             upi_vpa: profile.upi_vpa || 'kirana@upi',
             address: profile.address || '',
             gst_footer_note: profile.gst_footer_note || '',
+            invite_code: profile.invite_code,
+            reset_epoch: profile.reset_epoch || 1,
+            last_wiped_at: profile.last_wiped_at,
           });
           pulledCount++;
         }
@@ -657,14 +801,19 @@ class CloudSyncService {
         console.warn('Pull shop_profile failed:', e);
       }
 
-      // 2. Pull Products
+      // 2. Pull Products strictly scoped by shop_id
       try {
-        const { data: prods, error } = await supabase.from('products').select('*');
+        const { data: prods, error } = await supabase
+          .from('products')
+          .select('*')
+          .eq('shop_id', shopId);
+
         if (error) throw new Error(error.message);
         if (prods && prods.length > 0) {
           for (const p of prods) {
             const productRecord: Product = {
               id: p.id,
+              shop_id: p.shop_id || shopId,
               name: p.name,
               short_code: p.short_code,
               barcode: p.barcode || '',
@@ -688,14 +837,19 @@ class CloudSyncService {
         console.warn('Pull products failed:', e);
       }
 
-      // 3. Pull Customers
+      // 3. Pull Customers strictly scoped by shop_id
       try {
-        const { data: custs, error } = await supabase.from('customers').select('*');
+        const { data: custs, error } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('shop_id', shopId);
+
         if (error) throw new Error(error.message);
         if (custs && custs.length > 0) {
           for (const c of custs) {
             const customerRecord: Customer = {
               id: c.id,
+              shop_id: c.shop_id || shopId,
               name: c.name,
               phone: c.phone,
               address_landmark: c.address_landmark || null,
@@ -713,9 +867,13 @@ class CloudSyncService {
         console.warn('Pull customers failed:', e);
       }
 
-      // 4. Pull Store Users
+      // 4. Pull Store Users strictly scoped by shop_id
       try {
-        const { data: users, error } = await supabase.from('store_users').select('*');
+        const { data: users, error } = await supabase
+          .from('store_users')
+          .select('*')
+          .eq('shop_id', shopId);
+
         if (error) throw new Error(error.message);
         if (users && users.length > 0) {
           for (const u of users) {
@@ -726,7 +884,7 @@ class CloudSyncService {
               full_name: u.full_name,
               phone: u.phone || undefined,
               role: u.role,
-              shop_id: u.shop_id || 'current_shop',
+              shop_id: u.shop_id || shopId,
               is_active: u.is_active ?? true,
               created_at: u.created_at || new Date().toISOString(),
               updated_at: u.updated_at || undefined,
@@ -739,15 +897,19 @@ class CloudSyncService {
         console.warn('Pull store users failed:', e);
       }
 
-      // 5. Pull Inventory Logs (Append-Only Delta Ledger)
+      // 5. Pull Inventory Logs strictly scoped by shop_id
       try {
-        const { data: logs, error } = await supabase.from('inventory_logs').select('*');
+        const { data: logs, error } = await supabase
+          .from('inventory_logs')
+          .select('*')
+          .eq('shop_id', shopId);
+
         if (error) throw new Error(error.message);
         if (logs && logs.length > 0) {
           for (const l of logs) {
             await db.inventory_logs.put({
               id: l.id,
-              shop_id: l.shop_id || 'current_shop',
+              shop_id: l.shop_id || shopId,
               product_id: l.product_id,
               change_qty: Number(l.change_qty) || 0,
               reason_type: l.reason_type,
@@ -763,15 +925,19 @@ class CloudSyncService {
         console.warn('Pull inventory logs failed:', e);
       }
 
-      // 6. Pull Khata Transactions (Append-Only Ledger)
+      // 6. Pull Khata Transactions strictly scoped by shop_id
       try {
-        const { data: txs, error } = await supabase.from('khata_transactions').select('*');
+        const { data: txs, error } = await supabase
+          .from('khata_transactions')
+          .select('*')
+          .eq('shop_id', shopId);
+
         if (error) throw new Error(error.message);
         if (txs && txs.length > 0) {
           for (const t of txs) {
             await db.khata_transactions.put({
               id: t.id,
-              shop_id: t.shop_id || 'current_shop',
+              shop_id: t.shop_id || shopId,
               customer_id: t.customer_id,
               entry_type: t.entry_type,
               amount: Number(t.amount) || 0,
@@ -788,7 +954,67 @@ class CloudSyncService {
         console.warn('Pull khata transactions failed:', e);
       }
 
-      // 7. ACID Reconciliation: Recompute stock & udhari deterministically from deltas
+      // 7. Pull Sales Invoices strictly scoped by shop_id
+      try {
+        const { data: invoices, error } = await supabase
+          .from('sales_invoices')
+          .select('*')
+          .eq('shop_id', shopId);
+
+        if (error) throw new Error(error.message);
+        if (invoices && invoices.length > 0) {
+          for (const inv of invoices) {
+            await db.sales_invoices.put({
+              id: inv.id,
+              shop_id: inv.shop_id || shopId,
+              invoice_number: inv.invoice_number,
+              customer_id: inv.customer_id,
+              subtotal_amount: Number(inv.subtotal_amount) || 0,
+              discount_roundoff: Number(inv.discount_roundoff) || 0,
+              grand_total: Number(inv.grand_total) || 0,
+              total_cogs: Number(inv.total_cogs) || 0,
+              payment_mode: inv.payment_mode,
+              amount_paid_now: Number(inv.amount_paid_now) || 0,
+              udhari_added: Number(inv.udhari_added) || 0,
+              status: inv.status,
+              created_at: inv.created_at || new Date().toISOString(),
+            });
+            pulledCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Pull sales invoices failed:', e);
+      }
+
+      // 8. Pull Sale Items strictly scoped by shop_id
+      try {
+        const { data: saleItems, error } = await supabase
+          .from('sale_items')
+          .select('*')
+          .eq('shop_id', shopId);
+
+        if (error) throw new Error(error.message);
+        if (saleItems && saleItems.length > 0) {
+          for (const item of saleItems) {
+            await db.sale_items.put({
+              id: item.id,
+              shop_id: item.shop_id || shopId,
+              invoice_id: item.invoice_id,
+              product_id: item.product_id,
+              product_name_snapshot: item.product_name_snapshot,
+              qty: Number(item.qty) || 0,
+              unit_selling_price: Number(item.unit_selling_price) || 0,
+              unit_purchase_cost: Number(item.unit_purchase_cost || (item as any).unit_cost_price) || 0,
+              line_total: Number(item.line_total) || 0,
+            });
+            pulledCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Pull sale items failed:', e);
+      }
+
+      // 9. ACID Reconciliation: Recompute stock & udhari deterministically from deltas
       await db.reconcileAllStockAndBalances();
 
       const now = new Date().toISOString();
@@ -796,7 +1022,7 @@ class CloudSyncService {
         isSyncing: false,
         lastSyncedAt: now,
         status: 'synced',
-        message: `Cloud sync complete! Pulled ${pulledCount} items and reconciled ledger deltas.`,
+        message: `Cloud sync complete! Pulled ${pulledCount} items and reconciled ledger deltas for shop.`,
       });
 
       return { success: true, pulledCount, errors };

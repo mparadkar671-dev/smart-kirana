@@ -169,7 +169,10 @@ export interface DailyGallaSession {
 export interface ShopProfile {
   id: string; // 'current_shop'
   shop_id?: string;
+  owner_user_id?: string;
   invite_code?: string; // 6-digit Store Invite Code, e.g. "KRN-4829"
+  reset_epoch?: number; // Multi-device watermark check to detect remote wipes
+  last_wiped_at?: string;
   shop_name: string;
   owner_name: string;
   phone: string;

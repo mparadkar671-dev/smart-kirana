@@ -1,4 +1,5 @@
 import { db } from '../db/db';
+import { cloudSyncService } from './cloudSyncService';
 import {
   Customer,
   KhataTransaction,
@@ -307,10 +308,15 @@ export class KhataService {
     if (customerId === '0000-WALK-IN') {
       throw new Error('Cannot delete system Walk-in Customer.');
     }
-    await db.transaction('rw', [db.customers, db.khata_transactions], async () => {
+    await db.transaction('rw', [db.customers, db.khata_transactions, db.sync_outbox], async () => {
       await db.customers.delete(customerId);
       await db.khata_transactions.where({ customer_id: customerId }).delete();
+      await db.queueSync(
+        { table_name: 'customers', operation: 'DELETE', payload: { id: customerId } },
+        db.sync_outbox
+      );
     });
+    cloudSyncService.deleteCustomer(customerId);
   }
 
   /**
@@ -319,12 +325,140 @@ export class KhataService {
   static async bulkDeleteCustomers(customerIds: string[]): Promise<void> {
     const validIds = customerIds.filter((id) => id !== '0000-WALK-IN');
     if (validIds.length === 0) return;
-    await db.transaction('rw', [db.customers, db.khata_transactions], async () => {
+    await db.transaction('rw', [db.customers, db.khata_transactions, db.sync_outbox], async () => {
       await db.customers.bulkDelete(validIds);
       for (const id of validIds) {
         await db.khata_transactions.where({ customer_id: id }).delete();
+        await db.queueSync(
+          { table_name: 'customers', operation: 'DELETE', payload: { id } },
+          db.sync_outbox
+        );
       }
     });
+    for (const id of validIds) {
+      cloudSyncService.deleteCustomer(id);
+    }
+  }
+
+  /**
+   * Free SMS Reminder Generator for Keypad / "Dabba" Feature Phones without WhatsApp
+   * Formatted in clean plain text (no markdown asterisks) compatible with KaiOS / standard SMS.
+   */
+  static generateSmsText(params: {
+    customerName: string;
+    balance: number;
+    shopName: string;
+    upiVpa?: string;
+    shopPhone?: string;
+    agingDays?: number;
+  }): string {
+    const { customerName, balance, shopName, upiVpa, shopPhone, agingDays } = params;
+    const balanceStr = balance.toFixed(2);
+    let text = `Khata Update from ${shopName}:\n`;
+    text += `Namaste ${customerName} ji, your pending balance is Rs. ${balanceStr}`;
+    if (agingDays && agingDays > 0) {
+      text += ` (${agingDays} days pending)`;
+    }
+    text += `.\n`;
+    if (upiVpa) {
+      text += `Pay via UPI VPA: ${upiVpa}\n`;
+    }
+    if (shopPhone) {
+      text += `Contact: ${shopPhone}\n`;
+    }
+    text += `Thank you!`;
+    return text;
+  }
+
+  static generateSmsLink(params: {
+    customer: Customer;
+    shopProfile: ShopProfile;
+    agingDays?: number;
+  }): string {
+    const cleanPhone = this.cleanIndianPhone(params.customer.phone);
+    const text = this.generateSmsText({
+      customerName: params.customer.name,
+      balance: params.customer.current_udhari_balance,
+      shopName: params.shopProfile.shop_name,
+      upiVpa: params.shopProfile.upi_vpa,
+      shopPhone: params.shopProfile.phone,
+      agingDays: params.agingDays,
+    });
+    return `sms:+91${cleanPhone}?body=${encodeURIComponent(text)}`;
+  }
+
+  /**
+   * SMS generator for a single customer bill with itemized highlights
+   */
+  static generateCustomerBillSmsText(params: {
+    customerName: string;
+    bill: { invoice: SalesInvoice; items: SaleItem[]; udhariAmount: number };
+    shopProfile: ShopProfile;
+  }): string {
+    const { customerName, bill, shopProfile } = params;
+    const inv = bill.invoice;
+    const itemsSummary = bill.items.map((it) => `${it.product_name_snapshot} (${it.qty})`).join(', ');
+    let text = `Bill #${inv.invoice_number} from ${shopProfile.shop_name}:\n`;
+    text += `Customer: ${customerName} ji\n`;
+    text += `Total: Rs. ${inv.grand_total.toFixed(2)}, Paid: Rs. ${inv.amount_paid_now.toFixed(2)}, Udhari: Rs. ${bill.udhariAmount.toFixed(2)}\n`;
+    if (itemsSummary) {
+      text += `Items: ${itemsSummary.slice(0, 90)}${itemsSummary.length > 90 ? '...' : ''}\n`;
+    }
+    if (shopProfile.upi_vpa) {
+      text += `UPI: ${shopProfile.upi_vpa}\n`;
+    }
+    text += `Thank you for shopping with us!`;
+    return text;
+  }
+
+  static generateCustomerBillSmsLink(params: {
+    customer: Customer;
+    bill: { invoice: SalesInvoice; items: SaleItem[]; udhariAmount: number };
+    shopProfile: ShopProfile;
+  }): string {
+    const cleanPhone = this.cleanIndianPhone(params.customer.phone);
+    const text = this.generateCustomerBillSmsText({
+      customerName: params.customer.name,
+      bill: params.bill,
+      shopProfile: params.shopProfile,
+    });
+    return `sms:+91${cleanPhone}?body=${encodeURIComponent(text)}`;
+  }
+
+  /**
+   * SMS generator for all pending bills statement
+   */
+  static generateAllPendingBillsSmsText(params: {
+    customer: Customer;
+    bills: Array<{ invoice: SalesInvoice; items: SaleItem[]; udhariAmount: number }>;
+    shopProfile: ShopProfile;
+  }): string {
+    const { customer, bills, shopProfile } = params;
+    const totalCredit = bills.reduce((sum, b) => sum + b.udhariAmount, 0);
+    let text = `Khata Summary from ${shopProfile.shop_name}:\n`;
+    text += `Namaste ${customer.name} ji,\n`;
+    text += `You have ${bills.length} unpaid bill(s) totaling Rs. ${totalCredit.toFixed(2)}:\n`;
+    bills.slice(0, 5).forEach((b) => {
+      text += `#${b.invoice.invoice_number}: Rs. ${b.udhariAmount.toFixed(2)}\n`;
+    });
+    if (bills.length > 5) {
+      text += `+ ${bills.length - 5} more bills.\n`;
+    }
+    if (shopProfile.upi_vpa) {
+      text += `UPI: ${shopProfile.upi_vpa}\n`;
+    }
+    text += `Thank you!`;
+    return text;
+  }
+
+  static generateAllPendingBillsSmsLink(params: {
+    customer: Customer;
+    bills: Array<{ invoice: SalesInvoice; items: SaleItem[]; udhariAmount: number }>;
+    shopProfile: ShopProfile;
+  }): string {
+    const cleanPhone = this.cleanIndianPhone(params.customer.phone);
+    const text = this.generateAllPendingBillsSmsText(params);
+    return `sms:+91${cleanPhone}?body=${encodeURIComponent(text)}`;
   }
 
   /**

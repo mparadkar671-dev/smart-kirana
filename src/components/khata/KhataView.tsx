@@ -18,6 +18,7 @@ import {
   Filter,
   Trash2,
   X,
+  PhoneCall,
 } from 'lucide-react';
 
 interface KhataViewProps {
@@ -159,6 +160,46 @@ export const KhataView: React.FC<KhataViewProps> = ({
     window.open(url, '_blank');
   };
 
+  const [smsToast, setSmsToast] = useState<string | null>(null);
+
+  const handleDirectSms = (c: Customer) => {
+    const defaultProf: ShopProfile = shopProfile || {
+      id: 'current_shop',
+      shop_name: 'Smart Kirana',
+      owner_name: 'Owner',
+      phone: '9876543210',
+      upi_vpa: 'kirana@upi',
+      address: 'Shop Market',
+      gst_footer_note: '',
+      updated_at: new Date().toISOString(),
+    };
+
+    const days = KhataService.getAgingDays(c.oldest_unpaid_date);
+    const text = KhataService.generateSmsText({
+      customerName: c.name,
+      balance: c.current_udhari_balance,
+      shopName: defaultProf.shop_name,
+      upiVpa: defaultProf.upi_vpa,
+      shopPhone: defaultProf.phone,
+      agingDays: days,
+    });
+    const url = KhataService.generateSmsLink({
+      customer: c,
+      shopProfile: defaultProf,
+      agingDays: days,
+    });
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+
+    KhataService.logReminderSent(c.id);
+    setSmsToast(`✓ SMS text copied for ${c.name}! Opening SMS app...`);
+    setTimeout(() => setSmsToast(null), 3000);
+
+    window.location.href = url;
+  };
+
   const handleToggleSelectAll = () => {
     if (selectedCustomerIds.size === filteredAndSortedCustomers.length && filteredAndSortedCustomers.length > 0) {
       setSelectedCustomerIds(new Set());
@@ -237,6 +278,13 @@ export const KhataView: React.FC<KhataViewProps> = ({
           </p>
         </div>
       </div>
+
+      {smsToast && (
+        <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-xs font-bold rounded-xl animate-in fade-in flex items-center gap-2">
+          <PhoneCall className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+          <span>{smsToast}</span>
+        </div>
+      )}
 
       {/* Top KPI Bar (REQ-10) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="khata-kpi-bar">
@@ -510,6 +558,18 @@ export const KhataView: React.FC<KhataViewProps> = ({
                               className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 disabled:opacity-30 transition"
                             >
                               <MessageSquare className="w-4 h-4" />
+                            </button>
+
+                            {/* Direct SMS Nudge (For Keypad / Dabba Phones) */}
+                            <button
+                              type="button"
+                              data-testid={`sms-btn-${cust.id}`}
+                              disabled={cust.current_udhari_balance <= 0}
+                              onClick={() => handleDirectSms(cust)}
+                              title="Send 1-Click SMS Text Reminder (For Keypad / Dabba Phones)"
+                              className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 disabled:opacity-30 transition"
+                            >
+                              <PhoneCall className="w-4 h-4" />
                             </button>
 
                             {/* Receive Jama */}

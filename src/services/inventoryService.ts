@@ -123,8 +123,12 @@ export class InventoryService {
    * Deletes a product
    */
   static async deleteProduct(productId: string): Promise<void> {
-    await db.transaction('rw', [db.products, db.inventory_logs], async () => {
+    await db.transaction('rw', [db.products, db.inventory_logs, db.sync_outbox], async () => {
       await db.products.delete(productId);
+      await db.queueSync(
+        { table_name: 'products', operation: 'DELETE', payload: { id: productId } },
+        db.sync_outbox
+      );
     });
     cloudSyncService.deleteProduct(productId);
   }
@@ -134,8 +138,14 @@ export class InventoryService {
    */
   static async bulkDeleteProducts(productIds: string[]): Promise<void> {
     if (!productIds || productIds.length === 0) return;
-    await db.transaction('rw', [db.products, db.inventory_logs], async () => {
+    await db.transaction('rw', [db.products, db.inventory_logs, db.sync_outbox], async () => {
       await db.products.bulkDelete(productIds);
+      for (const id of productIds) {
+        await db.queueSync(
+          { table_name: 'products', operation: 'DELETE', payload: { id } },
+          db.sync_outbox
+        );
+      }
     });
     for (const id of productIds) { cloudSyncService.deleteProduct(id); }
   }

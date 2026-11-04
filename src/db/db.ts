@@ -342,8 +342,11 @@ export class KiranaDatabase extends Dexie {
    * Update shop profile
    */
   async updateShopProfile(profile: Partial<ShopProfile>): Promise<void> {
-    await this.shop_profile.update(DEFAULT_SHOP_PROFILE.id, {
+    const current = (await this.shop_profile.get(DEFAULT_SHOP_PROFILE.id)) || DEFAULT_SHOP_PROFILE;
+    await this.shop_profile.put({
+      ...current,
       ...profile,
+      id: DEFAULT_SHOP_PROFILE.id,
       updated_at: new Date().toISOString(),
     });
   }

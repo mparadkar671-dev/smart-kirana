@@ -181,33 +181,6 @@ export const authService = {
       console.warn('Error reading local shop profile:', e);
     }
 
-    // 2. From Supabase shop_profile
-    if (supabase) {
-      try {
-        const { data, error } = await supabase
-          .from('shop_profile')
-          .select('id, shop_name, owner_name, phone, address')
-          .limit(50);
-        if (data && !error) {
-          for (const row of data) {
-            const key = (row.shop_name || '').toLowerCase().trim();
-            if (key && !seen.has(key)) {
-              shops.push({
-                id: row.id,
-                shop_name: row.shop_name,
-                owner_name: row.owner_name,
-                phone: row.phone,
-                address: row.address,
-              });
-              seen.add(key);
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('Error fetching shops from Supabase:', err);
-      }
-    }
-
     // Default fallback if database has no registered shops yet
     if (shops.length === 0) {
       shops.push({
@@ -400,34 +373,7 @@ export const authService = {
     // Restore shop profile & store user role from Supabase to IndexedDB
     if (data.user) {
       try {
-        const { data: profile } = await supabase
-          .from('shop_profile')
-          .select('*')
-          .eq('user_id', data.user.id)
-          .maybeSingle();
-
-        if (profile) {
-          await db.updateShopProfile({
-            shop_name: profile.shop_name,
-            owner_name: profile.owner_name,
-            phone: profile.phone,
-            upi_vpa: profile.upi_vpa || 'kirana@upi',
-            address: profile.address || '',
-            gst_footer_note: profile.gst_footer_note || '',
-          });
-        } else if (data.user.user_metadata) {
-          const meta = data.user.user_metadata;
-          if (meta.shop_name || meta.owner_name) {
-            await db.updateShopProfile({
-              shop_name: meta.shop_name || 'My Kirana Store',
-              owner_name: meta.owner_name || 'Store Owner',
-              phone: meta.phone || '',
-              upi_vpa: `${meta.phone || 'kirana'}@upi`,
-            });
-          }
-        }
-
-        // Fetch or initialize store_user role
+        // 1. Fetch or initialize store_user role and resolve store shop_id
         const { data: storeUserData } = await supabase
           .from('store_users')
           .select('*')
@@ -440,6 +386,19 @@ export const authService = {
           'OWNER';
 
         const isActive = storeUserData?.is_active ?? true;
+        const resolvedShopId = storeUserData?.shop_id || (data.user.user_metadata?.shop_id as string) || 'current_shop';
+
+        // Multi-tenant store account switch check: If logging into a different store,
+        // purge local Dexie cache so store A data does not leak into store B
+        if (typeof localStorage !== 'undefined') {
+          const previousShopId = localStorage.getItem('kirana_active_shop_id');
+          if (previousShopId && previousShopId !== resolvedShopId) {
+            console.log(`Store account switch detected (${previousShopId} -> ${resolvedShopId}). Clearing local Dexie data to maintain tenant isolation.`);
+            await db.clearAllRecordsToEmpty();
+            await db.sync_outbox.clear();
+          }
+          localStorage.setItem('kirana_active_shop_id', resolvedShopId);
+        }
 
         const storeUserRecord: StoreUser = {
           id: storeUserData?.id || `usr-${data.user.id.slice(0, 8)}`,
@@ -451,7 +410,7 @@ export const authService = {
             'Store User',
           phone: storeUserData?.phone || data.user.user_metadata?.phone,
           role,
-          shop_id: storeUserData?.shop_id || 'current_shop',
+          shop_id: resolvedShopId,
           is_active: isActive,
           approval_status: isActive ? 'APPROVED' : 'PENDING',
           created_at: storeUserData?.created_at || new Date().toISOString(),
@@ -459,6 +418,44 @@ export const authService = {
         };
 
         await db.saveStoreUser(storeUserRecord);
+
+        // 2. Fetch shop profile strictly for resolvedShopId
+        const { data: profile } = await supabase
+          .from('shop_profile')
+          .select('*')
+          .or(`id.eq.${resolvedShopId},user_id.eq.${data.user.id}`)
+          .maybeSingle();
+
+        if (profile) {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('kirana_active_shop_id', profile.id);
+          }
+          await db.updateShopProfile({
+            id: profile.id,
+            shop_id: profile.id,
+            shop_name: profile.shop_name,
+            owner_name: profile.owner_name,
+            phone: profile.phone,
+            upi_vpa: profile.upi_vpa || 'kirana@upi',
+            address: profile.address || '',
+            gst_footer_note: profile.gst_footer_note || '',
+            invite_code: profile.invite_code,
+            reset_epoch: profile.reset_epoch || 1,
+            last_wiped_at: profile.last_wiped_at,
+          });
+        } else if (data.user.user_metadata) {
+          const meta = data.user.user_metadata;
+          if (meta.shop_name || meta.owner_name) {
+            await db.updateShopProfile({
+              id: resolvedShopId,
+              shop_id: resolvedShopId,
+              shop_name: meta.shop_name || 'My Kirana Store',
+              owner_name: meta.owner_name || 'Store Owner',
+              phone: meta.phone || '',
+              upi_vpa: `${meta.phone || 'kirana'}@upi`,
+            });
+          }
+        }
 
         if (!isActive && role !== 'OWNER') {
           throw new Error(
@@ -641,6 +638,9 @@ export const authService = {
    * Signs out user
    */
   async signOut() {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('kirana_active_shop_id');
+    }
     if (!supabase) return;
     await supabase.auth.signOut();
   },

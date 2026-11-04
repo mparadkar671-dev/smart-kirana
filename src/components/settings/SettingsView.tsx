@@ -401,29 +401,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
       // 1. Automatic Emergency JSON Backup Download Immediately BEFORE Wipe (REQ: Iteration 6)
       await BackupService.downloadJsonBackup();
 
-      // 2. Perform Selected Destructive Action
+      // 2. Perform Selected Destructive Action with atomic remote Supabase wipe & outbox cleanup
       if (pendingDangerAction === 'CLEAR_TRANSACTIONS') {
+        await cloudSyncService.executeStoreVaultReset('CLEAR_TRANSACTIONS_KEEP_PRODUCTS', true);
         await db.clearTransactionalData();
+        await db.sync_outbox.clear();
         await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
-          text: 'Emergency JSON backup downloaded. Sales & khata transactions cleared. Catalog preserved.',
+          text: 'Emergency JSON backup downloaded. Sales & khata transactions permanently cleared in local Dexie & Supabase. Catalog preserved.',
         });
       } else if (pendingDangerAction === 'WIPE_EMPTY') {
+        await cloudSyncService.executeStoreVaultReset('WIPE_ALL_FRESH_STORE', true);
         await db.clearAllRecordsToEmpty();
+        await db.sync_outbox.clear();
         await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
-          text: 'Emergency JSON backup downloaded. All products and records wiped! Store is 100% clean and empty.',
+          text: 'Emergency JSON backup downloaded. All products, customers & transactions wiped from local Dexie & Supabase! Store is 100% clean and empty.',
         });
       } else if (pendingDangerAction === 'RESET_DEMO') {
+        await cloudSyncService.executeStoreVaultReset('WIPE_ALL_FRESH_STORE', true);
+        await db.clearAllRecordsToEmpty();
+        await db.sync_outbox.clear();
         await db.resetToDemoState();
+        await cloudSyncService.syncAllToCloud();
         await refreshRealSalesCount();
         const p = await db.getShopProfile();
         setProfile(p);
         setStatusMsg({
           type: 'success',
-          text: 'Emergency JSON backup downloaded. Database successfully reset to demo state.',
+          text: 'Emergency JSON backup downloaded. Database successfully reset to 25 demo products and synchronized with Supabase.',
         });
       }
 

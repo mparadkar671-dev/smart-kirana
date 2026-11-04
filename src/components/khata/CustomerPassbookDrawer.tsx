@@ -21,6 +21,7 @@ import {
   Eye,
   Send,
   ShoppingBag,
+  PhoneCall,
 } from 'lucide-react';
 
 interface CustomerPassbookDrawerProps {
@@ -52,6 +53,7 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
   // Receipt Slip Modal State
   const [viewReceiptInvoice, setViewReceiptInvoice] = useState<SalesInvoice | null>(null);
   const [viewReceiptItems, setViewReceiptItems] = useState<SaleItem[]>([]);
+  const [smsFeedback, setSmsFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     setCurrentCustomer(customer);
@@ -128,6 +130,83 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
       shopProfile: defaultProfile,
     });
     window.open(url, '_blank');
+  };
+
+  // Free SMS Reminder (Keypad / Dabba Phone friendly)
+  const handleSendSms = (agingDays?: number) => {
+    const text = KhataService.generateSmsText({
+      customerName: currentCustomer.name,
+      balance: currentCustomer.current_udhari_balance,
+      shopName: defaultProfile.shop_name,
+      upiVpa: defaultProfile.upi_vpa,
+      shopPhone: defaultProfile.phone,
+      agingDays,
+    });
+    const url = KhataService.generateSmsLink({
+      customer: currentCustomer,
+      shopProfile: defaultProfile,
+      agingDays,
+    });
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+
+    KhataService.logReminderSent(currentCustomer.id);
+    setSmsFeedback('✓ SMS ready & copied to clipboard!');
+    setTimeout(() => setSmsFeedback(null), 3000);
+
+    window.location.href = url;
+  };
+
+  // Send single bill on SMS (Dabba phone friendly)
+  const handleSendSingleBillSms = (bill: {
+    invoice: SalesInvoice;
+    items: SaleItem[];
+    udhariAmount: number;
+  }) => {
+    const text = KhataService.generateCustomerBillSmsText({
+      customerName: currentCustomer.name,
+      bill,
+      shopProfile: defaultProfile,
+    });
+    const url = KhataService.generateCustomerBillSmsLink({
+      customer: currentCustomer,
+      bill,
+      shopProfile: defaultProfile,
+    });
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+
+    setSmsFeedback('✓ Bill SMS copied & opened!');
+    setTimeout(() => setSmsFeedback(null), 3000);
+
+    window.location.href = url;
+  };
+
+  // Send all pending bills statement on SMS
+  const handleSendAllBillsSms = () => {
+    const text = KhataService.generateAllPendingBillsSmsText({
+      customer: currentCustomer,
+      bills: pendingBills,
+      shopProfile: defaultProfile,
+    });
+    const url = KhataService.generateAllPendingBillsSmsLink({
+      customer: currentCustomer,
+      bills: pendingBills,
+      shopProfile: defaultProfile,
+    });
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+
+    setSmsFeedback('✓ All Bills SMS copied & opened!');
+    setTimeout(() => setSmsFeedback(null), 3000);
+
+    window.location.href = url;
   };
 
   // Send all pending bills statement on WhatsApp
@@ -227,7 +306,7 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
           </div>
 
           {/* Action Buttons Row */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <button
               type="button"
               data-testid="receive-jama-btn"
@@ -247,7 +326,19 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
               className="py-2 px-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1.5"
             >
               <MessageSquare className="w-4 h-4" />
-              <span>Remind</span>
+              <span>WhatsApp</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="send-sms-reminder-btn"
+              disabled={currentCustomer.current_udhari_balance <= 0}
+              onClick={() => handleSendSms(agingDays)}
+              className="py-2 px-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center justify-center gap-1.5"
+              title="Send SMS text message for basic keypad / dabba phones without WhatsApp"
+            >
+              <PhoneCall className="w-4 h-4" />
+              <span>📱 SMS (Dabba)</span>
             </button>
 
             <button
@@ -260,6 +351,12 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
               <span>Passbook PDF</span>
             </button>
           </div>
+
+          {smsFeedback && (
+            <div className="p-1.5 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold text-center rounded-xl animate-in fade-in">
+              {smsFeedback}
+            </div>
+          )}
         </div>
 
         {/* TAB SWITCHER: 1. Chronological Ledger vs 2. Detailed Pending Bills */}
@@ -381,15 +478,28 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
               </div>
 
               {pendingBills.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleSendAllBillsWhatsApp}
-                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
-                  title="Send complete itemized list of all unpaid bills to customer WhatsApp"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>WhatsApp All Bills</span>
-                </button>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleSendAllBillsWhatsApp}
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                    title="Send complete itemized list of all unpaid bills to customer WhatsApp"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>WhatsApp All</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="sms-all-bills-btn"
+                    onClick={handleSendAllBillsSms}
+                    className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-xs"
+                    title="Send all unpaid bills via native SMS text for feature / dabba phones"
+                  >
+                    <PhoneCall className="w-3.5 h-3.5" />
+                    <span>SMS All</span>
+                  </button>
+                </div>
               )}
             </div>
 
@@ -512,7 +622,7 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
                           </div>
 
                           {/* Action Buttons for this specific bill */}
-                          <div className="flex items-center justify-end gap-2 pt-1">
+                          <div className="flex items-center justify-end gap-2 pt-1 flex-wrap">
                             <button
                               type="button"
                               onClick={() => handleViewReceipt(bill.invoice, bill.items)}
@@ -528,7 +638,18 @@ export const CustomerPassbookDrawer: React.FC<CustomerPassbookDrawerProps> = ({
                               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs transition"
                             >
                               <MessageSquare className="w-3.5 h-3.5" />
-                              <span>WhatsApp This Bill</span>
+                              <span>WhatsApp</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              data-testid={`sms-bill-btn-${bill.invoice.invoice_number}`}
+                              onClick={() => handleSendSingleBillSms(bill)}
+                              className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs transition"
+                              title="Send single bill via SMS (dabba keypad phones)"
+                            >
+                              <PhoneCall className="w-3.5 h-3.5" />
+                              <span>SMS</span>
                             </button>
                           </div>
                         </div>

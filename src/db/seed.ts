@@ -472,6 +472,7 @@ export const DEFAULT_SHOP_PROFILE: ShopProfile = {
   id: 'current_shop',
   shop_id: 'current_shop',
   invite_code: 'KRN-4829',
+  reset_epoch: 1,
   shop_name: 'Shree Ganesh Kirana & General Store',
   owner_name: 'Ramesh Patel',
   phone: '9876543210',

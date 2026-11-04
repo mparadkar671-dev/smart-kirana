@@ -9,6 +9,7 @@ import {
   Download,
   Copy,
   Sparkles,
+  MessageSquare,
   Image as ImageIcon,
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -245,6 +246,53 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     setCopyFeedback('✓ Bill image copied! Paste (Ctrl+V) in WhatsApp Web');
   };
 
+  /**
+   * Generates clean SMS text message for basic keypad / "dabba" feature phones without internet
+   */
+  const handleSmsShare = () => {
+    const isWalkIn = !customer?.phone || customer.phone === '0000000000';
+    const cleanPhone = isWalkIn ? '' : customer.phone.replace(/\D/g, '');
+
+    const lines = safeItems
+      .slice(0, 4)
+      .map((i) => {
+        const name = i.product_name_snapshot || (i as any).product_name || (i as any).name || 'Item';
+        return `${name} (${i.qty}x${i.unit_selling_price})`;
+      })
+      .join(', ');
+
+    let smsText = `Bill #${invoice.invoice_number || 'N/A'} from ${profile?.shop_name || 'Smart Kirana'}:\n`;
+    smsText += `Customer: ${customer?.name || 'Customer'}\n`;
+    smsText += `Total: Rs. ${formatRupees(invoice.grand_total)}, Paid: Rs. ${formatRupees(invoice.amount_paid_now)}`;
+    if (invoice.udhari_added > 0) {
+      smsText += `, Udhari: Rs. ${formatRupees(invoice.udhari_added)}`;
+    }
+    smsText += `\n`;
+    if (lines) {
+      smsText += `Items: ${lines}${safeItems.length > 4 ? ` +${safeItems.length - 4} more` : ''}\n`;
+    }
+    if (customer && !isWalkIn && currentKhataBalance > 0) {
+      smsText += `Total Balance: Rs. ${formatRupees(currentKhataBalance)}\n`;
+    }
+    if (profile?.upi_vpa) {
+      smsText += `UPI: ${profile.upi_vpa}\n`;
+    }
+    smsText += `Thank you!`;
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(smsText).catch(() => {});
+    }
+
+    setCopyFeedback('✓ Bill SMS copied & opened!');
+    setTimeout(() => setCopyFeedback(null), 3000);
+
+    const smsUrl = cleanPhone
+      ? `sms:+91${cleanPhone}?body=${encodeURIComponent(smsText)}`
+      : `sms:?body=${encodeURIComponent(smsText)}`;
+
+    window.location.href = smsUrl;
+  };
+
   const upiLink = profile?.upi_vpa
     ? `upi://pay?pa=${encodeURIComponent(profile.upi_vpa)}&pn=${encodeURIComponent(
         profile.shop_name
@@ -269,7 +317,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           </div>
 
           {/* Action Buttons Row */}
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-4 gap-1.5">
             <button
               onClick={handlePrint}
               className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition shadow-xs"
@@ -284,7 +332,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               className="py-1.5 px-2 bg-blue-700 hover:bg-blue-600 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition shadow-xs disabled:opacity-50"
               title="Save Bill as Image"
             >
-              <ImageIcon className="w-3.5 h-3.5" /> Bill Image
+              <ImageIcon className="w-3.5 h-3.5" /> Image
             </button>
 
             <button
@@ -294,6 +342,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               title="Share on WhatsApp"
             >
               <Share2 className="w-3.5 h-3.5" /> WhatsApp
+            </button>
+
+            <button
+              data-testid="sms-share-btn"
+              onClick={handleSmsShare}
+              className="py-1.5 px-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition shadow-xs"
+              title="Send bill SMS text for feature / dabba phones"
+            >
+              <MessageSquare className="w-3.5 h-3.5" /> SMS
             </button>
           </div>
 

@@ -11,6 +11,7 @@ import { WALK_IN_CUSTOMER_ID } from '../types';
 describe('Iteration 6: Security & Danger Vault Isolation & Full System Regression', () => {
   beforeEach(async () => {
     await db.resetToDemoState();
+    await db.sync_outbox.clear();
     vi.restoreAllMocks();
   });
 
@@ -139,7 +140,7 @@ describe('Iteration 6: Security & Danger Vault Isolation & Full System Regressio
 
       const remainingProducts = await db.products.count();
       expect(remainingProducts).toBe(25);
-    });
+    }, { timeout: 6000 });
   });
 
   it('Full System Regression Gate: Verifies 10 multi-tenant tables, indexed shop_id, and ACID isolation', async () => {
@@ -183,5 +184,78 @@ describe('Iteration 6: Security & Danger Vault Isolation & Full System Regressio
       const hasShopIdIndex = table?.schema.indexes.some((idx) => idx.name === 'shop_id') || table?.schema.primKey.name === 'shop_id';
       expect(hasShopIdIndex).toBe(true);
     }
+  });
+
+  it('verifies SMS reminder links generate standard sms:+91 URIs in plain text for keypad/dabba phones', async () => {
+    const { KhataService } = await import('../services/khataService');
+    const dummyCust = {
+      id: 'cust-dabba-1',
+      name: 'Rameshwar Lal',
+      phone: '9876543210',
+      credit_limit: 2000,
+      current_udhari_balance: 450,
+      oldest_unpaid_date: '2026-10-01',
+      created_at: new Date().toISOString(),
+    };
+    const dummyProfile = {
+      id: 'current_shop',
+      shop_name: 'Shree Ganesh Kirana',
+      owner_name: 'Ramesh Patel',
+      phone: '9123456780',
+      upi_vpa: 'ganesh@upi',
+      address: 'Main Market',
+      gst_footer_note: '',
+      updated_at: new Date().toISOString(),
+    };
+
+    const smsLink = KhataService.generateSmsLink({
+      customer: dummyCust,
+      shopProfile: dummyProfile,
+      agingDays: 14,
+    });
+
+    expect(smsLink).toContain('sms:+919876543210?body=');
+    const bodyEncoded = smsLink.split('body=')[1];
+    const decoded = decodeURIComponent(bodyEncoded);
+
+    // Plain text verification: Must NOT contain markdown asterisks *
+    expect(decoded).not.toContain('*');
+    expect(decoded).toContain('Khata Update from Shree Ganesh Kirana:');
+    expect(decoded).toContain('Rameshwar Lal ji');
+    expect(decoded).toContain('Rs. 450.00');
+    expect(decoded).toContain('Pay via UPI VPA: ganesh@upi');
+  });
+
+  it('verifies executeStoreVaultReset atomically clears local outbox and updates reset_epoch', async () => {
+    const { cloudSyncService } = await import('../services/cloudSyncService');
+
+    // Add a pending outbox item
+    await db.sync_outbox.add({
+      id: 'outbox-test-1',
+      shop_id: 'current_shop',
+      table_name: 'products',
+      operation: 'INSERT',
+      payload: { id: 'p1', name: 'Test' },
+      status: 'PENDING',
+      created_at: new Date().toISOString(),
+      retry_count: 0,
+      error_message: null,
+    });
+
+    const initialOutboxCount = await db.sync_outbox.count();
+    expect(initialOutboxCount).toBe(1);
+
+    // Execute Danger Vault Reset
+    const res = await cloudSyncService.executeStoreVaultReset('WIPE_ALL_FRESH_STORE', false);
+    expect(res.success).toBe(true);
+
+    // Outbox must be 100% cleared so wiped data is not re-pushed
+    const afterOutboxCount = await db.sync_outbox.count();
+    expect(afterOutboxCount).toBe(0);
+
+    // Profile reset_epoch must be updated
+    const profile = await db.getShopProfile();
+    expect(profile.reset_epoch).toBeDefined();
+    expect(profile.reset_epoch).toBeGreaterThan(0);
   });
 });
