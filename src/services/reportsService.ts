@@ -10,6 +10,7 @@ import {
   CreditNote,
 } from '../types';
 import { formatINR, roundCurrency, toPaise, toRupees } from '../utils/math';
+import { LoanAccountService } from './loanAccountService';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -1302,6 +1303,244 @@ export class ReportsService {
     };
 
     const xlsxBuffer = createMultiSheetExcelWorkbook([sheetConfig]);
+    return { pdfBuffer, xlsxBuffer };
+  }
+
+  // =========================================================================
+  // 8. LOAN-FUNDED INVENTORY, PURCHASE, SALES, P&L & DAILY SEPARATION REPORT
+  // =========================================================================
+  static async getLoanInventoryReportData(
+    range?: DateFilterRange,
+    loanAccountId?: string
+  ) {
+    return LoanAccountService.getLoanFundedInventoryReport({
+      loanAccountId,
+      startDate: range?.startDate,
+      endDate: range?.endDate,
+    });
+  }
+
+  static async generateLoanInventoryReport(
+    shopProfile?: ShopProfile,
+    range?: DateFilterRange,
+    loanAccountId?: string
+  ): Promise<{ pdfBuffer: ArrayBuffer; xlsxBuffer: Uint8Array }> {
+    const safeProfile = shopProfile || (await db.getShopProfile());
+    const data = await this.getLoanInventoryReportData(range, loanAccountId);
+    const dateRangeStr = this.getRangeLabel(range);
+
+    // 1. Standard Vyapar-style PDF Report
+    const doc = new jsPDF('landscape');
+    doc.setFontSize(15);
+    doc.text(safeProfile.shop_name, 14, 15);
+    doc.setFontSize(11);
+    doc.text('Loan-Funded Stock, Purchase, Sales, Profit & Daily Set-Aside Register', 14, 22);
+    doc.setFontSize(9);
+    doc.text(
+      `Date Range: ${dateRangeStr} | Loan Allocated: Rs. ${data.totals.totalLoanAllocatedToStock.toFixed(2)} | Sales: Rs. ${data.totals.totalSalesRevenue.toFixed(2)} | Net Profit: Rs. ${data.totals.totalNetProfit.toFixed(2)} | Today Set-Aside Principal: Rs. ${data.totals.todayTotalPrincipalToSeparate.toFixed(2)}`,
+      14,
+      28
+    );
+
+    const rows = data.productRows.map((r, i) => [
+      (i + 1).toString(),
+      r.productName,
+      r.category,
+      `${r.loanAccountName} (${r.lenderName})`,
+      `${r.purchasedQtyFromLoan} ${r.unitType} (Rs. ${r.totalPurchaseCostFromLoan.toFixed(2)})`,
+      `${r.currentStock} ${r.unitType} (Rs. ${r.currentStockCostValuation.toFixed(2)})`,
+      `${r.totalQtySold} ${r.unitType}`,
+      `Rs. ${r.totalSalesRevenue.toFixed(2)}`,
+      `Rs. ${r.totalSalesCogs.toFixed(2)}`,
+      `Rs. ${r.totalNetProfit.toFixed(2)} (${r.profitMarginPct}%)`,
+      `Rs. ${r.todayPrincipalCogsToSeparate.toFixed(2)}`,
+    ]);
+
+    autoTable(doc, {
+      startY: 33,
+      head: [
+        [
+          '#',
+          'Product Name',
+          'Category',
+          'Loan Account',
+          'Purchased (Loan)',
+          'Stock Left (Cost)',
+          'Sold Qty',
+          'Sales Revenue',
+          'Principal (COGS)',
+          'Net Profit',
+          'Today Set-Aside',
+        ],
+      ],
+      body:
+        rows.length > 0
+          ? rows
+          : [['-', '-', '-', '-', '-', '-', '-', '-', '-', '-', 'No loan-funded products found']],
+      theme: 'grid',
+      headStyles: { fillColor: [109, 40, 217] },
+    });
+
+    const pdfBuffer = doc.output('arraybuffer');
+
+    // 2. Multi-Sheet Vyapar Standard Excel Pack (Summary + Category Breakdown + Item-Wise P&L)
+    const summarySheet: SheetConfig = {
+      sheetName: '1_Loan_Accounts_Summary',
+      shopName: safeProfile.shop_name,
+      reportTitle: 'Loan Accounts Summary & Daily Repayment Set-Aside Register',
+      dateRangeStr,
+      generatedBy: safeProfile.owner_name,
+      headers: [
+        '#',
+        'Loan Account Title',
+        'Bank / Lender Name',
+        'Sanctioned Loan (₹)',
+        'Stock Purchased (₹)',
+        'Stock Remaining at Cost (₹)',
+        'Total Sales Revenue (₹)',
+        'Principal Recovered (COGS ₹)',
+        'Net Profit Earned (₹)',
+        'Today Set-Aside Principal (₹)',
+        'Already Repaid (₹)',
+        'Balance Loan to Repay (₹)',
+      ],
+      rows: data.loanAccounts.map((l, idx) => [
+        idx + 1,
+        l.loanAccount.name,
+        l.loanAccount.lender_name,
+        `₹ ${l.loanAccount.principal_amount.toFixed(2)}`,
+        `₹ ${l.totalPurchasedFromLoan.toFixed(2)}`,
+        `₹ ${l.currentStockValuationAtCost.toFixed(2)}`,
+        `₹ ${l.totalSalesRevenue.toFixed(2)}`,
+        `₹ ${l.totalPrincipalRecoveredViaSales.toFixed(2)}`,
+        `₹ ${l.totalNetProfitGenerated.toFixed(2)}`,
+        `₹ ${l.todayPrincipalToSetAside.toFixed(2)}`,
+        `₹ ${(l.loanAccount.amount_repaid || 0).toFixed(2)}`,
+        `₹ ${l.remainingLoanToRepay.toFixed(2)}`,
+      ]),
+      totalsRow: [
+        'TOTAL LOAN PORTFOLIO',
+        `${data.loanAccounts.length} Loans`,
+        '',
+        `₹ ${data.totals.totalLoanSanctioned.toFixed(2)}`,
+        `₹ ${data.totals.totalLoanAllocatedToStock.toFixed(2)}`,
+        `₹ ${data.totals.totalStockRemainingAtCost.toFixed(2)}`,
+        `₹ ${data.totals.totalSalesRevenue.toFixed(2)}`,
+        `₹ ${data.totals.totalPrincipalRecoveredFromSales.toFixed(2)}`,
+        `₹ ${data.totals.totalNetProfit.toFixed(2)}`,
+        `₹ ${data.totals.todayTotalPrincipalToSeparate.toFixed(2)}`,
+        '',
+        '',
+      ],
+    };
+
+    const categorySheet: SheetConfig = {
+      sheetName: '2_Category_Wise_Loan_PnL',
+      shopName: safeProfile.shop_name,
+      reportTitle: 'Category-Wise Loan Material Purchase, Sales & Profit Breakdown',
+      dateRangeStr,
+      generatedBy: safeProfile.owner_name,
+      headers: [
+        '#',
+        'Product Category',
+        'Items Count',
+        'Loan Purchase Cost (₹)',
+        'Current Stock Cost (₹)',
+        'Sales Revenue (₹)',
+        'Principal Recovered / COGS (₹)',
+        'Net Profit (₹)',
+        'Today Sales Revenue (₹)',
+        'Today Principal to Separate (₹)',
+      ],
+      rows: data.categorySummary.map((c, idx) => [
+        idx + 1,
+        c.category,
+        c.productsCount,
+        `₹ ${c.purchasedCostFromLoan.toFixed(2)}`,
+        `₹ ${c.currentStockCost.toFixed(2)}`,
+        `₹ ${c.salesRevenue.toFixed(2)}`,
+        `₹ ${c.cogsRecovered.toFixed(2)}`,
+        `₹ ${c.netProfit.toFixed(2)}`,
+        `₹ ${c.todayRevenueToSetAside.toFixed(2)}`,
+        `₹ ${c.todayPrincipalToSetAside.toFixed(2)}`,
+      ]),
+      totalsRow: [
+        'TOTAL CATEGORIES',
+        `${data.categorySummary.length} Categories`,
+        data.productRows.length,
+        `₹ ${data.totals.totalLoanAllocatedToStock.toFixed(2)}`,
+        `₹ ${data.totals.totalStockRemainingAtCost.toFixed(2)}`,
+        `₹ ${data.totals.totalSalesRevenue.toFixed(2)}`,
+        `₹ ${data.totals.totalPrincipalRecoveredFromSales.toFixed(2)}`,
+        `₹ ${data.totals.totalNetProfit.toFixed(2)}`,
+        `₹ ${data.totals.todayTotalRevenueFromLoanStock.toFixed(2)}`,
+        `₹ ${data.totals.todayTotalPrincipalToSeparate.toFixed(2)}`,
+      ],
+    };
+
+    const productSheet: SheetConfig = {
+      sheetName: '3_Loan_Product_Wise_PnL',
+      shopName: safeProfile.shop_name,
+      reportTitle: 'Product-Wise Loan Material Purchase, Sales, Profit & Daily Set-Aside',
+      dateRangeStr,
+      generatedBy: safeProfile.owner_name,
+      headers: [
+        '#',
+        'Product Name',
+        'Category',
+        'Loan Account',
+        'Purchased Qty (Loan)',
+        'Loan Purchase Cost (₹)',
+        'Remaining Stock',
+        'Remaining Stock Cost (₹)',
+        'Units Sold',
+        'Sales Revenue (₹)',
+        'Principal COGS (₹)',
+        'Net Profit (₹)',
+        'Margin %',
+        'Today Sold',
+        'Today Revenue (₹)',
+        'Today Principal to Separate (₹)',
+      ],
+      rows: data.productRows.map((r, idx) => [
+        idx + 1,
+        r.productName,
+        r.category,
+        `${r.loanAccountName} (${r.lenderName})`,
+        `${r.purchasedQtyFromLoan} ${r.unitType}`,
+        `₹ ${r.totalPurchaseCostFromLoan.toFixed(2)}`,
+        `${r.currentStock} ${r.unitType}`,
+        `₹ ${r.currentStockCostValuation.toFixed(2)}`,
+        `${r.totalQtySold} ${r.unitType}`,
+        `₹ ${r.totalSalesRevenue.toFixed(2)}`,
+        `₹ ${r.totalSalesCogs.toFixed(2)}`,
+        `₹ ${r.totalNetProfit.toFixed(2)}`,
+        `${r.profitMarginPct}%`,
+        `${r.todayQtySold} ${r.unitType}`,
+        `₹ ${r.todaySalesRevenue.toFixed(2)}`,
+        `₹ ${r.todayPrincipalCogsToSeparate.toFixed(2)}`,
+      ]),
+      totalsRow: [
+        'TOTAL LOAN PRODUCTS',
+        `${data.productRows.length} Products`,
+        '',
+        '',
+        '',
+        `₹ ${data.totals.totalLoanAllocatedToStock.toFixed(2)}`,
+        '',
+        `₹ ${data.totals.totalStockRemainingAtCost.toFixed(2)}`,
+        '',
+        `₹ ${data.totals.totalSalesRevenue.toFixed(2)}`,
+        `₹ ${data.totals.totalPrincipalRecoveredFromSales.toFixed(2)}`,
+        `₹ ${data.totals.totalNetProfit.toFixed(2)}`,
+        '',
+        '',
+        `₹ ${data.totals.todayTotalRevenueFromLoanStock.toFixed(2)}`,
+        `₹ ${data.totals.todayTotalPrincipalToSeparate.toFixed(2)}`,
+      ],
+    };
+
+    const xlsxBuffer = createMultiSheetExcelWorkbook([summarySheet, categorySheet, productSheet]);
     return { pdfBuffer, xlsxBuffer };
   }
 

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Product, UnitType, Wholesaler } from '../../types';
+import { Product, UnitType, Wholesaler, LoanAccount } from '../../types';
 import { CreateProductInput, InventoryService } from '../../services/inventoryService';
 import { WholesalerService } from '../../services/wholesalerService';
-import { calculateProfitMarginPercent } from '../../utils/math';
+import { LoanAccountService } from '../../services/loanAccountService';
+import { calculateProfitMarginPercent, formatINR } from '../../utils/math';
 import { generateUniqueStoreBarcode, getBarcodePatternBars } from '../../utils/barcodeGenerator';
 import { compressProductImage } from '../../utils/imageCompressor';
 import { generateSmartProductThumbnail, normalizeProductImageToSquare } from '../../utils/productImageEngine';
@@ -18,6 +19,7 @@ import {
   Trash2,
   Plus,
   Truck,
+  Landmark,
 } from 'lucide-react';
 
 interface ProductModalProps {
@@ -66,6 +68,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     last_supplier_name: '',
     supplier_phone: '',
     wholesaler_id: null,
+    loan_account_id: null,
     image_url: null,
     expiry_date: null,
     is_quick_tap: false,
@@ -78,6 +81,15 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const [newWsPhone, setNewWsPhone] = useState('');
   const [isSavingWs, setIsSavingWs] = useState(false);
 
+  // Loan Account Funding state
+  const [loanAccounts, setLoanAccounts] = useState<LoanAccount[]>([]);
+  const [isFromLoan, setIsFromLoan] = useState(false);
+  const [showInlineLoan, setShowInlineLoan] = useState(false);
+  const [newLoanName, setNewLoanName] = useState('');
+  const [newLoanLender, setNewLoanLender] = useState('');
+  const [newLoanPrincipal, setNewLoanPrincipal] = useState<number>(0);
+  const [isSavingLoan, setIsSavingLoan] = useState(false);
+
   const [isCompressingImg, setIsCompressingImg] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -89,6 +101,15 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setWholesalers(list);
     } catch {
       setWholesalers([]);
+    }
+  };
+
+  const loadLoanAccounts = async () => {
+    try {
+      const list = await LoanAccountService.getAll();
+      setLoanAccounts(list);
+    } catch {
+      setLoanAccounts([]);
     }
   };
 
@@ -105,10 +126,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     loadWholesalers();
+    loadLoanAccounts();
     setShowInlineWholesaler(false);
+    setShowInlineLoan(false);
     setErrorMsg(null);
 
     if (productToEdit) {
+      setIsFromLoan(Boolean(productToEdit.loan_account_id));
       setFormData({
         name: productToEdit.name,
         marathi_name: productToEdit.marathi_name || '',
@@ -125,11 +149,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         last_supplier_name: productToEdit.last_supplier_name || '',
         supplier_phone: productToEdit.supplier_phone || '',
         wholesaler_id: productToEdit.wholesaler_id || null,
+        loan_account_id: productToEdit.loan_account_id || null,
         image_url: productToEdit.image_url || null,
         expiry_date: productToEdit.expiry_date || null,
         is_quick_tap: productToEdit.is_quick_tap,
       });
     } else {
+      setIsFromLoan(false);
       // Pre-fill initial synchronous barcode immediately, then refine against DB
       const initialBarcode = generateUniqueStoreBarcode(new Set());
       setFormData({
@@ -148,6 +174,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         last_supplier_name: '',
         supplier_phone: '',
         wholesaler_id: null,
+        loan_account_id: null,
         image_url: null,
         expiry_date: null,
         is_quick_tap: false,
@@ -265,6 +292,42 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setErrorMsg(err instanceof Error ? err.message : 'Failed to save wholesaler');
     } finally {
       setIsSavingWs(false);
+    }
+  };
+
+  const handleSaveInlineLoan = async () => {
+    if (!newLoanName.trim()) {
+      setErrorMsg('Loan Account Name is required (e.g., Mudra Loan ₹50,000)');
+      return;
+    }
+    if (!newLoanPrincipal || newLoanPrincipal <= 0) {
+      setErrorMsg('Please enter a valid sanctioned Loan Amount (> ₹0)');
+      return;
+    }
+
+    setIsSavingLoan(true);
+    setErrorMsg(null);
+    try {
+      const created = await LoanAccountService.create({
+        name: newLoanName.trim(),
+        lender_name: newLoanLender.trim() || 'Bank / Lender',
+        principal_amount: newLoanPrincipal,
+      });
+      const updatedLoans = await LoanAccountService.getAll();
+      setLoanAccounts(updatedLoans);
+      setIsFromLoan(true);
+      setFormData((prev) => ({
+        ...prev,
+        loan_account_id: created.id,
+      }));
+      setNewLoanName('');
+      setNewLoanLender('');
+      setNewLoanPrincipal(0);
+      setShowInlineLoan(false);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to save loan account');
+    } finally {
+      setIsSavingLoan(false);
     }
   };
 
@@ -758,6 +821,136 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                       <span>{isSavingWs ? 'Saving...' : 'Save Wholesaler'}</span>
                     </button>
                   </div>
+                </div>
+              )}
+            </div>
+
+            {/* Loan Amount Capital Tracking Selector + Inline Quick-Add */}
+            <div className="sm:col-span-2 p-3.5 bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-xl space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="flex items-center gap-1.5 text-xs font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wide">
+                  <Landmark className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                  <span>Purchased from Loan Amount? (Separate Loan P&amp;L &amp; Daily Set-Aside)</span>
+                </label>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="product-loan-mode-own"
+                    onClick={() => {
+                      setIsFromLoan(false);
+                      setFormData((prev) => ({ ...prev, loan_account_id: null }));
+                    }}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                      !isFromLoan
+                        ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900 shadow-2xs'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
+                    }`}
+                  >
+                    No (Own Shop Capital)
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="product-loan-mode-loan"
+                    onClick={() => setIsFromLoan(true)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                      isFromLoan
+                        ? 'bg-purple-700 text-white shadow-2xs'
+                        : 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700'
+                    }`}
+                  >
+                    🏦 Yes (From Loan Amount)
+                  </button>
+                </div>
+              </div>
+
+              {isFromLoan && (
+                <div className="space-y-2.5 pt-1 animate-in fade-in">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <select
+                      data-testid="product-loan-account-select"
+                      value={formData.loan_account_id || ''}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          loan_account_id: e.target.value || null,
+                        }))
+                      }
+                      className="flex-1 px-3 py-2 border border-purple-300 dark:border-purple-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm font-medium focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                    >
+                      <option value="">-- Select Which Loan Amount / Account --</option>
+                      {loanAccounts.map((loan) => (
+                        <option key={loan.id} value={loan.id}>
+                          {loan.name} — {loan.lender_name} ({formatINR(loan.principal_amount)})
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      data-testid="toggle-inline-loan-btn"
+                      onClick={() => setShowInlineLoan(!showInlineLoan)}
+                      className="px-3 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition shadow-2xs shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{showInlineLoan ? 'Cancel' : '+ Add New Loan Amount'}</span>
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] text-purple-800 dark:text-purple-300">
+                    All purchases, sales, profit &amp; daily repayment set-aside money for this product will be tracked separately under the selected loan account in Reports &amp; P&amp;L.
+                  </p>
+
+                  {showInlineLoan && (
+                    <div
+                      data-testid="inline-loan-form"
+                      className="p-3 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-800 rounded-xl space-y-2.5"
+                    >
+                      <div className="text-xs font-bold text-purple-900 dark:text-purple-300">
+                        Quick-Add New Loan Account / Credit Line
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input
+                          type="text"
+                          data-testid="inline-loan-name"
+                          value={newLoanName}
+                          onChange={(e) => setNewLoanName(e.target.value)}
+                          placeholder="Loan Title (e.g. Mudra Loan ₹50k) *"
+                          className="px-2.5 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs text-slate-900 dark:text-white"
+                        />
+                        <input
+                          type="text"
+                          data-testid="inline-loan-lender"
+                          value={newLoanLender}
+                          onChange={(e) => setNewLoanLender(e.target.value)}
+                          placeholder="Bank / Lender (e.g. SBI / Finserv)"
+                          className="px-2.5 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs text-slate-900 dark:text-white"
+                        />
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          data-testid="inline-loan-principal"
+                          value={newLoanPrincipal || ''}
+                          onChange={(e) => setNewLoanPrincipal(parseFloat(e.target.value) || 0)}
+                          placeholder="Total Loan Amount (₹) *"
+                          className="px-2.5 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          data-testid="save-inline-loan-btn"
+                          disabled={isSavingLoan}
+                          onClick={handleSaveInlineLoan}
+                          className="px-3.5 py-1.5 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{isSavingLoan ? 'Saving...' : 'Save Loan Account'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -13,6 +13,7 @@ import {
   StoreUser,
   SyncOutboxItem,
   Wholesaler,
+  LoanAccount,
 } from '../types';
 
 export interface CloudSyncStatus {
@@ -260,6 +261,38 @@ class CloudSyncService {
       }
     } catch (err) {
       console.warn('Background sync wholesaler to Supabase failed (offline mode):', err);
+    }
+  }
+
+  /**
+   * Syncs a single Loan Account to Supabase cloud
+   */
+  async syncLoanAccount(loanAccount: LoanAccount): Promise<void> {
+    if (!supabase) return;
+    try {
+      const userId = await this.getUserId();
+      const payload: Record<string, unknown> = {
+        id: loanAccount.id,
+        shop_id: loanAccount.shop_id || 'current_shop',
+        name: loanAccount.name,
+        lender_name: loanAccount.lender_name,
+        principal_amount: loanAccount.principal_amount,
+        interest_rate_pct: loanAccount.interest_rate_pct || 0,
+        emi_or_daily_target: loanAccount.emi_or_daily_target || 0,
+        amount_repaid: loanAccount.amount_repaid || 0,
+        is_active: loanAccount.is_active !== false,
+        notes: loanAccount.notes || null,
+        created_at: loanAccount.created_at || new Date().toISOString(),
+        updated_at: loanAccount.updated_at || new Date().toISOString(),
+      };
+      if (userId) payload.user_id = userId;
+
+      const { error } = await supabase.from('loan_accounts').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.warn('Sync loan_account to Supabase returned error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Background sync loan_account to Supabase failed (offline mode):', err);
     }
   }
 

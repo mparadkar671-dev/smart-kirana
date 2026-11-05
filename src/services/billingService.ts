@@ -110,6 +110,7 @@ export class BillingService {
         unit_purchase_cost: itemCost,
         unit_selling_price: itemPrice,
         line_total: lineTotal,
+        loan_account_id: item.product.loan_account_id || null,
       };
       saleItems.push(saleItem);
 
@@ -121,6 +122,7 @@ export class BillingService {
         reason_type: 'SALE_OUT',
         unit_cost_at_time: itemCost,
         reference_id: invoiceId,
+        loan_account_id: item.product.loan_account_id || null,
         notes: `Billed in invoice ${invoiceNumber}`,
         created_at: nowIso,
       };

@@ -21,10 +21,26 @@ export interface Product {
   last_supplier_name: string;
   supplier_phone?: string; // Contact phone for direct WhatsApp / SMS purchase orders
   wholesaler_id?: string | null; // FK to Wholesaler entity
+  loan_account_id?: string | null; // FK to LoanAccount if stock was purchased using loan capital
   image_url?: string | null; // Compressed 160x160px WebP DataURL (<15KB) or remote URL
   expiry_date?: string | null; // Date (YYYY-MM-DD, nullable)
   is_quick_tap: boolean; // Boolean (Top-24 Fast-Tap Pareto items)
   updated_at: string; // ISO Timestamp
+}
+
+export interface LoanAccount {
+  id: string; // UUID PK (e.g. "loan-1730000000-xyz")
+  shop_id?: string; // Multi-tenant Shop ID (indexed)
+  name: string; // e.g. "Mudra Loan ₹50,000", "Bajaj Finserv OD", "Wholesaler Credit Line"
+  lender_name: string; // e.g. "State Bank of India", "Rameshwar Trader Credit"
+  principal_amount: number; // Numeric 10,2 (Total sanctioned loan amount)
+  interest_rate_pct?: number; // Annual or monthly interest % (optional)
+  emi_or_daily_target?: number; // Daily or monthly repayment target (optional)
+  amount_repaid: number; // Cumulative principal/amount already set aside or repaid to lender
+  is_active: boolean;
+  notes?: string;
+  created_at: string; // ISO Timestamp
+  updated_at?: string;
 }
 
 export interface Wholesaler {
@@ -61,6 +77,7 @@ export interface InventoryLog {
   reason_type: InventoryReason;
   unit_cost_at_time: number; // Numeric 10,2
   reference_id?: string | null; // UUID FK (e.g. invoice_id or expense_id)
+  loan_account_id?: string | null; // UUID FK if purchased using a specific Loan Account
   notes: string;
   created_at: string; // ISO Timestamp
 }
@@ -124,6 +141,7 @@ export interface SaleItem {
   unit_purchase_cost: number; // Numeric 10,2
   unit_selling_price: number; // Numeric 10,2
   line_total: number; // Numeric 10,2
+  loan_account_id?: string | null; // Snapshot of product's loan_account_id at time of sale
 }
 
 export type KhataEntryType = 'DEBIT_UDHARI_GIVEN' | 'CREDIT_JAMA_RECEIVED';

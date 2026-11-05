@@ -20,6 +20,7 @@ export interface CreateProductInput {
   last_supplier_name?: string;
   supplier_phone?: string;
   wholesaler_id?: string | null;
+  loan_account_id?: string | null;
   image_url?: string | null;
   expiry_date?: string | null;
   is_quick_tap: boolean;
@@ -55,6 +56,7 @@ export class InventoryService {
       last_supplier_name: input.last_supplier_name?.trim() || 'General Wholesaler',
       supplier_phone: input.supplier_phone?.trim() || undefined,
       wholesaler_id: input.wholesaler_id || null,
+      loan_account_id: input.loan_account_id || null,
       image_url: input.image_url || null,
       expiry_date: input.expiry_date || null,
       is_quick_tap: !!input.is_quick_tap,
@@ -72,7 +74,10 @@ export class InventoryService {
           reason_type: 'PURCHASE_IN',
           unit_cost_at_time: newProduct.purchase_price,
           reference_id: null,
-          notes: 'Opening stock on product creation',
+          loan_account_id: newProduct.loan_account_id || null,
+          notes: newProduct.loan_account_id
+            ? 'Opening stock on product creation (Loan Funded)'
+            : 'Opening stock on product creation',
           created_at: new Date().toISOString(),
         };
         await db.inventory_logs.add(log);
@@ -207,6 +212,7 @@ export class InventoryService {
     qty: number;
     unitCost?: number;
     supplierName?: string;
+    loanAccountId?: string | null;
     notes?: string;
   }): Promise<{ product: Product; log: InventoryLog }> {
     if (params.qty <= 0) throw new Error('Restock quantity must be positive');
@@ -233,6 +239,9 @@ export class InventoryService {
       if (params.supplierName && params.supplierName.trim()) {
         updates.last_supplier_name = params.supplierName.trim();
       }
+      if (params.loanAccountId !== undefined) {
+        updates.loan_account_id = params.loanAccountId || null;
+      }
 
       await db.products.update(params.productId, updates);
       await db.queueSync(
@@ -248,6 +257,7 @@ export class InventoryService {
         reason_type: 'PURCHASE_IN',
         unit_cost_at_time: cost,
         reference_id: null,
+        loan_account_id: params.loanAccountId !== undefined ? (params.loanAccountId || null) : (product.loan_account_id || null),
         notes: params.notes?.trim() || `Restocked +${params.qty} from ${updates.last_supplier_name || product.last_supplier_name}`,
         created_at: new Date().toISOString(),
       };

@@ -650,6 +650,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                                     24
                                   </span>
                                 )}
+                                {p.loan_account_id && (
+                                  <span
+                                    title="Purchased from Loan Amount (Tracked in Loan & Capital Report)"
+                                    data-testid={`loan-badge-${p.id}`}
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 text-[10px] font-bold rounded-md border border-purple-200 dark:border-purple-800"
+                                  >
+                                    🏦 Loan Stock
+                                  </span>
+                                )}
                               </div>
                               <div className="flex items-center gap-2 mt-0.5">
                                 <span className="font-mono text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded">

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ShopProfile, SalesInvoice, PaymentMode, Customer, SaleItem, Product } from '../../types';
 import { db } from '../../db/db';
 import { ReportsService, DateFilterRange } from '../../services/reportsService';
+import { LoanAccountService, LoanInventoryReportData } from '../../services/loanAccountService';
 import { GallaService } from '../../services/gallaService';
 import { ReceiptModal } from '../pos/ReceiptModal';
 import { SalesReturnModal } from '../pos/SalesReturnModal';
@@ -38,6 +39,8 @@ import {
   Send,
   CheckCircle,
   HelpCircle,
+  Landmark,
+  Plus,
 } from 'lucide-react';
 
 interface ReportsViewProps {
@@ -54,7 +57,8 @@ export type ReportTab =
   | 'galla'
   | 'returns'
   | 'tax'
-  | 'invoices';
+  | 'invoices'
+  | 'loans';
 
 export type DatePreset = 'TODAY' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'ALL';
 
@@ -86,6 +90,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
   const [returnsData, setReturnsData] = useState<any>(null);
   const [taxData, setTaxData] = useState<any>(null);
   const [invoicesData, setInvoicesData] = useState<SalesInvoice[]>([]);
+  const [loanReportData, setLoanReportData] = useState<LoanInventoryReportData | null>(null);
+  const [selectedLoanFilterId, setSelectedLoanFilterId] = useState<string>('ALL');
+  const [showAddLoanForm, setShowAddLoanForm] = useState<boolean>(false);
+  const [newLoanTitle, setNewLoanTitle] = useState<string>('');
+  const [newLoanLender, setNewLoanLender] = useState<string>('');
+  const [newLoanAmount, setNewLoanAmount] = useState<number>(0);
 
   // Invoices Multi-Select & Actions
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
@@ -144,7 +154,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
 
   useEffect(() => {
     loadAllReports();
-  }, [datePreset, activeTab, viewMode]);
+  }, [datePreset, activeTab, viewMode, selectedLoanFilterId]);
 
   const loadAllReports = async () => {
     setIsLoading(true);
@@ -152,12 +162,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
 
     try {
       if (viewMode === 'dashboard') {
-        const [pnl, udh, invVal, gal, tx] = await Promise.all([
+        const [pnl, udh, invVal, gal, tx, loanRep] = await Promise.all([
           ReportsService.getProfitAndLossData(range),
           ReportsService.getCustomerKhataAgingData(),
           ReportsService.getStockValuationAndDeadStockData(),
           ReportsService.getDailyGallaShiftAuditData(range),
           ReportsService.getHsnTaxSummaryData(range),
+          ReportsService.getLoanInventoryReportData(range, selectedLoanFilterId),
         ]);
         setPnlData(pnl);
         setProductsData(pnl.itemWise || []);
@@ -165,6 +176,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         setInventoryData(invVal);
         setGallaData(gal);
         setTaxData(tx);
+        setLoanReportData(loanRep);
       } else {
         if (activeTab === 'pnl' || activeTab === 'products') {
           const pnl = await ReportsService.getProfitAndLossData(range);
@@ -195,6 +207,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         } else if (activeTab === 'invoices') {
           const invs = await ReportsService.getBillRegisterData(range);
           setInvoicesData(invs);
+        } else if (activeTab === 'loans') {
+          const loanRep = await ReportsService.getLoanInventoryReportData(range, selectedLoanFilterId);
+          setLoanReportData(loanRep);
         }
       }
     } finally {
@@ -249,6 +264,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       } else if (activeTab === 'invoices') {
         const res = await ReportsService.generateBillRegisterReport(defaultProfile, range);
         downloadFileBlob(res.xlsxBuffer, `Daily_Bill_Register_${dateStr}.xlsx`, mime);
+      } else if (activeTab === 'loans') {
+        const res = await ReportsService.generateLoanInventoryReport(defaultProfile, range, selectedLoanFilterId);
+        downloadFileBlob(res.xlsxBuffer, `Loan_Stock_Sales_PnL_Report_${dateStr}.xlsx`, mime);
       }
     } catch (err: any) {
       alert(`Excel export failed: ${err.message}`);
@@ -287,6 +305,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       } else if (activeTab === 'invoices') {
         res = await ReportsService.generateBillRegisterReport(defaultProfile, range);
         downloadFileBlob(res.pdfBuffer, `Bill_Register_${dateStr}.pdf`, mime);
+      } else if (activeTab === 'loans') {
+        res = await ReportsService.generateLoanInventoryReport(defaultProfile, range, selectedLoanFilterId);
+        downloadFileBlob(res.pdfBuffer, `Loan_Stock_Sales_PnL_${dateStr}.pdf`, mime);
       }
     } catch (err: any) {
       alert(`PDF export failed: ${err.message}`);
@@ -562,6 +583,31 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
             </div>
           </div>
 
+          {/* Quick Banner for Today's Loan Money Separation in Dashboard */}
+          {loanReportData && (loanReportData.loanAccounts.length > 0 || loanReportData.productRows.length > 0) && (
+            <div className="bg-gradient-to-r from-purple-700 to-indigo-800 text-white p-4 rounded-2xl shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="space-y-0.5">
+                <div className="text-xs font-extrabold uppercase tracking-wider text-purple-200 flex items-center gap-1.5">
+                  <Landmark className="w-4 h-4" />
+                  <span>🏦 Today&apos;s Loan Stock Cash Separation (Daily Set-Aside)</span>
+                </div>
+                <p className="text-xs text-purple-100">
+                  Separate <strong className="text-amber-300">{formatINR(loanReportData.totals.todayTotalPrincipalToSeparate)}</strong> principal (from {formatINR(loanReportData.totals.todayTotalRevenueFromLoanStock)} today&apos;s loan item sales, Net Profit: <strong className="text-emerald-300">{formatINR(loanReportData.totals.todayTotalProfitFromLoanStock)}</strong>).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setViewMode('tabular');
+                  setActiveTab('loans');
+                }}
+                className="px-3.5 py-2 bg-white text-purple-900 hover:bg-purple-50 rounded-xl text-xs font-extrabold shrink-0 transition shadow-xs"
+              >
+                Open Loan Stock &amp; Set-Aside Report →
+              </button>
+            </div>
+          )}
+
           {/* Time-Wise Sales & True Profit Trend Chart */}
           <TimeWiseProfitTrendChart
             billWiseInvoices={pnlData?.billWise}
@@ -611,6 +657,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
             { id: 'returns' as ReportTab, label: '7. Returns & Audit', icon: RotateCcw },
             { id: 'tax' as ReportTab, label: '8. HSN & GST Tax', icon: Receipt },
             { id: 'invoices' as ReportTab, label: '9. Bill Register', icon: Layers },
+            { id: 'loans' as ReportTab, label: '10. 🏦 Loan Stock & Daily Set-Aside', icon: Landmark },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -1517,6 +1564,441 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
                         </tr>
                       );
                     })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 10: LOAN-FUNDED INVENTORY, PURCHASE, SALES, P&L & DAILY SET-ASIDE
+          ========================================================================= */}
+      {viewMode === 'tabular' && activeTab === 'loans' && loanReportData && (
+        <div className="space-y-5" data-testid="loan-inventory-report-container">
+          {/* Top Loan Filter Bar & Add New Loan Button */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-purple-50/70 dark:bg-purple-950/30 p-4 rounded-2xl border border-purple-200 dark:border-purple-800">
+            <div>
+              <h3 className="text-sm font-extrabold text-purple-950 dark:text-purple-200 flex items-center gap-2">
+                <Landmark className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                <span>Loan-Funded Material Purchase, Sales, P&amp;L &amp; Daily Set-Aside Register</span>
+              </h3>
+              <p className="text-xs text-purple-700 dark:text-purple-300 mt-0.5">
+                Track products purchased from loan amounts, view categorical P&amp;L, and separate daily cash for loan repayment whenever loan-funded products are sold.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <select
+                data-testid="report-loan-account-filter"
+                value={selectedLoanFilterId}
+                onChange={(e) => setSelectedLoanFilterId(e.target.value)}
+                className="px-3 py-2 bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
+              >
+                <option value="ALL">All Loan Accounts ({loanReportData.loanAccounts.length})</option>
+                {loanReportData.loanAccounts.map((l) => (
+                  <option key={l.loanAccount.id} value={l.loanAccount.id}>
+                    {l.loanAccount.name} ({l.loanAccount.lender_name})
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                data-testid="report-add-loan-toggle-btn"
+                onClick={() => setShowAddLoanForm(!showAddLoanForm)}
+                className="px-3 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs transition"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{showAddLoanForm ? 'Cancel' : '+ Add Loan Account'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Inline Add New Loan Form in Reports */}
+          {showAddLoanForm && (
+            <div
+              data-testid="report-add-loan-form"
+              className="p-4 bg-white dark:bg-slate-900 rounded-2xl border border-purple-300 dark:border-purple-800 space-y-3"
+            >
+              <div className="text-xs font-bold text-purple-900 dark:text-purple-300">
+                Create New Loan Account / Credit Line
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                <input
+                  type="text"
+                  data-testid="report-new-loan-name"
+                  value={newLoanTitle}
+                  onChange={(e) => setNewLoanTitle(e.target.value)}
+                  placeholder="Loan Title (e.g. Mudra Loan ₹50,000) *"
+                  className="px-3 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white"
+                />
+                <input
+                  type="text"
+                  data-testid="report-new-loan-lender"
+                  value={newLoanLender}
+                  onChange={(e) => setNewLoanLender(e.target.value)}
+                  placeholder="Bank / Lender (e.g. SBI / Bajaj)"
+                  className="px-3 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white"
+                />
+                <input
+                  type="number"
+                  min="1"
+                  data-testid="report-new-loan-amount"
+                  value={newLoanAmount || ''}
+                  onChange={(e) => setNewLoanAmount(parseFloat(e.target.value) || 0)}
+                  placeholder="Sanctioned Loan Amount (₹) *"
+                  className="px-3 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs font-bold text-slate-900 dark:text-white"
+                />
+                <button
+                  type="button"
+                  data-testid="report-save-loan-btn"
+                  onClick={async () => {
+                    if (!newLoanTitle.trim() || newLoanAmount <= 0) {
+                      alert('Please enter Loan Title and a valid Loan Amount');
+                      return;
+                    }
+                    await LoanAccountService.create({
+                      name: newLoanTitle.trim(),
+                      lender_name: newLoanLender.trim() || 'Bank / Lender',
+                      principal_amount: newLoanAmount,
+                    });
+                    setNewLoanTitle('');
+                    setNewLoanLender('');
+                    setNewLoanAmount(0);
+                    setShowAddLoanForm(false);
+                    await loadAllReports();
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition"
+                >
+                  Save Loan Account
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Daily Loan Money Separation Highlight Card + KPI Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3.5">
+            {/* TODAY'S DAILY SEPARATION BOX (Most critical requirement) */}
+            <div className="lg:col-span-2 bg-gradient-to-br from-purple-700 to-indigo-800 text-white p-4 rounded-2xl shadow-md space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-extrabold uppercase tracking-wider text-purple-200">
+                  🏦 Today&apos;s Loan Money to Separate (Daily Set-Aside)
+                </span>
+                <span className="px-2 py-0.5 bg-white/15 rounded-full text-[10px] font-bold">
+                  From Today&apos;s Sales
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                <div className="bg-white/10 p-2.5 rounded-xl">
+                  <div className="text-[10px] text-purple-200">Principal (COGS) to Separate</div>
+                  <div
+                    className="text-lg font-black text-amber-300 mt-0.5"
+                    data-testid="loan-today-principal-to-separate"
+                  >
+                    {formatINR(loanReportData.totals.todayTotalPrincipalToSeparate)}
+                  </div>
+                </div>
+                <div className="bg-white/10 p-2.5 rounded-xl">
+                  <div className="text-[10px] text-purple-200">Today&apos;s Loan Item Sales</div>
+                  <div
+                    className="text-lg font-black text-white mt-0.5"
+                    data-testid="loan-today-sales-revenue"
+                  >
+                    {formatINR(loanReportData.totals.todayTotalRevenueFromLoanStock)}
+                  </div>
+                </div>
+                <div className="bg-white/10 p-2.5 rounded-xl">
+                  <div className="text-[10px] text-purple-200">Today&apos;s Net Profit</div>
+                  <div
+                    className="text-lg font-black text-emerald-300 mt-0.5"
+                    data-testid="loan-today-net-profit"
+                  >
+                    {formatINR(loanReportData.totals.todayTotalProfitFromLoanStock)}
+                  </div>
+                </div>
+              </div>
+              <p className="text-[10px] text-purple-200">
+                Keep <strong>{formatINR(loanReportData.totals.todayTotalPrincipalToSeparate)}</strong> aside from today&apos;s Galla cash to repay the loan principal of sold loan-funded items.
+              </p>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">
+                Loan Stock Purchased
+              </span>
+              <p
+                className="text-xl font-black text-slate-900 dark:text-white mt-1"
+                data-testid="loan-total-purchased"
+              >
+                {formatINR(loanReportData.totals.totalLoanAllocatedToStock)}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Remaining Stock at Cost: {formatINR(loanReportData.totals.totalStockRemainingAtCost)}
+              </p>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">
+                Loan Product Sales
+              </span>
+              <p
+                className="text-xl font-black text-blue-700 dark:text-blue-400 mt-1"
+                data-testid="loan-total-sales"
+              >
+                {formatINR(loanReportData.totals.totalSalesRevenue)}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Principal Recovered: {formatINR(loanReportData.totals.totalPrincipalRecoveredFromSales)}
+              </p>
+            </div>
+
+            <div className="bg-emerald-50/70 dark:bg-emerald-950/30 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800 shadow-2xs">
+              <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400 uppercase">
+                Loan Stock Net Profit
+              </span>
+              <p
+                className="text-xl font-black text-emerald-700 dark:text-emerald-300 mt-1"
+                data-testid="loan-total-profit"
+              >
+                {formatINR(loanReportData.totals.totalNetProfit)}
+              </p>
+              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
+                Sales Revenue minus Loan COGS
+              </p>
+            </div>
+          </div>
+
+          {/* 1. Loan Account-Wise Summary & Daily Set-Aside Repayment Tracker */}
+          {loanReportData.loanAccounts.length > 0 && (
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
+              <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase">
+                  1. Loan Account Summary &amp; Repayment Status
+                </h4>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50/50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-semibold">
+                    <tr>
+                      <th className="p-3">Loan Account &amp; Lender</th>
+                      <th className="p-3 text-right">Sanctioned Loan</th>
+                      <th className="p-3 text-right">Material Purchased</th>
+                      <th className="p-3 text-right">Stock Remaining</th>
+                      <th className="p-3 text-right">Sales Revenue</th>
+                      <th className="p-3 text-right">Principal Recovered</th>
+                      <th className="p-3 text-right">Net Profit</th>
+                      <th className="p-3 text-right">Today Separate (COGS)</th>
+                      <th className="p-3 text-center">Set Aside / Repay</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {loanReportData.loanAccounts.map((acc) => (
+                      <tr key={acc.loanAccount.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                        <td className="p-3">
+                          <div className="font-bold text-slate-900 dark:text-white">{acc.loanAccount.name}</div>
+                          <div className="text-[10px] text-slate-500">
+                            {acc.loanAccount.lender_name} • {acc.linkedProductsCount} Products
+                          </div>
+                        </td>
+                        <td className="p-3 text-right font-bold text-slate-800 dark:text-slate-200">
+                          {formatINR(acc.loanAccount.principal_amount)}
+                        </td>
+                        <td className="p-3 text-right font-medium text-purple-700 dark:text-purple-300">
+                          {formatINR(acc.totalPurchasedFromLoan)}
+                        </td>
+                        <td className="p-3 text-right text-slate-600 dark:text-slate-400">
+                          {formatINR(acc.currentStockValuationAtCost)}
+                        </td>
+                        <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
+                          {formatINR(acc.totalSalesRevenue)}
+                        </td>
+                        <td className="p-3 text-right font-semibold text-blue-700 dark:text-blue-400">
+                          {formatINR(acc.totalPrincipalRecoveredViaSales)}
+                        </td>
+                        <td className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                          {formatINR(acc.totalNetProfitGenerated)}
+                        </td>
+                        <td className="p-3 text-right font-extrabold text-purple-700 dark:text-purple-300">
+                          {formatINR(acc.todayPrincipalToSetAside)}
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="text-[10px] text-slate-500">
+                              Repaid: {formatINR(acc.loanAccount.amount_repaid || 0)}
+                            </span>
+                            {acc.todayPrincipalToSetAside > 0 && (
+                              <button
+                                type="button"
+                                data-testid={`set-aside-today-btn-${acc.loanAccount.id}`}
+                                onClick={async () => {
+                                  await LoanAccountService.recordRepayment(
+                                    acc.loanAccount.id,
+                                    acc.todayPrincipalToSetAside
+                                  );
+                                  await loadAllReports();
+                                }}
+                                className="px-2 py-1 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-[10px] font-bold transition"
+                              >
+                                + Set Aside Today ({formatINR(acc.todayPrincipalToSetAside)})
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 2. Categorical Breakdown of Loan-Funded Products */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800">
+              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase">
+                2. Categorical Report of Loan-Funded Products (Purchase, Sales, Profit &amp; Daily Set-Aside)
+              </h4>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs" data-testid="loan-category-breakdown-table">
+                <thead className="bg-slate-50/50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-semibold">
+                  <tr>
+                    <th className="p-3">Category</th>
+                    <th className="p-3 text-center">Items</th>
+                    <th className="p-3 text-right">Purchased (Loan)</th>
+                    <th className="p-3 text-right">Stock Left (Cost)</th>
+                    <th className="p-3 text-right">Sales Revenue</th>
+                    <th className="p-3 text-right">Principal Recovered (COGS)</th>
+                    <th className="p-3 text-right">Net Profit</th>
+                    <th className="p-3 text-right">Today Separate (COGS)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {loanReportData.categorySummary.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-6 text-center text-slate-400">
+                        No loan-funded product categories yet. Mark a product or stock-in batch as &ldquo;From Loan Amount&rdquo; in Inventory Master.
+                      </td>
+                    </tr>
+                  ) : (
+                    loanReportData.categorySummary.map((cat, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                        <td className="p-3 font-bold text-slate-900 dark:text-white">{cat.category}</td>
+                        <td className="p-3 text-center font-semibold text-slate-600 dark:text-slate-300">
+                          {cat.productsCount}
+                        </td>
+                        <td className="p-3 text-right text-purple-700 dark:text-purple-300 font-medium">
+                          {formatINR(cat.purchasedCostFromLoan)}
+                        </td>
+                        <td className="p-3 text-right text-slate-600 dark:text-slate-400">
+                          {formatINR(cat.currentStockCost)}
+                        </td>
+                        <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
+                          {formatINR(cat.salesRevenue)}
+                        </td>
+                        <td className="p-3 text-right font-mono text-blue-700 dark:text-blue-400">
+                          {formatINR(cat.cogsRecovered)}
+                        </td>
+                        <td className="p-3 text-right font-bold text-emerald-600 dark:text-emerald-400">
+                          {formatINR(cat.netProfit)}
+                        </td>
+                        <td className="p-3 text-right font-extrabold text-purple-700 dark:text-purple-300">
+                          {formatINR(cat.todayPrincipalToSetAside)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 3. Product-Wise Detailed Loan Stock Purchase, Sale, P&L & Daily Money Separation Table */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800">
+              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase">
+                3. Product-Wise Loan Material Purchase, Sales, Profit &amp; Daily Set-Aside Insights
+              </h4>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs" data-testid="loan-product-wise-table">
+                <thead className="bg-slate-50/50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-semibold">
+                  <tr>
+                    <th className="p-3">Product &amp; Category</th>
+                    <th className="p-3">Loan Account</th>
+                    <th className="p-3 text-right">Loan Purchased</th>
+                    <th className="p-3 text-right">Remaining Stock</th>
+                    <th className="p-3 text-right">Units Sold</th>
+                    <th className="p-3 text-right">Sales Revenue</th>
+                    <th className="p-3 text-right">Principal (COGS)</th>
+                    <th className="p-3 text-right">Net Profit</th>
+                    <th className="p-3 text-right">Today Sold &amp; Set-Aside</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {loanReportData.productRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="p-6 text-center text-slate-400">
+                        No products marked under a Loan Account yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    loanReportData.productRows.map((row) => (
+                      <tr key={row.productId} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                        <td className="p-3">
+                          <div className="font-bold text-slate-900 dark:text-white">{row.productName}</div>
+                          <div className="text-[10px] text-slate-500">{row.category}</div>
+                        </td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 font-bold text-[10px]">
+                            🏦 {row.loanAccountName}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="font-semibold text-slate-800 dark:text-slate-200">
+                            {formatINR(row.totalPurchaseCostFromLoan)}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {row.purchasedQtyFromLoan} {row.unitType}
+                          </div>
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                            {row.currentStock} {row.unitType}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            Cost: {formatINR(row.currentStockCostValuation)}
+                          </div>
+                        </td>
+                        <td className="p-3 text-right font-bold text-slate-800 dark:text-slate-200">
+                          {row.totalQtySold} {row.unitType}
+                        </td>
+                        <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
+                          {formatINR(row.totalSalesRevenue)}
+                        </td>
+                        <td className="p-3 text-right font-mono text-blue-700 dark:text-blue-400">
+                          {formatINR(row.totalSalesCogs)}
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="font-bold text-emerald-600 dark:text-emerald-400">
+                            {formatINR(row.totalNetProfit)}
+                          </div>
+                          <div className="text-[10px] text-emerald-700 dark:text-emerald-500">
+                            {row.profitMarginPct}% margin
+                          </div>
+                        </td>
+                        <td className="p-3 text-right bg-purple-50/40 dark:bg-purple-950/20">
+                          <div className="font-extrabold text-purple-700 dark:text-purple-300">
+                            Separate: {formatINR(row.todayPrincipalCogsToSeparate)}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            Sold today: {row.todayQtySold} {row.unitType} ({formatINR(row.todaySalesRevenue)})
+                          </div>
+                        </td>
+                      </tr>
+                    ))
                   )}
                 </tbody>
               </table>

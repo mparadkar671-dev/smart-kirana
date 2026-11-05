@@ -62,6 +62,22 @@ CREATE TABLE IF NOT EXISTS public.wholesalers (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS public.loan_accounts (
+    id TEXT PRIMARY KEY,
+    shop_id TEXT NOT NULL DEFAULT 'current_shop',
+    user_id TEXT,
+    name TEXT NOT NULL,
+    lender_name TEXT NOT NULL DEFAULT 'Bank / Lender',
+    principal_amount NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    interest_rate_pct NUMERIC(6,2) DEFAULT 0.00,
+    emi_or_daily_target NUMERIC(10,2) DEFAULT 0.00,
+    amount_repaid NUMERIC(12,2) NOT NULL DEFAULT 0.00,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS public.products (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
@@ -245,6 +261,9 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '';
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS marathi_name TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS search_keywords TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS loan_account_id TEXT;
+ALTER TABLE public.inventory_logs ADD COLUMN IF NOT EXISTS loan_account_id TEXT;
+ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS loan_account_id TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS short_code TEXT DEFAULT '';
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS barcode TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'General';
