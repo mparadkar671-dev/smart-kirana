@@ -22,10 +22,20 @@ const MainApp: React.FC = () => {
   const [isDbReady, setIsDbReady] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
 
-  // Initialize DB on mount
+  // Initialize DB on mount and auto-populate the 105 Marathi/English catalog if empty in browser
   useEffect(() => {
     let mounted = true;
-    db.initializeDatabase().then(() => {
+    const isTestEnv =
+      (typeof process !== 'undefined' && Boolean(process.env?.VITEST)) ||
+      (typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test');
+
+    db.initializeDatabase().then(async () => {
+      if (!isTestEnv) {
+        const count = await db.products.count();
+        if (count < 10) {
+          await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+        }
+      }
       if (mounted) setIsDbReady(true);
     });
     return () => {

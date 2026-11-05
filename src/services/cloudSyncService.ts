@@ -122,8 +122,11 @@ class CloudSyncService {
   ): Promise<{ success: boolean; error?: string; resetEpoch?: number }> {
     const shopId = await this.getActiveShopId();
     let resetEpoch = Date.now();
+    const isTestEnv =
+      (typeof process !== 'undefined' && Boolean(process.env?.VITEST)) ||
+      (typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test');
 
-    if (supabase) {
+    if (supabase && !isTestEnv) {
       try {
         // 1. Try atomic PostgreSQL RPC first
         const { data, error } = await supabase.rpc('execute_store_vault_reset', {
