@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { ShopProfile, SalesInvoice, PaymentMode, Customer, SaleItem } from '../../types';
+import { ShopProfile, SalesInvoice, PaymentMode, Customer, SaleItem, Product } from '../../types';
 import { db } from '../../db/db';
 import { ReportsService, DateFilterRange } from '../../services/reportsService';
 import { GallaService } from '../../services/gallaService';
 import { ReceiptModal } from '../pos/ReceiptModal';
 import { SalesReturnModal } from '../pos/SalesReturnModal';
 import { CustomerPassbookDrawer } from '../khata/CustomerPassbookDrawer';
+import { RestockAlertsView } from '../inventory/RestockAlertsView';
 import {
   TimeWiseProfitTrendChart,
   ProductMarginDistributionChart,
@@ -80,6 +81,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
   const [udhariData, setUdhariData] = useState<any>(null);
   const [inventoryData, setInventoryData] = useState<any>(null);
   const [reorderData, setReorderData] = useState<any>(null);
+  const [allStoreProducts, setAllStoreProducts] = useState<Product[]>([]);
   const [gallaData, setGallaData] = useState<any>(null);
   const [returnsData, setReturnsData] = useState<any>(null);
   const [taxData, setTaxData] = useState<any>(null);
@@ -175,8 +177,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
           const invVal = await ReportsService.getStockValuationAndDeadStockData();
           setInventoryData(invVal);
         } else if (activeTab === 'reorder') {
-          const reord = await ReportsService.getSmartWholesalerReorderData();
+          const [reord, prods] = await Promise.all([
+            ReportsService.getSmartWholesalerReorderData(),
+            db.products.toArray(),
+          ]);
           setReorderData(reord);
+          setAllStoreProducts(prods);
         } else if (activeTab === 'galla') {
           const gal = await ReportsService.getDailyGallaShiftAuditData(range);
           setGallaData(gal);
@@ -1007,7 +1013,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
           TAB 5: SMART WHOLESALER REORDER SHEET (14-Day Velocity)
           ========================================================================= */}
       {viewMode === 'tabular' && activeTab === 'reorder' && reorderData && (
-        <div className="space-y-4" data-testid="reorder-report-container">
+        <div className="space-y-5" data-testid="reorder-report-container">
+          {/* Wholesaler Directory & Direct WhatsApp Purchase Orders */}
+          <RestockAlertsView
+            products={allStoreProducts}
+            shopProfile={defaultProfile}
+            onRefresh={loadAllReports}
+          />
+
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
             <div className="bg-amber-50/70 dark:bg-amber-950/30 p-4 rounded-2xl border border-amber-200 dark:border-amber-800 shadow-2xs">
               <span className="text-[11px] font-bold text-amber-800 dark:text-amber-400 uppercase">Items to Reorder</span>

@@ -1,6 +1,7 @@
 import { db } from '../db/db';
 import { Product, InventoryLog, ExpenseAndDrawing, UnitType, InventoryReason } from '../types';
 import { roundQty, roundCurrency, calculateProfitMarginPercent } from '../utils/math';
+import { generateUniqueStoreBarcode } from '../utils/barcodeGenerator';
 import { cloudSyncService } from './cloudSyncService';
 
 export interface CreateProductInput {
@@ -15,6 +16,9 @@ export interface CreateProductInput {
   current_stock: number;
   low_stock_threshold: number;
   last_supplier_name?: string;
+  supplier_phone?: string;
+  wholesaler_id?: string | null;
+  image_url?: string | null;
   expiry_date?: string | null;
   is_quick_tap: boolean;
 }
@@ -25,11 +29,18 @@ export class InventoryService {
    */
   static async createProduct(input: CreateProductInput): Promise<Product> {
     const id = `prod-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    let barcode = input.barcode?.trim() || '';
+    if (!barcode) {
+      const allProds = await db.products.toArray();
+      const existingSet = new Set(allProds.map((p) => p.barcode).filter(Boolean));
+      barcode = generateUniqueStoreBarcode(existingSet);
+    }
+
     const newProduct: Product = {
       id,
       name: input.name.trim(),
       short_code: input.short_code.trim().toUpperCase(),
-      barcode: input.barcode?.trim() || `890${Date.now().toString().slice(-9)}`,
+      barcode,
       category: input.category.trim() || 'General',
       unit_type: input.unit_type,
       purchase_price: roundCurrency(input.purchase_price),
@@ -38,6 +49,9 @@ export class InventoryService {
       current_stock: roundQty(input.current_stock || 0),
       low_stock_threshold: roundQty(input.low_stock_threshold ?? 5),
       last_supplier_name: input.last_supplier_name?.trim() || 'General Wholesaler',
+      supplier_phone: input.supplier_phone?.trim() || undefined,
+      wholesaler_id: input.wholesaler_id || null,
+      image_url: input.image_url || null,
       expiry_date: input.expiry_date || null,
       is_quick_tap: !!input.is_quick_tap,
       updated_at: new Date().toISOString(),

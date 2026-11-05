@@ -47,6 +47,21 @@ CREATE TABLE IF NOT EXISTS public.store_users (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS public.wholesalers (
+    id TEXT PRIMARY KEY,
+    shop_id TEXT NOT NULL DEFAULT 'current_shop',
+    user_id TEXT,
+    name TEXT NOT NULL,
+    agency_or_brand TEXT,
+    phone TEXT NOT NULL,
+    gstin TEXT,
+    address TEXT,
+    visit_day TEXT DEFAULT 'Monday',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS public.products (
     id TEXT PRIMARY KEY,
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
@@ -59,9 +74,12 @@ CREATE TABLE IF NOT EXISTS public.products (
     purchase_price NUMERIC(10,2) NOT NULL DEFAULT 0.00,
     selling_price NUMERIC(10,2) NOT NULL DEFAULT 0.00,
     mrp NUMERIC(10,2) NOT NULL DEFAULT 0.00,
-    current_stock NUMERIC(10,3) NOT NULL DEFAULT 0.000,
-    low_stock_threshold NUMERIC(10,3) NOT NULL DEFAULT 5.000,
+    current_stock NUMERIC(12,3) NOT NULL DEFAULT 0.000,
+    low_stock_threshold NUMERIC(12,3) NOT NULL DEFAULT 5.000,
+    wholesaler_id TEXT REFERENCES public.wholesalers(id) ON DELETE SET NULL,
     last_supplier_name TEXT,
+    supplier_phone TEXT,
+    image_url TEXT,
     expiry_date DATE,
     is_quick_tap BOOLEAN NOT NULL DEFAULT FALSE,
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -208,6 +226,18 @@ ALTER TABLE public.store_users ADD COLUMN IF NOT EXISTS approval_status TEXT NOT
 ALTER TABLE public.store_users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE public.store_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS user_id TEXT;
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '';
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS agency_or_brand TEXT;
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT '';
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS gstin TEXT;
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS visit_day TEXT DEFAULT 'Monday';
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '';
@@ -218,12 +248,21 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS unit_type TEXT DEFAULT 'PCS
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS purchase_price NUMERIC(10,2) DEFAULT 0.00;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS selling_price NUMERIC(10,2) DEFAULT 0.00;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS mrp NUMERIC(10,2) DEFAULT 0.00;
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS current_stock NUMERIC(10,3) DEFAULT 0.000;
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS low_stock_threshold NUMERIC(10,3) DEFAULT 5.000;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS current_stock NUMERIC(12,3) DEFAULT 0.000;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS low_stock_threshold NUMERIC(12,3) DEFAULT 5.000;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS wholesaler_id TEXT REFERENCES public.wholesalers(id) ON DELETE SET NULL;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS last_supplier_name TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS supplier_phone TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS image_url TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS expiry_date DATE;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_quick_tap BOOLEAN DEFAULT FALSE;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+-- Upgrade existing stock/qty columns to NUMERIC(12,3) for fractional kg/L precision (e.g. 0.500 kg, 5.250 kg)
+ALTER TABLE public.products ALTER COLUMN current_stock TYPE NUMERIC(12,3) USING current_stock::numeric(12,3);
+ALTER TABLE public.products ALTER COLUMN low_stock_threshold TYPE NUMERIC(12,3) USING low_stock_threshold::numeric(12,3);
+ALTER TABLE public.inventory_logs ALTER COLUMN change_qty TYPE NUMERIC(12,3) USING change_qty::numeric(12,3);
+ALTER TABLE public.sale_items ALTER COLUMN qty TYPE NUMERIC(12,3) USING qty::numeric(12,3);
 
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS user_id TEXT;
@@ -311,7 +350,9 @@ ALTER TABLE public.daily_galla_sessions ADD COLUMN IF NOT EXISTS created_at TIME
 -- ==============================================================================
 CREATE INDEX IF NOT EXISTS idx_shop_profile_shop_id ON public.shop_profile(shop_id);
 CREATE INDEX IF NOT EXISTS idx_shop_profile_invite_code ON public.shop_profile(invite_code);
+CREATE INDEX IF NOT EXISTS idx_wholesalers_shop_id ON public.wholesalers(shop_id);
 CREATE INDEX IF NOT EXISTS idx_products_shop_id ON public.products(shop_id);
+CREATE INDEX IF NOT EXISTS idx_products_wholesaler_id ON public.products(wholesaler_id);
 CREATE INDEX IF NOT EXISTS idx_customers_shop_id ON public.customers(shop_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_logs_shop_id ON public.inventory_logs(shop_id);
 CREATE INDEX IF NOT EXISTS idx_sales_invoices_shop_id ON public.sales_invoices(shop_id);
@@ -484,6 +525,7 @@ BEGIN
 
     IF p_reset_mode = 'WIPE_ALL_FRESH_STORE' THEN
         DELETE FROM public.products WHERE shop_id = p_shop_id;
+        DELETE FROM public.wholesalers WHERE shop_id = p_shop_id;
         DELETE FROM public.customers WHERE shop_id = p_shop_id AND id != '0000-WALK-IN';
     END IF;
 
@@ -512,6 +554,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- ==============================================================================
 ALTER TABLE public.shop_profile ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.store_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.wholesalers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.inventory_logs ENABLE ROW LEVEL SECURITY;
@@ -539,6 +582,14 @@ CREATE POLICY "authenticated_store_users" ON public.store_users FOR ALL TO authe
     USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
     WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
 CREATE POLICY "anon_store_users" ON public.store_users FOR ALL TO anon
+    USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
+
+DROP POLICY IF EXISTS "authenticated_wholesalers" ON public.wholesalers;
+DROP POLICY IF EXISTS "anon_wholesalers" ON public.wholesalers;
+CREATE POLICY "authenticated_wholesalers" ON public.wholesalers FOR ALL TO authenticated
+    USING (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL)
+    WITH CHECK (shop_id IN (SELECT public.get_auth_shop_ids()) OR shop_id = 'current_shop' OR user_id::text = auth.uid()::text OR user_id IS NULL);
+CREATE POLICY "anon_wholesalers" ON public.wholesalers FOR ALL TO anon
     USING (id IS NOT NULL) WITH CHECK (id IS NOT NULL);
 
 DROP POLICY IF EXISTS "authenticated_products" ON public.products;

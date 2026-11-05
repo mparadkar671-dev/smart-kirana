@@ -14,12 +14,33 @@ export interface Product {
   purchase_price: number; // Numeric 10,2
   selling_price: number; // Numeric 10,2
   mrp: number; // Numeric 10,2
-  current_stock: number; // Numeric 10,3 (supports e.g. 14.250 kg)
-  low_stock_threshold: number; // Numeric 10,3
+  current_stock: number; // Numeric 10,3 (supports e.g. 5.250 kg, 3.500 kg, 0.500 kg)
+  low_stock_threshold: number; // Numeric 10,3 (supports e.g. 0.500 kg, 0.250 kg)
   last_supplier_name: string;
+  supplier_phone?: string; // Contact phone for direct WhatsApp / SMS purchase orders
+  wholesaler_id?: string | null; // FK to Wholesaler entity
+  image_url?: string | null; // Compressed 160x160px WebP DataURL (<15KB) or remote URL
   expiry_date?: string | null; // Date (YYYY-MM-DD, nullable)
   is_quick_tap: boolean; // Boolean (Top-24 Fast-Tap Pareto items)
   updated_at: string; // ISO Timestamp
+}
+
+export interface Wholesaler {
+  id: string; // UUID PK (e.g. "ws-1730000000-xyz")
+  shop_id?: string; // Multi-tenant Shop ID (indexed)
+  name: string; // e.g. "Rameshwar Bhai" or "APMC Mandi Sugar Mill"
+  agency_or_brand?: string; // e.g. "HUL Distributor", "APMC Grain Merchant", "Amul Dairy"
+  phone: string; // 10-digit Indian mobile number for direct WhatsApp / SMS orders
+  gstin?: string;
+  address?: string;
+  visit_day?: string; // e.g. "Monday & Thursday"
+  is_active: boolean;
+  contact_person?: string;
+  address_city?: string;
+  gst_number?: string;
+  notes?: string;
+  created_at: string; // ISO Timestamp
+  updated_at?: string;
 }
 
 export type InventoryReason = 

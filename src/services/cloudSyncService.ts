@@ -12,6 +12,7 @@ import {
   ShopProfile,
   StoreUser,
   SyncOutboxItem,
+  Wholesaler,
 } from '../types';
 
 export interface CloudSyncStatus {
@@ -143,6 +144,7 @@ class CloudSyncService {
           if (resetMode === 'WIPE_ALL_FRESH_STORE') {
             await supabase.from('customers').delete().eq('shop_id', shopId).neq('id', '0000-WALK-IN');
             await supabase.from('products').delete().eq('shop_id', shopId);
+            await supabase.from('wholesalers').delete().eq('shop_id', shopId);
           }
 
           // Bump reset_epoch on shop_profile
@@ -203,6 +205,9 @@ class CloudSyncService {
         current_stock: product.current_stock,
         low_stock_threshold: product.low_stock_threshold,
         last_supplier_name: product.last_supplier_name,
+        supplier_phone: product.supplier_phone || null,
+        wholesaler_id: product.wholesaler_id || null,
+        image_url: product.image_url || null,
         expiry_date: product.expiry_date || null,
         is_quick_tap: product.is_quick_tap,
         updated_at: product.updated_at || new Date().toISOString(),
@@ -215,6 +220,52 @@ class CloudSyncService {
       }
     } catch (err) {
       console.warn('Background sync product to Supabase failed (offline mode):', err);
+    }
+  }
+
+  /**
+   * Syncs a single wholesaler to Supabase cloud
+   */
+  async syncWholesaler(wholesaler: Wholesaler): Promise<void> {
+    if (!supabase) return;
+    try {
+      const userId = await this.getUserId();
+      const payload: Record<string, unknown> = {
+        id: wholesaler.id,
+        shop_id: wholesaler.shop_id || 'current_shop',
+        name: wholesaler.name,
+        agency_or_brand: wholesaler.agency_or_brand || null,
+        phone: wholesaler.phone,
+        gstin: wholesaler.gstin || wholesaler.gst_number || null,
+        address: wholesaler.address || wholesaler.address_city || null,
+        visit_day: wholesaler.visit_day || null,
+        is_active: wholesaler.is_active !== false,
+        created_at: wholesaler.created_at || new Date().toISOString(),
+        updated_at: wholesaler.updated_at || new Date().toISOString(),
+      };
+      if (userId) payload.user_id = userId;
+
+      const { error } = await supabase.from('wholesalers').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.warn('Sync wholesaler to Supabase returned error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Background sync wholesaler to Supabase failed (offline mode):', err);
+    }
+  }
+
+  /**
+   * Deletes a single wholesaler from Supabase cloud
+   */
+  async deleteWholesaler(wholesalerId: string): Promise<void> {
+    if (!supabase) return;
+    try {
+      const { error } = await supabase.from('wholesalers').delete().eq('id', wholesalerId);
+      if (error) {
+        console.warn('Delete wholesaler from Supabase returned error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Background delete wholesaler from Supabase failed:', err);
     }
   }
 
@@ -583,6 +634,9 @@ class CloudSyncService {
               current_stock: p.current_stock,
               low_stock_threshold: p.low_stock_threshold,
               last_supplier_name: p.last_supplier_name,
+              supplier_phone: p.supplier_phone || null,
+              wholesaler_id: p.wholesaler_id || null,
+              image_url: p.image_url || null,
               expiry_date: p.expiry_date || null,
               is_quick_tap: p.is_quick_tap,
               updated_at: p.updated_at,
@@ -600,6 +654,38 @@ class CloudSyncService {
         }
       } catch (e: unknown) {
         errors.push(`Products: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      // 3b. Sync Wholesalers
+      try {
+        const wholesalers = await db.wholesalers.toArray();
+        if (wholesalers.length > 0) {
+          const rows = wholesalers.map((w) => {
+            const r: Record<string, unknown> = {
+              id: w.id,
+              shop_id: w.shop_id || shopId,
+              name: w.name,
+              agency_or_brand: w.agency_or_brand || null,
+              phone: w.phone,
+              gstin: w.gstin || w.gst_number || null,
+              address: w.address || w.address_city || null,
+              visit_day: w.visit_day || null,
+              is_active: w.is_active !== false,
+              created_at: w.created_at || new Date().toISOString(),
+              updated_at: w.updated_at || new Date().toISOString(),
+            };
+            if (userId) r.user_id = userId;
+            return r;
+          });
+          for (let i = 0; i < rows.length; i += 50) {
+            const chunk = rows.slice(i, i + 50);
+            const { error } = await supabase.from('wholesalers').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
+            pushedCount += chunk.length;
+          }
+        }
+      } catch (e: unknown) {
+        console.warn('Wholesalers sync notice:', e);
       }
 
       // 4. Sync Customers
@@ -825,6 +911,9 @@ class CloudSyncService {
               current_stock: Number(p.current_stock) || 0,
               low_stock_threshold: Number(p.low_stock_threshold) || 5,
               last_supplier_name: p.last_supplier_name || 'General Wholesaler',
+              supplier_phone: p.supplier_phone || undefined,
+              wholesaler_id: p.wholesaler_id || null,
+              image_url: p.image_url || null,
               expiry_date: p.expiry_date || null,
               is_quick_tap: Boolean(p.is_quick_tap),
               updated_at: p.updated_at || new Date().toISOString(),
@@ -835,6 +924,36 @@ class CloudSyncService {
         }
       } catch (e) {
         console.warn('Pull products failed:', e);
+      }
+
+      // 2b. Pull Wholesalers strictly scoped by shop_id
+      try {
+        const { data: wholesalers, error } = await supabase
+          .from('wholesalers')
+          .select('*')
+          .eq('shop_id', shopId);
+
+        if (!error && wholesalers && wholesalers.length > 0) {
+          for (const w of wholesalers) {
+            const wsRecord: Wholesaler = {
+              id: w.id,
+              shop_id: w.shop_id || shopId,
+              name: w.name,
+              agency_or_brand: w.agency_or_brand || undefined,
+              phone: w.phone || '',
+              gstin: w.gstin || undefined,
+              address: w.address || undefined,
+              visit_day: w.visit_day || undefined,
+              is_active: w.is_active !== false,
+              created_at: w.created_at || new Date().toISOString(),
+              updated_at: w.updated_at || undefined,
+            };
+            await db.wholesalers.put(wsRecord);
+            pulledCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Pull wholesalers failed:', e);
       }
 
       // 3. Pull Customers strictly scoped by shop_id

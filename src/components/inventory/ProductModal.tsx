@@ -1,8 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { Product, UnitType } from '../../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { Product, UnitType, Wholesaler } from '../../types';
 import { CreateProductInput, InventoryService } from '../../services/inventoryService';
-import { calculateProfitMarginPercent, roundCurrency, roundQty } from '../../utils/math';
-import { X, Sparkles, Check, AlertCircle } from 'lucide-react';
+import { WholesalerService } from '../../services/wholesalerService';
+import { calculateProfitMarginPercent } from '../../utils/math';
+import { generateUniqueStoreBarcode, getBarcodePatternBars } from '../../utils/barcodeGenerator';
+import { compressProductImage } from '../../utils/imageCompressor';
+import { db } from '../../db/db';
+import {
+  X,
+  Sparkles,
+  Check,
+  AlertCircle,
+  RefreshCw,
+  Printer,
+  ImagePlus,
+  Trash2,
+  Plus,
+  Truck,
+} from 'lucide-react';
 
 interface ProductModalProps {
   isOpen: boolean;
@@ -46,14 +61,50 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     current_stock: 0,
     low_stock_threshold: 5,
     last_supplier_name: '',
+    supplier_phone: '',
+    wholesaler_id: null,
+    image_url: null,
     expiry_date: null,
     is_quick_tap: false,
   });
 
+  const [wholesalers, setWholesalers] = useState<Wholesaler[]>([]);
+  const [showInlineWholesaler, setShowInlineWholesaler] = useState(false);
+  const [newWsName, setNewWsName] = useState('');
+  const [newWsAgency, setNewWsAgency] = useState('');
+  const [newWsPhone, setNewWsPhone] = useState('');
+  const [isSavingWs, setIsSavingWs] = useState(false);
+
+  const [isCompressingImg, setIsCompressingImg] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadWholesalers = async () => {
+    try {
+      const list = await WholesalerService.getAll();
+      setWholesalers(list);
+    } catch {
+      setWholesalers([]);
+    }
+  };
+
+  const generateFreshBarcode = async (): Promise<string> => {
+    try {
+      const allProds = await db.products.toArray();
+      const existingBarcodes = new Set(allProds.map((p) => p.barcode).filter(Boolean));
+      return generateUniqueStoreBarcode(existingBarcodes);
+    } catch {
+      return generateUniqueStoreBarcode(new Set());
+    }
+  };
 
   useEffect(() => {
+    if (!isOpen) return;
+    loadWholesalers();
+    setShowInlineWholesaler(false);
+    setErrorMsg(null);
+
     if (productToEdit) {
       setFormData({
         name: productToEdit.name,
@@ -67,14 +118,19 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         current_stock: productToEdit.current_stock,
         low_stock_threshold: productToEdit.low_stock_threshold,
         last_supplier_name: productToEdit.last_supplier_name || '',
+        supplier_phone: productToEdit.supplier_phone || '',
+        wholesaler_id: productToEdit.wholesaler_id || null,
+        image_url: productToEdit.image_url || null,
         expiry_date: productToEdit.expiry_date || null,
         is_quick_tap: productToEdit.is_quick_tap,
       });
     } else {
+      // Pre-fill initial synchronous barcode immediately, then refine against DB
+      const initialBarcode = generateUniqueStoreBarcode(new Set());
       setFormData({
         name: '',
         short_code: '',
-        barcode: '',
+        barcode: initialBarcode,
         category: 'Groceries',
         unit_type: 'PCS',
         purchase_price: 0,
@@ -83,16 +139,127 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         current_stock: 0,
         low_stock_threshold: 5,
         last_supplier_name: '',
+        supplier_phone: '',
+        wholesaler_id: null,
+        image_url: null,
         expiry_date: null,
         is_quick_tap: false,
       });
+      generateFreshBarcode().then((uniqueCode) => {
+        setFormData((prev) => ({
+          ...prev,
+          barcode: prev.barcode === initialBarcode || !prev.barcode ? uniqueCode : prev.barcode,
+        }));
+      });
     }
-    setErrorMsg(null);
   }, [productToEdit, isOpen]);
 
   if (!isOpen) return null;
 
   const margin = calculateProfitMarginPercent(formData.purchase_price, formData.selling_price);
+  const isLoose = formData.unit_type === 'KG_LOOSE' || formData.unit_type === 'LTR';
+  const barcodeBars = getBarcodePatternBars(formData.barcode || '2000000000000');
+
+  const handleAutoGenerateBarcode = async () => {
+    const code = await generateFreshBarcode();
+    setFormData((prev) => ({ ...prev, barcode: code }));
+  };
+
+  const handlePrintBarcodeLabel = () => {
+    if (typeof window === 'undefined') return;
+    const printWin = window.open('', '_blank', 'width=380,height=260');
+    if (!printWin) return;
+    const title = formData.name || 'Kirana Item';
+    const price = formData.selling_price ? `₹${formData.selling_price.toFixed(2)}` : '';
+    const code = formData.barcode || '2000000000000';
+    printWin.document.write(`
+      <html>
+        <head><title>Print Label - ${title}</title></head>
+        <body style="font-family: monospace; text-align: center; padding: 12px; margin: 0;">
+          <div style="border: 1px dashed #333; padding: 10px; display: inline-block; width: 220px;">
+            <div style="font-weight: bold; font-size: 13px; margin-bottom: 4px;">${title}</div>
+            <div style="font-size: 15px; font-weight: 800; margin-bottom: 6px;">${price}</div>
+            <div style="letter-spacing: 3px; font-size: 14px; font-weight: bold;">||| || ||| | |||| |||</div>
+            <div style="font-size: 12px; margin-top: 2px;">${code}</div>
+          </div>
+          <script>window.onload = function() { window.print(); window.close(); }</script>
+        </body>
+      </html>
+    `);
+    printWin.document.close();
+  };
+
+  const handleImageFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsCompressingImg(true);
+    try {
+      const compressed = await compressProductImage(file);
+      setFormData((prev) => ({ ...prev, image_url: compressed }));
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to compress product image');
+    } finally {
+      setIsCompressingImg(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleWholesalerSelect = (wsId: string) => {
+    if (!wsId) {
+      setFormData((prev) => ({
+        ...prev,
+        wholesaler_id: null,
+      }));
+      return;
+    }
+    const found = wholesalers.find((w) => w.id === wsId);
+    if (found) {
+      setFormData((prev) => ({
+        ...prev,
+        wholesaler_id: found.id,
+        last_supplier_name: found.name,
+        supplier_phone: found.phone,
+      }));
+    }
+  };
+
+  const handleSaveInlineWholesaler = async () => {
+    if (!newWsName.trim()) {
+      setErrorMsg('Wholesaler / Person Name is required');
+      return;
+    }
+    const cleanPhone = newWsPhone.replace(/\D/g, '');
+    if (cleanPhone.length < 10) {
+      setErrorMsg('Please enter a valid 10-digit WhatsApp Contact No. for the wholesaler');
+      return;
+    }
+
+    setIsSavingWs(true);
+    setErrorMsg(null);
+    try {
+      const created = await WholesalerService.create({
+        name: newWsName.trim(),
+        agency_or_brand: newWsAgency.trim(),
+        phone: cleanPhone.slice(-10),
+      });
+      const updatedList = await WholesalerService.getAll();
+      setWholesalers(updatedList);
+      setFormData((prev) => ({
+        ...prev,
+        wholesaler_id: created.id,
+        last_supplier_name: created.name,
+        supplier_phone: created.phone,
+      }));
+      setNewWsName('');
+      setNewWsAgency('');
+      setNewWsPhone('');
+      setShowInlineWholesaler(false);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to save wholesaler');
+    } finally {
+      setIsSavingWs(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,7 +305,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               {productToEdit ? 'Edit Product' : 'Add New Kirana Product'}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Configure inventory item, unit parameters, and profit margins
+              Configure inventory item, GS1 barcode, wholesaler link, and image
             </p>
           </div>
           <button
@@ -157,7 +324,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         )}
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Product Name */}
             <div className="sm:col-span-2">
@@ -167,6 +334,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               <input
                 type="text"
                 required
+                data-testid="product-name-input"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="e.g. Tata Salt Vacuum Evaporated 1kg"
@@ -182,6 +350,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               <input
                 type="text"
                 required
+                data-testid="product-shortcode-input"
                 value={formData.short_code}
                 onChange={(e) => setFormData({ ...formData, short_code: e.target.value.toUpperCase() })}
                 placeholder="e.g. TS1, PG5, SUG"
@@ -189,18 +358,67 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               />
             </div>
 
-            {/* Barcode */}
+            {/* Barcode with Auto-Generate & Visual SVG Preview */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wide">
-                Barcode / EAN (Optional)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                  GS1 / EAN-13 Barcode
+                </label>
+                <button
+                  type="button"
+                  data-testid="auto-generate-barcode-btn"
+                  onClick={handleAutoGenerateBarcode}
+                  className="text-[11px] font-bold text-blue-700 dark:text-blue-400 hover:underline flex items-center gap-1"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>🔄 Auto-Generate</span>
+                </button>
+              </div>
               <input
                 type="text"
-                value={formData.barcode}
+                data-testid="product-barcode-input"
+                value={formData.barcode || ''}
                 onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
-                placeholder="Scan or enter barcode"
+                placeholder="Scan or auto-generate 13-digit EAN"
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
+              {formData.barcode && (
+                <div className="mt-1.5 px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <svg
+                      width="96"
+                      height="22"
+                      viewBox="0 0 96 22"
+                      className="shrink-0 text-slate-900 dark:text-white"
+                      aria-label="Barcode preview"
+                    >
+                      {(() => {
+                        let x = 2;
+                        return barcodeBars.map((w, idx) => {
+                          const isDark = idx % 2 === 0;
+                          const rect = isDark ? (
+                            <rect key={idx} x={x} y={1} width={w} height={20} fill="currentColor" />
+                          ) : null;
+                          x += w;
+                          return rect;
+                        });
+                      })()}
+                    </svg>
+                    <span className="text-[10px] font-mono font-bold text-slate-600 dark:text-slate-300 truncate">
+                      {formData.barcode}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePrintBarcodeLabel}
+                    title="Print Barcode Sticker"
+                    className="px-2 py-1 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded text-[10px] font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 flex items-center gap-1 shrink-0"
+                  >
+                    <Printer className="w-3 h-3" />
+                    <span>🖨️ Print Label</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Category */}
@@ -225,8 +443,18 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 Unit Type *
               </label>
               <select
+                data-testid="unit-type-select"
                 value={formData.unit_type}
-                onChange={(e) => setFormData({ ...formData, unit_type: e.target.value as UnitType })}
+                onChange={(e) => {
+                  const nextUnit = e.target.value as UnitType;
+                  const nextIsLoose = nextUnit === 'KG_LOOSE' || nextUnit === 'LTR';
+                  setFormData({
+                    ...formData,
+                    unit_type: nextUnit,
+                    low_stock_threshold:
+                      nextIsLoose && formData.low_stock_threshold === 5 ? 0.5 : formData.low_stock_threshold,
+                  });
+                }}
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium"
               >
                 <option value="PCS">PCS (Standard Items / Soap / Biscuits)</option>
@@ -263,7 +491,6 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
                   Selling Price (₹ Retail) *
                 </label>
-                {/* Margin Badge (REQ-04) */}
                 <span
                   data-testid="margin-badge"
                   className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
@@ -312,34 +539,6 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               </div>
             </div>
 
-            {/* Current Stock */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wide">
-                Current Stock ({formData.unit_type === 'KG_LOOSE' ? 'kg' : formData.unit_type === 'LTR' ? 'L' : 'units'}) *
-              </label>
-              <input
-                type="number"
-                step={formData.unit_type === 'KG_LOOSE' || formData.unit_type === 'LTR' ? '0.001' : '1'}
-                value={formData.current_stock}
-                onChange={(e) => setFormData({ ...formData, current_stock: parseFloat(e.target.value) || 0 })}
-                className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm font-bold text-blue-900 dark:text-blue-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
-            </div>
-
-            {/* Low Stock Alert Threshold */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wide">
-                Low Stock Threshold (Alert Limit) *
-              </label>
-              <input
-                type="number"
-                step={formData.unit_type === 'KG_LOOSE' || formData.unit_type === 'LTR' ? '0.001' : '1'}
-                value={formData.low_stock_threshold}
-                onChange={(e) => setFormData({ ...formData, low_stock_threshold: parseFloat(e.target.value) || 0 })}
-                className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
-            </div>
-
             {/* Expiry Date */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wide">
@@ -353,18 +552,235 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               />
             </div>
 
-            {/* Last Supplier Name */}
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wide">
-                Wholesaler / Supplier Name
-              </label>
+            {/* Current Stock (Supports 5.250 kg, 3.500 kg, 0.500 kg) */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                  Current Stock ({formData.unit_type === 'KG_LOOSE' ? 'kg' : formData.unit_type === 'LTR' ? 'L' : 'units'}) *
+                </label>
+                {isLoose && (
+                  <div className="flex gap-1">
+                    {[0.5, 1, 3.5, 5.25].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, current_stock: preset })}
+                        className="px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded text-[10px] font-bold hover:bg-blue-100"
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <input
-                type="text"
-                value={formData.last_supplier_name || ''}
-                onChange={(e) => setFormData({ ...formData, last_supplier_name: e.target.value })}
-                placeholder="e.g. Tata Consumer Wholesale, APMC Mandi"
-                className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                type="number"
+                step={isLoose ? '0.001' : '1'}
+                min="0"
+                data-testid="current-stock-input"
+                value={formData.current_stock}
+                onChange={(e) => setFormData({ ...formData, current_stock: parseFloat(e.target.value) || 0 })}
+                className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm font-bold text-blue-900 dark:text-blue-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
+              {isLoose && (
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Supports exact fractional weights (e.g. 5.250 kg, 3.500 kg, 0.500 kg)
+                </p>
+              )}
+            </div>
+
+            {/* Low Stock Alert Threshold (Supports 1/2 kg = 0.500 kg, 1/4 kg = 0.250 kg) */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                  Low Stock Limit (Alert) *
+                </label>
+                {isLoose && (
+                  <div className="flex gap-1">
+                    {[
+                      { label: '¼ kg', val: 0.25 },
+                      { label: '½ kg', val: 0.5 },
+                      { label: '1 kg', val: 1 },
+                      { label: '2 kg', val: 2 },
+                    ].map((p) => (
+                      <button
+                        key={p.val}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, low_stock_threshold: p.val })}
+                        className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded text-[10px] font-bold hover:bg-amber-100"
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <input
+                type="number"
+                step={isLoose ? '0.001' : '1'}
+                min="0"
+                data-testid="low-stock-threshold-input"
+                value={formData.low_stock_threshold}
+                onChange={(e) => setFormData({ ...formData, low_stock_threshold: parseFloat(e.target.value) || 0 })}
+                className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+              {isLoose && (
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Small scale limit supported: 0.5 (½ kg) or 0.25 (¼ kg)
+                </p>
+              )}
+            </div>
+
+            {/* Wholesaler / Distributor Dropdown + Inline Quick-Add (Step 2.1) */}
+            <div className="sm:col-span-2 p-3.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide">
+                  <Truck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <span>Wholesaler / Distributor</span>
+                </label>
+                <button
+                  type="button"
+                  data-testid="toggle-inline-wholesaler-btn"
+                  onClick={() => setShowInlineWholesaler(!showInlineWholesaler)}
+                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition shadow-2xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{showInlineWholesaler ? 'Cancel' : '+ New Wholesaler'}</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <select
+                  data-testid="wholesaler-select"
+                  value={formData.wholesaler_id || ''}
+                  onChange={(e) => handleWholesalerSelect(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                >
+                  <option value="">-- Select Saved Wholesaler / Distributor --</option>
+                  {wholesalers.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.agency_or_brand || w.phone})
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="text"
+                  value={formData.last_supplier_name || ''}
+                  onChange={(e) => setFormData({ ...formData, last_supplier_name: e.target.value })}
+                  placeholder="Or type supplier name manually"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Inline Mini-Form to Add New Wholesaler */}
+              {showInlineWholesaler && (
+                <div
+                  data-testid="inline-wholesaler-form"
+                  className="p-3 bg-white dark:bg-slate-900 border border-blue-300 dark:border-blue-800 rounded-xl space-y-2.5 animate-in fade-in"
+                >
+                  <div className="text-xs font-bold text-blue-900 dark:text-blue-300">
+                    Quick-Add New Wholesaler / Distributor
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      data-testid="inline-ws-name"
+                      value={newWsName}
+                      onChange={(e) => setNewWsName(e.target.value)}
+                      placeholder="Wholesaler / Person Name *"
+                      className="px-2.5 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs text-slate-900 dark:text-white"
+                    />
+                    <input
+                      type="text"
+                      data-testid="inline-ws-agency"
+                      value={newWsAgency}
+                      onChange={(e) => setNewWsAgency(e.target.value)}
+                      placeholder="Agency / Brand (e.g. Parle)"
+                      className="px-2.5 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs text-slate-900 dark:text-white"
+                    />
+                    <input
+                      type="tel"
+                      data-testid="inline-ws-phone"
+                      value={newWsPhone}
+                      onChange={(e) => setNewWsPhone(e.target.value)}
+                      placeholder="WhatsApp 10-Digit Phone *"
+                      maxLength={10}
+                      className="px-2.5 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      data-testid="save-inline-wholesaler-btn"
+                      disabled={isSavingWs}
+                      onClick={handleSaveInlineWholesaler}
+                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{isSavingWs ? 'Saving...' : 'Save Wholesaler'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Product Image Upload (<15KB 160x160 WebP Compressor - Step 4.2) */}
+            <div className="sm:col-span-2 p-3.5 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                {formData.image_url ? (
+                  <img
+                    src={formData.image_url}
+                    alt={formData.name || 'Product preview'}
+                    data-testid="product-image-preview"
+                    className="w-16 h-16 rounded-xl object-cover border border-slate-300 dark:border-slate-600 shadow-xs shrink-0"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-xl bg-slate-200/70 dark:bg-slate-800 border border-dashed border-slate-400 dark:border-slate-600 flex flex-col items-center justify-center text-slate-400 shrink-0">
+                    <ImagePlus className="w-6 h-6" />
+                    <span className="text-[9px] font-semibold mt-0.5">160x160</span>
+                  </div>
+                )}
+                <div>
+                  <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Product Thumbnail Image (Optional)
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Auto-cropped to 160x160px WebP (&lt;15KB) for Top-24 Fast-Tap POS cards.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  data-testid="product-image-input"
+                  onChange={handleImageFileSelect}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isCompressingImg}
+                  className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition"
+                >
+                  <ImagePlus className="w-3.5 h-3.5 text-blue-600" />
+                  <span>{isCompressingImg ? 'Compressing...' : 'Upload Photo'}</span>
+                </button>
+                {formData.image_url && (
+                  <button
+                    type="button"
+                    data-testid="remove-product-image-btn"
+                    onClick={() => setFormData({ ...formData, image_url: null })}
+                    className="px-2.5 py-2 bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 rounded-xl text-xs font-semibold flex items-center gap-1 hover:bg-red-100 transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>🗑️ Remove Image</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Top-24 Fast-Tap Toggle (REQ-04 & REQ-23) */}
@@ -402,6 +818,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             <button
               type="submit"
               disabled={isSubmitting}
+              data-testid="save-product-submit-btn"
               className="px-5 py-2 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-sm font-semibold shadow-md transition flex items-center gap-2"
             >
               <Check className="w-4 h-4" />

@@ -10,6 +10,7 @@ import {
   DailyGallaSession,
   ShopProfile,
   StoreUser,
+  Wholesaler,
 } from '../types';
 
 export interface DatabaseSnapshot {
@@ -25,6 +26,7 @@ export interface DatabaseSnapshot {
   expenses_and_drawings: ExpenseAndDrawing[];
   daily_galla_sessions: DailyGallaSession[];
   store_users?: StoreUser[];
+  wholesalers?: Wholesaler[];
 }
 
 export class BackupService {
@@ -43,6 +45,7 @@ export class BackupService {
       expenses_and_drawings,
       daily_galla_sessions,
       store_users,
+      wholesalers,
     ] = await Promise.all([
       db.shop_profile.toArray(),
       db.products.toArray(),
@@ -54,6 +57,7 @@ export class BackupService {
       db.expenses_and_drawings.toArray(),
       db.daily_galla_sessions.toArray(),
       db.store_users.toArray(),
+      db.wholesalers.toArray(),
     ]);
 
     return {
@@ -69,6 +73,7 @@ export class BackupService {
       expenses_and_drawings,
       daily_galla_sessions,
       store_users,
+      wholesalers,
     };
   }
 
@@ -184,6 +189,7 @@ export class BackupService {
         db.expenses_and_drawings,
         db.daily_galla_sessions,
         db.store_users,
+        db.wholesalers,
       ],
       async () => {
         // Clear all tables
@@ -197,6 +203,7 @@ export class BackupService {
         await db.expenses_and_drawings.clear();
         await db.daily_galla_sessions.clear();
         await db.store_users.clear();
+        await db.wholesalers.clear();
 
         // Restore tables
         if (snapshot.shop_profile?.length) await db.shop_profile.bulkAdd(snapshot.shop_profile);
@@ -209,6 +216,7 @@ export class BackupService {
         if (snapshot.expenses_and_drawings?.length) await db.expenses_and_drawings.bulkAdd(snapshot.expenses_and_drawings);
         if (snapshot.daily_galla_sessions?.length) await db.daily_galla_sessions.bulkAdd(snapshot.daily_galla_sessions);
         if (snapshot.store_users?.length) await db.store_users.bulkAdd(snapshot.store_users);
+        if (snapshot.wholesalers?.length) await db.wholesalers.bulkAdd(snapshot.wholesalers);
       }
     );
   }

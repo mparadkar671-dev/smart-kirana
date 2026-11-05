@@ -672,57 +672,93 @@ export const POSView: React.FC<POSViewProps> = ({
             data-testid="fast-tap-grid"
             className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5"
           >
-            {fastTapProducts.map((prod) => (
-              <button
-                key={prod.id}
-                type="button"
-                data-testid={`fast-tap-${prod.short_code}`}
-                onClick={() => addItemToCart(prod)}
-                className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-orange-500 dark:hover:border-orange-500 rounded-xl shadow-2xs hover:shadow-xs transition text-left flex flex-col justify-between group active:scale-[0.98]"
-              >
-                <div>
-                  <div className="flex items-start justify-between mb-1">
-                    <span className="text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded group-hover:bg-orange-100 dark:group-hover:bg-orange-950 group-hover:text-orange-800 dark:group-hover:text-orange-300 transition">
-                      {prod.short_code}
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      {prod.unit_type}
-                    </span>
-                  </div>
-                  <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 line-clamp-2 leading-tight">
-                    {prod.name}
-                  </h3>
-                </div>
+            {fastTapProducts.map((prod) => {
+              const unitShort =
+                prod.unit_type === 'KG_LOOSE'
+                  ? 'kg'
+                  : prod.unit_type === 'LTR'
+                  ? 'L'
+                  : prod.unit_type === 'PACK'
+                  ? 'pack'
+                  : 'pc';
 
-                <div className="mt-2 pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-xs font-extrabold text-blue-900 dark:text-emerald-400">
-                      {formatINR(prod.selling_price)}
-                    </span>
-                    {prod.mrp > prod.selling_price && (
-                      <span className="text-[10px] text-slate-400 line-through">
-                        ₹{prod.mrp}
-                      </span>
-                    )}
-                  </div>
-                  <div>
-                    {prod.current_stock <= 0 ? (
-                      <span className="text-[9px] font-bold text-rose-600 bg-rose-50 dark:bg-rose-950/60 px-1 py-0.5 rounded">
-                        Out
-                      </span>
-                    ) : prod.current_stock <= prod.low_stock_threshold ? (
-                      <span className="text-[9px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/60 px-1 py-0.5 rounded">
-                        Low: {prod.current_stock}
-                      </span>
+              const catInitial = (prod.category || prod.name || 'K').trim().charAt(0).toUpperCase();
+
+              return (
+                <button
+                  key={prod.id}
+                  type="button"
+                  data-testid={`fast-tap-${prod.short_code}`}
+                  onClick={() => addItemToCart(prod)}
+                  className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-orange-500 dark:hover:border-orange-500 rounded-xl shadow-2xs hover:shadow-xs transition text-left flex flex-col justify-between group active:scale-[0.98]"
+                >
+                  {/* Top & Center: Product Thumbnail Image (or Category Avatar) + Bold Product Name */}
+                  <div className="flex items-center gap-2.5">
+                    {prod.image_url ? (
+                      <img
+                        src={prod.image_url}
+                        alt={prod.name}
+                        data-testid={`fast-tap-img-${prod.id}`}
+                        className="w-11 h-11 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-50 dark:bg-slate-800"
+                      />
                     ) : (
-                      <span className="text-[10px] font-medium text-slate-400">
-                        {prod.current_stock}
-                      </span>
+                      <div
+                        data-testid={`fast-tap-avatar-${prod.id}`}
+                        className="w-11 h-11 rounded-lg bg-gradient-to-br from-blue-50 to-orange-50 dark:from-slate-800 dark:to-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center shrink-0 group-hover:border-orange-300 transition"
+                      >
+                        <span className="text-xs font-black text-blue-800 dark:text-orange-400">
+                          {catInitial}
+                        </span>
+                        <span className="text-[8px] font-semibold uppercase text-slate-400">
+                          {unitShort}
+                        </span>
+                      </div>
                     )}
+
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 line-clamp-2 leading-tight">
+                        {prod.name}
+                      </h3>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 block truncate mt-0.5">
+                        {prod.category}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              </button>
-            ))}
+
+                  {/* Bottom: Prominent Selling Price Badge + Stock / Low-Stock Indicator Pill */}
+                  <div className="mt-2 pt-1.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-1">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-xs font-extrabold text-blue-900 dark:text-emerald-400">
+                        {formatINR(prod.selling_price)}
+                        <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                          /{unitShort}
+                        </span>
+                      </span>
+                      {prod.mrp > prod.selling_price && (
+                        <span className="text-[10px] text-slate-400 line-through">
+                          ₹{prod.mrp}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      {prod.current_stock <= 0 ? (
+                        <span className="text-[9px] font-bold text-rose-600 bg-rose-50 dark:bg-rose-950/60 px-1.5 py-0.5 rounded-md">
+                          Out
+                        </span>
+                      ) : prod.current_stock <= prod.low_stock_threshold ? (
+                        <span className="text-[9px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded-md">
+                          Low: {prod.current_stock}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-medium text-slate-400 bg-slate-50 dark:bg-slate-800/70 px-1.5 py-0.5 rounded-md">
+                          {prod.current_stock} {unitShort}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

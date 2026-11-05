@@ -20,6 +20,7 @@ import {
   Square,
   FolderSync,
   X,
+  Truck,
 } from 'lucide-react';
 
 interface InventoryViewProps {
@@ -178,6 +179,16 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          <button
+            type="button"
+            data-testid="open-wholesalers-reorder-btn"
+            onClick={() => setActiveTab('restock')}
+            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+          >
+            <Truck className="w-4 h-4" />
+            <span>🚛 Wholesalers &amp; Reorder</span>
+          </button>
+
           <button
             onClick={handleOpenAdd}
             className="flex-1 sm:flex-initial px-4 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
@@ -378,27 +389,38 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
                         {/* Name + Code */}
                         <td className="p-3">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-slate-900 dark:text-slate-100">{p.name}</span>
-                            {p.is_quick_tap && (
-                              <span
-                                title="Top-24 Pareto Fast-Tap Grid"
-                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-300 text-[10px] font-bold rounded-md"
-                              >
-                                <Sparkles className="w-2.5 h-2.5 text-orange-600 dark:text-orange-400" />
-                                24
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className="font-mono text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded">
-                              {p.short_code}
-                            </span>
-                            {p.barcode && (
-                              <span className="font-mono text-[10px] text-slate-400 dark:text-slate-500">
-                                {p.barcode}
-                              </span>
-                            )}
+                          <div className="flex items-center gap-2.5">
+                            {p.image_url ? (
+                              <img
+                                src={p.image_url}
+                                alt={p.name}
+                                className="w-9 h-9 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                              />
+                            ) : null}
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-slate-900 dark:text-slate-100">{p.name}</span>
+                                {p.is_quick_tap && (
+                                  <span
+                                    title="Top-24 Pareto Fast-Tap Grid"
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-300 text-[10px] font-bold rounded-md"
+                                  >
+                                    <Sparkles className="w-2.5 h-2.5 text-orange-600 dark:text-orange-400" />
+                                    24
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="font-mono text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-1.5 py-0.5 rounded">
+                                  {p.short_code}
+                                </span>
+                                {p.barcode && (
+                                  <span className="font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                                    {p.barcode}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </td>
 
@@ -507,6 +529,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           products={products}
           shopProfile={shopProfile}
           onRestockClick={(p) => handleOpenStockIn(p)}
+          onRefresh={onRefresh}
         />
       )}
 

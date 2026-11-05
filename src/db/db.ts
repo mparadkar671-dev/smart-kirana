@@ -14,10 +14,11 @@ import {
   SyncOperation,
   CreditNote,
   SalesReturnReason,
+  Wholesaler,
   WALK_IN_CUSTOMER_RECORD,
   WALK_IN_CUSTOMER_ID,
 } from '../types';
-import { INITIAL_PRODUCTS, DEFAULT_SHOP_PROFILE, INITIAL_CUSTOMERS } from './seed';
+import { INITIAL_PRODUCTS, DEFAULT_SHOP_PROFILE, INITIAL_CUSTOMERS, INITIAL_WHOLESALERS } from './seed';
 
 export function generateInviteCode(): string {
   const num = Math.floor(1000 + Math.random() * 9000);
@@ -54,6 +55,7 @@ export class KiranaDatabase extends Dexie {
   store_users!: EntityTable<StoreUser, 'id'>;
   sync_outbox!: EntityTable<SyncOutboxItem, 'id'>;
   credit_notes!: EntityTable<CreditNote, 'id'>;
+  wholesalers!: EntityTable<Wholesaler, 'id'>;
 
   constructor() {
     super('SmartKiranaDB');
@@ -116,6 +118,22 @@ export class KiranaDatabase extends Dexie {
       credit_notes: 'id, shop_id, credit_note_number, original_invoice_id, customer_id, created_at',
     });
 
+    this.version(6).stores({
+      products: 'id, shop_id, barcode, short_code, name, category, is_quick_tap, wholesaler_id, updated_at',
+      inventory_logs: 'id, shop_id, product_id, reason_type, reference_id, created_at',
+      customers: 'id, shop_id, phone, name, current_udhari_balance, created_at',
+      sales_invoices: 'id, shop_id, invoice_number, customer_id, payment_mode, status, credit_note_number, created_at',
+      sale_items: 'id, shop_id, invoice_id, product_id',
+      khata_transactions: 'id, shop_id, customer_id, entry_type, invoice_id, payment_channel, created_at',
+      expenses_and_drawings: 'id, shop_id, category, paid_via, created_at',
+      daily_galla_sessions: 'id, shop_id, &session_date, created_at',
+      shop_profile: 'id, shop_id, invite_code',
+      store_users: 'id, user_id, email, role, shop_id, created_at',
+      sync_outbox: 'id, table_name, shop_id, status, created_at, retry_count',
+      credit_notes: 'id, shop_id, credit_note_number, original_invoice_id, customer_id, created_at',
+      wholesalers: 'id, shop_id, name, phone, agency_or_brand, is_active, created_at',
+    });
+
     // Multi-tenant Hook: Ensure all records are always tagged with shop_id and invite code
     const tenantTables = [
       this.products,
@@ -128,6 +146,7 @@ export class KiranaDatabase extends Dexie {
       this.daily_galla_sessions,
       this.sync_outbox,
       this.credit_notes,
+      this.wholesalers,
     ];
 
     tenantTables.forEach((table) => {
@@ -157,7 +176,7 @@ export class KiranaDatabase extends Dexie {
   async initializeDatabase(options: { seedDemo?: boolean } = {}): Promise<void> {
     await this.transaction(
       'rw',
-      [this.products, this.customers, this.shop_profile, this.inventory_logs],
+      [this.products, this.customers, this.shop_profile, this.inventory_logs, this.wholesalers],
       async () => {
         // 1. Ensure WALK_IN_CUSTOMER exists
         const walkIn = await this.customers.get(WALK_IN_CUSTOMER_ID);
@@ -209,6 +228,12 @@ export class KiranaDatabase extends Dexie {
           }
         }
       }
+
+      // Seed initial demo wholesalers if empty
+      const wsCount = await this.wholesalers.count();
+      if (wsCount === 0) {
+        await this.wholesalers.bulkAdd(INITIAL_WHOLESALERS);
+      }
     }
   }
 
@@ -227,6 +252,7 @@ export class KiranaDatabase extends Dexie {
         this.expenses_and_drawings,
         this.daily_galla_sessions,
         this.inventory_logs,
+        this.wholesalers,
       ],
       async () => {
         await this.products.clear();
@@ -237,6 +263,7 @@ export class KiranaDatabase extends Dexie {
         await this.expenses_and_drawings.clear();
         await this.daily_galla_sessions.clear();
         await this.inventory_logs.clear();
+        await this.wholesalers.clear();
 
         // Re-insert mandatory WALK_IN_CUSTOMER
         await this.customers.add(WALK_IN_CUSTOMER_RECORD);
@@ -299,6 +326,7 @@ export class KiranaDatabase extends Dexie {
         this.expenses_and_drawings,
         this.daily_galla_sessions,
         this.shop_profile,
+        this.wholesalers,
       ],
       async () => {
         await this.products.clear();
@@ -310,10 +338,12 @@ export class KiranaDatabase extends Dexie {
         await this.expenses_and_drawings.clear();
         await this.daily_galla_sessions.clear();
         await this.shop_profile.clear();
+        await this.wholesalers.clear();
 
         await this.shop_profile.add(DEFAULT_SHOP_PROFILE);
         await this.customers.bulkAdd(INITIAL_CUSTOMERS);
         await this.products.bulkAdd(INITIAL_PRODUCTS);
+        await this.wholesalers.bulkAdd(INITIAL_WHOLESALERS);
 
         const initialLogs: InventoryLog[] = INITIAL_PRODUCTS.map((prod) => ({
           id: `demo-init-log-${prod.id}`,
