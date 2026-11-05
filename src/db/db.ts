@@ -134,6 +134,22 @@ export class KiranaDatabase extends Dexie {
       wholesalers: 'id, shop_id, name, phone, agency_or_brand, is_active, created_at',
     });
 
+    this.version(7).stores({
+      products: 'id, shop_id, barcode, short_code, name, marathi_name, search_keywords, category, is_quick_tap, wholesaler_id, updated_at',
+      inventory_logs: 'id, shop_id, product_id, reason_type, reference_id, created_at',
+      customers: 'id, shop_id, phone, name, current_udhari_balance, created_at',
+      sales_invoices: 'id, shop_id, invoice_number, customer_id, payment_mode, status, credit_note_number, created_at',
+      sale_items: 'id, shop_id, invoice_id, product_id',
+      khata_transactions: 'id, shop_id, customer_id, entry_type, invoice_id, payment_channel, created_at',
+      expenses_and_drawings: 'id, shop_id, category, paid_via, created_at',
+      daily_galla_sessions: 'id, shop_id, &session_date, created_at',
+      shop_profile: 'id, shop_id, invite_code',
+      store_users: 'id, user_id, email, role, shop_id, created_at',
+      sync_outbox: 'id, table_name, shop_id, status, created_at, retry_count',
+      credit_notes: 'id, shop_id, credit_note_number, original_invoice_id, customer_id, created_at',
+      wholesalers: 'id, shop_id, name, phone, agency_or_brand, is_active, created_at',
+    });
+
     // Multi-tenant Hook: Ensure all records are always tagged with shop_id and invite code
     const tenantTables = [
       this.products,

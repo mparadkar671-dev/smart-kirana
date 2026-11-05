@@ -5,6 +5,7 @@ import { WholesalerService } from '../../services/wholesalerService';
 import { calculateProfitMarginPercent } from '../../utils/math';
 import { generateUniqueStoreBarcode, getBarcodePatternBars } from '../../utils/barcodeGenerator';
 import { compressProductImage } from '../../utils/imageCompressor';
+import { generateSmartProductThumbnail, normalizeProductImageToSquare } from '../../utils/productImageEngine';
 import { db } from '../../db/db';
 import {
   X,
@@ -51,6 +52,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 }) => {
   const [formData, setFormData] = useState<CreateProductInput>({
     name: '',
+    marathi_name: '',
+    search_keywords: '',
     short_code: '',
     barcode: '',
     category: 'Groceries',
@@ -108,6 +111,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     if (productToEdit) {
       setFormData({
         name: productToEdit.name,
+        marathi_name: productToEdit.marathi_name || '',
+        search_keywords: productToEdit.search_keywords || '',
         short_code: productToEdit.short_code,
         barcode: productToEdit.barcode,
         category: productToEdit.category,
@@ -129,6 +134,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       const initialBarcode = generateUniqueStoreBarcode(new Set());
       setFormData({
         name: '',
+        marathi_name: '',
+        search_keywords: '',
         short_code: '',
         barcode: initialBarcode,
         category: 'Groceries',
@@ -326,10 +333,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Product Name */}
-            <div className="sm:col-span-2">
+            {/* Product Name (English / Display) */}
+            <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wide">
-                Product Name *
+                Product Name (English / Display) *
               </label>
               <input
                 type="text"
@@ -337,8 +344,38 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 data-testid="product-name-input"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="e.g. Tata Salt Vacuum Evaporated 1kg"
+                placeholder="e.g. Toor Dal (Arhar) / Tata Salt 1kg"
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            </div>
+
+            {/* Product Name (Marathi) */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wide">
+                Product Name (मराठी नाव - Optional)
+              </label>
+              <input
+                type="text"
+                data-testid="product-marathi-name-input"
+                value={formData.marathi_name || ''}
+                onChange={(e) => setFormData({ ...formData, marathi_name: e.target.value })}
+                placeholder="उदा. तूर डाळ, साखर, पारले-जी"
+                className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            </div>
+
+            {/* Background POS Search Keywords (Hidden on Top-24 card face, active in F2 search) */}
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wide">
+                Background POS Search Keywords (Marathi / Hinglish — Hidden on Card UI)
+              </label>
+              <input
+                type="text"
+                data-testid="product-search-keywords-input"
+                value={formData.search_keywords || ''}
+                onChange={(e) => setFormData({ ...formData, search_keywords: e.target.value })}
+                placeholder="e.g. toor dal, arhar dal, turdal, तुरीची डाळ, dal, chaha, saban"
+                className="w-full px-3.5 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
             </div>
 
@@ -725,15 +762,50 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               )}
             </div>
 
-            {/* Product Image Upload (<15KB 160x160 WebP Compressor - Step 4.2) */}
-            <div className="sm:col-span-2 p-3.5 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+            {/* Product Image Upload (<15KB 160x160 WebP Compressor - Step 4.2 + Drag & Drop / Paste) */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={async (e) => {
+                e.preventDefault();
+                const droppedFile = e.dataTransfer?.files?.[0];
+                if (droppedFile) {
+                  setIsCompressingImg(true);
+                  try {
+                    const squareUrl = await normalizeProductImageToSquare(droppedFile);
+                    setFormData((prev) => ({ ...prev, image_url: squareUrl }));
+                  } finally {
+                    setIsCompressingImg(false);
+                  }
+                }
+              }}
+              onPaste={async (e) => {
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].type.startsWith('image/')) {
+                    const blob = items[i].getAsFile();
+                    if (blob) {
+                      setIsCompressingImg(true);
+                      try {
+                        const squareUrl = await normalizeProductImageToSquare(blob);
+                        setFormData((prev) => ({ ...prev, image_url: squareUrl }));
+                      } finally {
+                        setIsCompressingImg(false);
+                      }
+                    }
+                    break;
+                  }
+                }
+              }}
+              className="sm:col-span-2 p-3.5 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4"
+            >
               <div className="flex items-center gap-3.5">
                 {formData.image_url ? (
                   <img
                     src={formData.image_url}
                     alt={formData.name || 'Product preview'}
                     data-testid="product-image-preview"
-                    className="w-16 h-16 rounded-xl object-cover border border-slate-300 dark:border-slate-600 shadow-xs shrink-0"
+                    className="w-16 h-16 rounded-xl object-contain bg-white border border-slate-300 dark:border-slate-600 shadow-xs shrink-0"
                   />
                 ) : (
                   <div className="w-16 h-16 rounded-xl bg-slate-200/70 dark:bg-slate-800 border border-dashed border-slate-400 dark:border-slate-600 flex flex-col items-center justify-center text-slate-400 shrink-0">
@@ -743,15 +815,15 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 )}
                 <div>
                   <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    Product Thumbnail Image (Optional)
+                    Uniform 160x160px Square Product Image (Drag &amp; Drop, Paste, or Auto-Generate)
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Auto-cropped to 160x160px WebP (&lt;15KB) for Top-24 Fast-Tap POS cards.
+                    Normalized onto a 160x160px (1:1) white studio canvas (&lt;15KB WebP) for Top-24 POS cards.
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -767,7 +839,24 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                   className="px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition"
                 >
                   <ImagePlus className="w-3.5 h-3.5 text-blue-600" />
-                  <span>{isCompressingImg ? 'Compressing...' : 'Upload Photo'}</span>
+                  <span>{isCompressingImg ? 'Normalizing...' : 'Upload Photo'}</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="auto-generate-thumbnail-btn"
+                  onClick={() => {
+                    const thumb = generateSmartProductThumbnail({
+                      name: formData.name || 'Kirana Product',
+                      marathiName: formData.marathi_name,
+                      category: formData.category,
+                      unitType: formData.unit_type,
+                    });
+                    setFormData((prev) => ({ ...prev, image_url: thumb }));
+                  }}
+                  className="px-3 py-2 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 rounded-xl text-xs font-bold flex items-center gap-1 hover:bg-blue-100 transition"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Auto-Image</span>
                 </button>
                 {formData.image_url && (
                   <button

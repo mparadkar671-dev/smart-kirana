@@ -195,6 +195,8 @@ class CloudSyncService {
         id: product.id,
         shop_id: product.shop_id || 'current_shop',
         name: product.name,
+        marathi_name: product.marathi_name || null,
+        search_keywords: product.search_keywords || null,
         short_code: product.short_code,
         barcode: product.barcode,
         category: product.category,
@@ -216,7 +218,14 @@ class CloudSyncService {
 
       const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
       if (error) {
-        console.warn('Sync product to Supabase returned error:', error.message);
+        if (error.message.includes('marathi_name') || error.message.includes('search_keywords') || error.message.includes('image_url') || error.message.includes('wholesaler_id')) {
+          const fallbackPayload = { ...payload };
+          delete fallbackPayload.marathi_name;
+          delete fallbackPayload.search_keywords;
+          await supabase.from('products').upsert(fallbackPayload, { onConflict: 'id' });
+        } else {
+          console.warn('Sync product to Supabase returned error:', error.message);
+        }
       }
     } catch (err) {
       console.warn('Background sync product to Supabase failed (offline mode):', err);
@@ -624,6 +633,8 @@ class CloudSyncService {
               id: p.id,
               shop_id: p.shop_id || shopId,
               name: p.name,
+              marathi_name: p.marathi_name || null,
+              search_keywords: p.search_keywords || null,
               short_code: p.short_code,
               barcode: p.barcode,
               category: p.category,
@@ -648,7 +659,20 @@ class CloudSyncService {
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
             const { error } = await supabase.from('products').upsert(chunk, { onConflict: 'id' });
-            if (error) throw new Error(error.message);
+            if (error) {
+              if (error.message.includes('marathi_name') || error.message.includes('search_keywords')) {
+                const fallbackChunk = chunk.map((row) => {
+                  const copy = { ...row };
+                  delete copy.marathi_name;
+                  delete copy.search_keywords;
+                  return copy;
+                });
+                const { error: retryErr } = await supabase.from('products').upsert(fallbackChunk, { onConflict: 'id' });
+                if (retryErr) throw new Error(retryErr.message);
+              } else {
+                throw new Error(error.message);
+              }
+            }
             pushedCount += chunk.length;
           }
         }

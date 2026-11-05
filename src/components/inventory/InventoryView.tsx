@@ -4,6 +4,13 @@ import { ProductModal } from './ProductModal';
 import { StockAdjustmentModal } from './StockAdjustmentModal';
 import { RestockAlertsView } from './RestockAlertsView';
 import { InventoryService } from '../../services/inventoryService';
+import {
+  MAHARASHTRA_105_KIRANA_CATALOG,
+  parseKiranaCatalogCsv,
+  bulkImportKiranaProducts,
+  export105KiranaCatalogCsvString,
+} from '../../services/csvCatalogImporter';
+import { normalizeProductImageToSquare, generateSmartProductThumbnail } from '../../utils/productImageEngine';
 import { formatINR, calculateProfitMarginPercent } from '../../utils/math';
 import {
   Package,
@@ -21,6 +28,10 @@ import {
   FolderSync,
   X,
   Truck,
+  Upload,
+  FileSpreadsheet,
+  ImagePlus,
+  CheckCircle,
 } from 'lucide-react';
 
 interface InventoryViewProps {
@@ -51,18 +62,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [bulkCategoryTarget, setBulkCategoryTarget] = useState<string>('');
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
 
+  // CSV / 105-Product Sheet Importer state
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isImportingCsv, setIsImportingCsv] = useState(false);
+  const [importFeedback, setImportFeedback] = useState<string | null>(null);
+
   const lowStockCount = InventoryService.filterLowStock(products).length;
   const expiringCount = InventoryService.filterExpiringSoon(products, 15).length;
   const totalAlerts = lowStockCount + expiringCount;
 
-  // Filter products
+  // Filter products (includes Marathi Name & Hidden POS Search Keywords)
   const filteredProducts = products.filter((p) => {
+    const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
-      !searchQuery ||
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.short_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.barcode.includes(searchQuery) ||
-      p.category.toLowerCase().includes(searchQuery.toLowerCase());
+      !q ||
+      p.name.toLowerCase().includes(q) ||
+      (p.marathi_name && p.marathi_name.toLowerCase().includes(q)) ||
+      (p.search_keywords && p.search_keywords.toLowerCase().includes(q)) ||
+      p.short_code.toLowerCase().includes(q) ||
+      p.barcode.includes(q) ||
+      p.category.toLowerCase().includes(q);
 
     const matchesCat = categoryFilter === 'ALL' || p.category === categoryFilter;
 
@@ -164,6 +183,73 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
+  // Handle 1-Click Upload of Untitled_spreadsheet.csv or any CSV sheet
+  const handleCsvFileUpload = async (file: File) => {
+    setIsImportingCsv(true);
+    setImportFeedback(null);
+    try {
+      const text = await file.text();
+      const parsedRows = parseKiranaCatalogCsv(text);
+      if (parsedRows.length === 0) {
+        alert('No valid product rows found in the uploaded CSV file.');
+        return;
+      }
+      const res = await bulkImportKiranaProducts(parsedRows);
+      setImportFeedback(
+        `✅ Imported ${res.importedCount} new products & updated ${res.updatedCount} items with uniform 160x160px images & EAN-13 barcodes!`
+      );
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`CSV Import failed: ${err.message}`);
+    } finally {
+      setIsImportingCsv(false);
+    }
+  };
+
+  // Handle 1-Click Built-in 105 Maharashtra Kirana Catalog Import
+  const handleImport105BuiltInCatalog = async () => {
+    setIsImportingCsv(true);
+    setImportFeedback(null);
+    try {
+      const res = await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+      setImportFeedback(
+        `✅ Loaded all 105 Maharashtra Kirana products (${res.importedCount} added, ${res.updatedCount} refreshed) with 160x160px images, GS1 barcodes & Marathi/Hinglish search keywords!`
+      );
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`105-Product Import failed: ${err.message}`);
+    } finally {
+      setIsImportingCsv(false);
+    }
+  };
+
+  // Handle downloading the 105-product sample CSV (Untitled_spreadsheet.csv)
+  const handleDownloadSample105Csv = () => {
+    const csvContent = export105KiranaCatalogCsvString();
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Untitled_spreadsheet.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // Handle 1-Click Drag-and-Drop or Click Image Replacement on any Inventory row
+  const handleRowImageReplace = async (product: Product, file: File) => {
+    try {
+      const normalizedSquareDataUrl = await normalizeProductImageToSquare(file);
+      await InventoryService.updateProduct(product.id, {
+        image_url: normalizedSquareDataUrl,
+      });
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`Failed to update image: ${err.message}`);
+    }
+  };
+
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
       {/* Top Header */}
@@ -178,7 +264,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          <button
+            type="button"
+            data-testid="import-csv-sheet-btn"
+            onClick={() => {
+              setImportFeedback(null);
+              setIsImportModalOpen(true);
+            }}
+            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+          >
+            <Upload className="w-4 h-4" />
+            <span>📥 Import CSV / Sheet (Auto-Barcode + Auto-Image)</span>
+          </button>
+
           <button
             type="button"
             data-testid="open-wholesalers-reorder-btn"
@@ -198,6 +297,113 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* 1-Click CSV / 105-Product Sheet Importer Modal */}
+      {isImportModalOpen && (
+        <div
+          data-testid="csv-import-modal"
+          className="bg-white dark:bg-slate-900 border-2 border-purple-600 dark:border-purple-500 rounded-2xl p-5 shadow-xl space-y-4 animate-in fade-in"
+        >
+          <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                <span>📥 105-Product Marathi/English CSV Importer &amp; 160x160 Auto-Image Engine</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Automatically assigns KG_LOOSE / PCS units, Maharashtra Kirana rates, unique GS1 200-prefix EAN-13 barcodes, uniform 160x160px square images, and hidden POS search keywords.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsImportModalOpen(false)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {importFeedback && (
+            <div
+              data-testid="csv-import-success-banner"
+              className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs font-bold text-emerald-800 dark:text-emerald-300 flex items-center gap-2"
+            >
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{importFeedback}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Option A: Upload Untitled_spreadsheet.csv */}
+            <label
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer?.files?.[0];
+                if (f) handleCsvFileUpload(f);
+              }}
+              className="cursor-pointer border-2 border-dashed border-purple-300 dark:border-purple-700 hover:border-purple-600 bg-purple-50/40 dark:bg-purple-950/20 rounded-2xl p-5 flex flex-col items-center justify-center text-center space-y-2 transition"
+            >
+              <Upload className="w-7 h-7 text-purple-600 dark:text-purple-400" />
+              <div className="text-xs font-bold text-slate-900 dark:text-white">
+                Click or Drop <code className="text-purple-700 dark:text-purple-300">Untitled_spreadsheet.csv</code> Here
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Columns: Product Name (Marathi), Product Name (English), Category, Search Keywords (POS), Sell Price, Purchase Price, MRP, Available Stock
+              </p>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                data-testid="csv-file-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleCsvFileUpload(file);
+                  e.target.value = '';
+                }}
+                className="hidden"
+              />
+            </label>
+
+            {/* Option B: 1-Click Load Built-in 105 Maharashtra Kirana Catalog */}
+            <div className="border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 rounded-2xl p-5 flex flex-col justify-between space-y-3">
+              <div className="space-y-1">
+                <span className="inline-block px-2 py-0.5 rounded-md bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-300 text-[10px] font-extrabold uppercase">
+                  Instant 1-Click Preset
+                </span>
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                  105-Product Maharashtra Kirana Bilingual Catalog
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Pre-loaded with all 105 Marathi + English items (तूर डाळ, साखर, शेंगदाणे, गगंगिरी मसाला, सोसायटी चहा, संतूर साबण, विम बार, पॅराशूट, इ.) with 160x160px pack illustrations &amp; Hinglish F2 keywords.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isImportingCsv}
+                  data-testid="import-105-maharashtra-btn"
+                  onClick={handleImport105BuiltInCatalog}
+                  className="flex-1 py-2.5 px-4 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>{isImportingCsv ? 'Importing 105 Items...' : '⚡ Load 105 Marathi/English Products'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="download-105-csv-template-btn"
+                  onClick={handleDownloadSample105Csv}
+                  className="py-2.5 px-3 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 rounded-xl text-xs font-semibold transition"
+                  title="Download Untitled_spreadsheet.csv template"
+                >
+                  📄 Download CSV
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs Switcher */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-1">
@@ -387,19 +593,54 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           />
                         </td>
 
-                        {/* Name + Code */}
+                        {/* Name + Code + 1-Click Drag-and-Drop 160x160 Image Replacement */}
                         <td className="p-3">
                           <div className="flex items-center gap-2.5">
-                            {p.image_url ? (
+                            <label
+                              title="Click or Drag & Drop a photo here to replace 160x160px product image"
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const file = e.dataTransfer?.files?.[0];
+                                if (file) handleRowImageReplace(p, file);
+                              }}
+                              className="relative w-10 h-10 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white shrink-0 cursor-pointer group/img"
+                            >
                               <img
-                                src={p.image_url}
+                                src={
+                                  p.image_url ||
+                                  generateSmartProductThumbnail({
+                                    name: p.name,
+                                    marathiName: p.marathi_name,
+                                    category: p.category,
+                                    unitType: p.unit_type,
+                                  })
+                                }
                                 alt={p.name}
-                                className="w-9 h-9 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                                data-testid={`inventory-row-img-${p.id}`}
+                                className="w-10 h-10 object-contain bg-white"
                               />
-                            ) : null}
+                              <span className="absolute inset-0 bg-slate-900/50 text-white opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition">
+                                <ImagePlus className="w-3.5 h-3.5" />
+                              </span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) handleRowImageReplace(p, f);
+                                  e.target.value = '';
+                                }}
+                              />
+                            </label>
                             <div>
                               <div className="flex items-center gap-2">
-                                <span className="font-semibold text-slate-900 dark:text-slate-100">{p.name}</span>
+                                <span className="font-semibold text-slate-900 dark:text-slate-100">
+                                  {p.marathi_name && !p.name.includes(p.marathi_name)
+                                    ? `${p.marathi_name} (${p.name})`
+                                    : p.name}
+                                </span>
                                 {p.is_quick_tap && (
                                   <span
                                     title="Top-24 Pareto Fast-Tap Grid"

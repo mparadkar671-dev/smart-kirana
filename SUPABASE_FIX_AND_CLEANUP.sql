@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS public.products (
     shop_id TEXT NOT NULL DEFAULT 'current_shop',
     user_id TEXT,
     name TEXT NOT NULL,
+    marathi_name TEXT,
+    search_keywords TEXT,
     short_code TEXT NOT NULL,
     barcode TEXT,
     category TEXT NOT NULL DEFAULT 'General',
@@ -241,6 +243,8 @@ ALTER TABLE public.wholesalers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ D
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '';
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS marathi_name TEXT;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS search_keywords TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS short_code TEXT DEFAULT '';
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS barcode TEXT;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'General';

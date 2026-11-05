@@ -6,6 +6,8 @@ import { cloudSyncService } from './cloudSyncService';
 
 export interface CreateProductInput {
   name: string;
+  marathi_name?: string;
+  search_keywords?: string;
   short_code: string;
   barcode?: string;
   category: string;
@@ -39,6 +41,8 @@ export class InventoryService {
     const newProduct: Product = {
       id,
       name: input.name.trim(),
+      marathi_name: input.marathi_name?.trim() || undefined,
+      search_keywords: input.search_keywords?.trim() || undefined,
       short_code: input.short_code.trim().toUpperCase(),
       barcode,
       category: input.category.trim() || 'General',

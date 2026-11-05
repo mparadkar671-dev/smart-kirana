@@ -156,7 +156,7 @@ export const POSView: React.FC<POSViewProps> = ({
   // Top-24 Fast-Tap Items (REQ-07 / Section 5.1)
   const fastTapProducts = products.filter((p) => p.is_quick_tap).slice(0, 24);
 
-  // 3-Way Instant Search (Barcode, Short Code, Fuzzy Name)
+  // 3-Way Instant Search (Barcode, Short Code, Bilingual Marathi/English Name & Hidden POS Search Keywords)
   const searchResults = searchQuery.trim()
     ? products
         .filter((p) => {
@@ -165,6 +165,8 @@ export const POSView: React.FC<POSViewProps> = ({
             p.barcode === q ||
             p.short_code.toLowerCase() === q ||
             p.name.toLowerCase().includes(q) ||
+            (p.marathi_name && p.marathi_name.toLowerCase().includes(q)) ||
+            (p.search_keywords && p.search_keywords.toLowerCase().includes(q)) ||
             p.category.toLowerCase().includes(q)
           );
         })
@@ -684,6 +686,11 @@ export const POSView: React.FC<POSViewProps> = ({
 
               const catInitial = (prod.category || prod.name || 'K').trim().charAt(0).toUpperCase();
 
+              const displayName =
+                prod.marathi_name && !prod.name.includes(prod.marathi_name)
+                  ? `${prod.marathi_name} (${prod.name})`
+                  : prod.name;
+
               return (
                 <button
                   key={prod.id}
@@ -692,19 +699,19 @@ export const POSView: React.FC<POSViewProps> = ({
                   onClick={() => addItemToCart(prod)}
                   className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-orange-500 dark:hover:border-orange-500 rounded-xl shadow-2xs hover:shadow-xs transition text-left flex flex-col justify-between group active:scale-[0.98]"
                 >
-                  {/* Top & Center: Product Thumbnail Image (or Category Avatar) + Bold Product Name */}
+                  {/* Top & Center: Uniform 160x160px Square Thumbnail Image + Bilingual Marathi/English Name */}
                   <div className="flex items-center gap-2.5">
                     {prod.image_url ? (
                       <img
                         src={prod.image_url}
-                        alt={prod.name}
+                        alt={displayName}
                         data-testid={`fast-tap-img-${prod.id}`}
-                        className="w-11 h-11 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-50 dark:bg-slate-800"
+                        className="w-11 h-11 aspect-square rounded-lg object-contain border border-slate-200 dark:border-slate-700 shrink-0 bg-white"
                       />
                     ) : (
                       <div
                         data-testid={`fast-tap-avatar-${prod.id}`}
-                        className="w-11 h-11 rounded-lg bg-gradient-to-br from-blue-50 to-orange-50 dark:from-slate-800 dark:to-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center shrink-0 group-hover:border-orange-300 transition"
+                        className="w-11 h-11 aspect-square rounded-lg bg-gradient-to-br from-blue-50 to-orange-50 dark:from-slate-800 dark:to-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center shrink-0 group-hover:border-orange-300 transition"
                       >
                         <span className="text-xs font-black text-blue-800 dark:text-orange-400">
                           {catInitial}
@@ -717,7 +724,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
                     <div className="min-w-0 flex-1">
                       <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 line-clamp-2 leading-tight">
-                        {prod.name}
+                        {displayName}
                       </h3>
                       <span className="text-[10px] text-slate-400 dark:text-slate-500 block truncate mt-0.5">
                         {prod.category}

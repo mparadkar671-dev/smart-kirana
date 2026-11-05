@@ -81,3 +81,4 @@ export function getBarcodePatternBars(barcode: string): number[] {
   bars.push(2, 1, 2); // End guard
   return bars;
 }
+

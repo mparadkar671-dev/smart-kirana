@@ -6,7 +6,9 @@ export type UnitType = 'PCS' | 'KG_LOOSE' | 'LTR' | 'PACK';
 export interface Product {
   id: string; // UUID PK
   shop_id?: string; // Multi-tenant Shop ID (indexed)
-  name: string; // Text
+  name: string; // Text (English or Bilingual display name)
+  marathi_name?: string; // Marathi product name (e.g. "तूर डाळ", "पारले-जी")
+  search_keywords?: string; // Hidden background POS search keywords (e.g. "toor dal, arhar dal, turdal, तुरीची डाळ, dal")
   short_code: string; // Text, e.g., "PG5", "TS1"
   barcode: string; // Text
   category: string; // Text
