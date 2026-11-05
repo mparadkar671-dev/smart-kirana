@@ -12,12 +12,15 @@ import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthPage } from './components/auth/AuthPage';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
-import { Sparkles, PlusCircle } from 'lucide-react';
+import { Sparkles, PlusCircle, CloudDownload } from 'lucide-react';
+import { MAHARASHTRA_105_KIRANA_CATALOG, bulkImportKiranaProducts } from './services/csvCatalogImporter';
+import { cloudSyncService } from './services/cloudSyncService';
 
 const MainApp: React.FC = () => {
   const { user, isOfflineGuest, isLoading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>('pos');
   const [isDbReady, setIsDbReady] = useState(false);
+  const [isRecovering, setIsRecovering] = useState(false);
 
   // Initialize DB on mount
   useEffect(() => {
@@ -92,7 +95,40 @@ const MainApp: React.FC = () => {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={async () => {
+                setIsRecovering(true);
+                try {
+                  await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+                } finally {
+                  setIsRecovering(false);
+                }
+              }}
+              disabled={isRecovering}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {isRecovering ? 'Restoring...' : '⚡ 1-Click Restore 105 Marathi/English Products'}
+            </button>
+            <button
+              onClick={async () => {
+                setIsRecovering(true);
+                try {
+                  const res = await cloudSyncService.restoreProductsFromCloudOrArchive();
+                  if (res.restoredCount === 0) {
+                    await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+                  }
+                } finally {
+                  setIsRecovering(false);
+                }
+              }}
+              disabled={isRecovering}
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
+            >
+              <CloudDownload className="w-3.5 h-3.5" />
+              ☁️ Recover from Cloud / Archive
+            </button>
             <button
               onClick={() => setActiveTab('inventory')}
               className="px-3.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs"

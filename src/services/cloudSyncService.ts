@@ -219,14 +219,14 @@ class CloudSyncService {
 
       const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
       if (error) {
-        if (error.message.includes('marathi_name') || error.message.includes('search_keywords') || error.message.includes('image_url') || error.message.includes('wholesaler_id')) {
-          const fallbackPayload = { ...payload };
-          delete fallbackPayload.marathi_name;
-          delete fallbackPayload.search_keywords;
-          await supabase.from('products').upsert(fallbackPayload, { onConflict: 'id' });
-        } else {
-          console.warn('Sync product to Supabase returned error:', error.message);
-        }
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.marathi_name;
+        delete fallbackPayload.search_keywords;
+        delete fallbackPayload.wholesaler_id;
+        delete fallbackPayload.image_url;
+        delete fallbackPayload.supplier_phone;
+        delete fallbackPayload.loan_account_id;
+        await supabase.from('products').upsert(fallbackPayload, { onConflict: 'id' });
       }
     } catch (err) {
       console.warn('Background sync product to Supabase failed (offline mode):', err);
@@ -592,27 +592,29 @@ class CloudSyncService {
       const localProfile = await db.getShopProfile();
       const localResetEpoch = localProfile.reset_epoch || 1;
 
-      // Multi-device watermark check: Check if a remote wipe was executed from another device
+      // Multi-device watermark check: Ensure local reset_epoch catches up with remote reset_epoch
+      // NEVER wipe local products during a push (syncAllToCloud) if the user has local products added/imported!
       try {
         const { data: remoteProfile } = await supabase
           .from('shop_profile')
-          .select('reset_epoch')
+          .select('reset_epoch, last_wiped_at')
           .eq('id', shopId)
           .maybeSingle();
 
         if (remoteProfile?.reset_epoch && remoteProfile.reset_epoch > localResetEpoch) {
-          console.warn('Remote store wipe/reset detected from another device! Aborting local push and synchronizing fresh state.');
-          await db.clearAllRecordsToEmpty();
-          await db.sync_outbox.clear();
-          await db.updateShopProfile({ reset_epoch: remoteProfile.reset_epoch });
-          await this.pullAllFromCloud();
-          this.setStatus({
-            isSyncing: false,
-            lastSyncedAt: new Date().toISOString(),
-            status: 'synced',
-            message: 'Store was reset on another device. Local cache cleared and synchronized.',
+          const localProducts = await db.products.toArray();
+          const remoteWipedTime = remoteProfile.last_wiped_at ? new Date(remoteProfile.last_wiped_at).getTime() : 0;
+          const hasNewerLocalProducts = localProducts.some((p) => {
+            const pTime = p.updated_at ? new Date(p.updated_at).getTime() : Date.now();
+            return pTime >= remoteWipedTime;
           });
-          return { success: true, pushedCount: 0, errors: ['Remote reset detected; local store synchronized.'] };
+
+          if (!hasNewerLocalProducts && localProducts.length === 0) {
+            await db.updateShopProfile({ reset_epoch: remoteProfile.reset_epoch });
+          } else {
+            // User has active/newly imported local products; adopt the latest reset_epoch and proceed to push them!
+            await db.updateShopProfile({ reset_epoch: remoteProfile.reset_epoch });
+          }
         }
       } catch (checkErr) {
         console.warn('Could not check remote reset_epoch:', checkErr);
@@ -657,6 +659,38 @@ class CloudSyncService {
         errors.push(`Store Users: ${e instanceof Error ? e.message : String(e)}`);
       }
 
+      // 2b. Sync Wholesalers BEFORE Products (so foreign key wholesaler_id succeeds)
+      try {
+        const wholesalers = await db.wholesalers.toArray();
+        if (wholesalers.length > 0) {
+          const rows = wholesalers.map((w) => {
+            const r: Record<string, unknown> = {
+              id: w.id,
+              shop_id: w.shop_id || shopId,
+              name: w.name,
+              agency_or_brand: w.agency_or_brand || null,
+              phone: w.phone,
+              gstin: w.gstin || w.gst_number || null,
+              address: w.address || w.address_city || null,
+              visit_day: w.visit_day || null,
+              is_active: w.is_active !== false,
+              created_at: w.created_at || new Date().toISOString(),
+              updated_at: w.updated_at || new Date().toISOString(),
+            };
+            if (userId) r.user_id = userId;
+            return r;
+          });
+          for (let i = 0; i < rows.length; i += 50) {
+            const chunk = rows.slice(i, i + 50);
+            const { error } = await supabase.from('wholesalers').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
+            pushedCount += chunk.length;
+          }
+        }
+      } catch (e: unknown) {
+        console.warn('Wholesalers sync notice:', e);
+      }
+
       // 3. Sync Products
       try {
         const prods = await db.products.toArray();
@@ -688,61 +722,29 @@ class CloudSyncService {
             if (userId) r.user_id = userId;
             return r;
           });
-          // Upsert in chunks of 50
+          // Upsert in chunks of 50 with graceful column fallback
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
             const { error } = await supabase.from('products').upsert(chunk, { onConflict: 'id' });
             if (error) {
-              if (error.message.includes('marathi_name') || error.message.includes('search_keywords')) {
-                const fallbackChunk = chunk.map((row) => {
-                  const copy = { ...row };
-                  delete copy.marathi_name;
-                  delete copy.search_keywords;
-                  return copy;
-                });
-                const { error: retryErr } = await supabase.from('products').upsert(fallbackChunk, { onConflict: 'id' });
-                if (retryErr) throw new Error(retryErr.message);
-              } else {
-                throw new Error(error.message);
-              }
+              const fallbackChunk = chunk.map((row) => {
+                const copy = { ...row };
+                delete copy.marathi_name;
+                delete copy.search_keywords;
+                delete copy.wholesaler_id;
+                delete copy.image_url;
+                delete copy.supplier_phone;
+                delete copy.loan_account_id;
+                return copy;
+              });
+              const { error: retryErr } = await supabase.from('products').upsert(fallbackChunk, { onConflict: 'id' });
+              if (retryErr) throw new Error(retryErr.message);
             }
             pushedCount += chunk.length;
           }
         }
       } catch (e: unknown) {
         errors.push(`Products: ${e instanceof Error ? e.message : String(e)}`);
-      }
-
-      // 3b. Sync Wholesalers
-      try {
-        const wholesalers = await db.wholesalers.toArray();
-        if (wholesalers.length > 0) {
-          const rows = wholesalers.map((w) => {
-            const r: Record<string, unknown> = {
-              id: w.id,
-              shop_id: w.shop_id || shopId,
-              name: w.name,
-              agency_or_brand: w.agency_or_brand || null,
-              phone: w.phone,
-              gstin: w.gstin || w.gst_number || null,
-              address: w.address || w.address_city || null,
-              visit_day: w.visit_day || null,
-              is_active: w.is_active !== false,
-              created_at: w.created_at || new Date().toISOString(),
-              updated_at: w.updated_at || new Date().toISOString(),
-            };
-            if (userId) r.user_id = userId;
-            return r;
-          });
-          for (let i = 0; i < rows.length; i += 50) {
-            const chunk = rows.slice(i, i + 50);
-            const { error } = await supabase.from('wholesalers').upsert(chunk, { onConflict: 'id' });
-            if (error) throw new Error(error.message);
-            pushedCount += chunk.length;
-          }
-        }
-      } catch (e: unknown) {
-        console.warn('Wholesalers sync notice:', e);
       }
 
       // 4. Sync Customers
@@ -918,11 +920,19 @@ class CloudSyncService {
 
         if (error) throw new Error(error.message);
         if (profile) {
-          // Check remote reset_epoch
+          // Check remote reset_epoch: only purge if remote wipe happened AFTER our local products were last updated
           if (profile.reset_epoch && profile.reset_epoch > localResetEpoch) {
-            console.log('Remote store wipe detected in pull. Purging local stale operational data.');
-            await db.clearAllRecordsToEmpty();
-            await db.sync_outbox.clear();
+            const localProds = await db.products.toArray();
+            const remoteWipedTime = profile.last_wiped_at ? new Date(profile.last_wiped_at).getTime() : 0;
+            const hasNewerLocalProducts = localProds.some((p) => {
+              const pTime = p.updated_at ? new Date(p.updated_at).getTime() : Date.now();
+              return pTime >= remoteWipedTime;
+            });
+            if (!hasNewerLocalProducts && remoteWipedTime > 0) {
+              console.log('Remote store wipe detected in pull. Purging local stale operational data.');
+              await db.clearAllRecordsToEmpty();
+              await db.sync_outbox.clear();
+            }
           }
 
           await db.updateShopProfile({
@@ -958,6 +968,8 @@ class CloudSyncService {
               id: p.id,
               shop_id: p.shop_id || shopId,
               name: p.name,
+              marathi_name: p.marathi_name || undefined,
+              search_keywords: p.search_keywords || undefined,
               short_code: p.short_code,
               barcode: p.barcode || '',
               category: p.category || 'General',
@@ -970,6 +982,7 @@ class CloudSyncService {
               last_supplier_name: p.last_supplier_name || 'General Wholesaler',
               supplier_phone: p.supplier_phone || undefined,
               wholesaler_id: p.wholesaler_id || null,
+              loan_account_id: p.loan_account_id || null,
               image_url: p.image_url || null,
               expiry_date: p.expiry_date || null,
               is_quick_tap: Boolean(p.is_quick_tap),
@@ -1211,6 +1224,121 @@ class CloudSyncService {
       });
       return { success: false, pulledCount, errors: [msg] };
     }
+  }
+
+  /**
+   * Emergency Cloud & Archive Recovery:
+   * 1. Pulls any products from Supabase `public.products` (across active shop_id or 'current_shop').
+   * 2. If `public.products` is empty, inspects `public.store_backup_archives` for the latest pre-wipe snapshot and restores those products.
+   */
+  async restoreProductsFromCloudOrArchive(): Promise<{
+    restoredCount: number;
+    source: 'CLOUD_PRODUCTS' | 'BACKUP_ARCHIVE' | 'NONE';
+    message: string;
+  }> {
+    if (!supabase) {
+      return { restoredCount: 0, source: 'NONE', message: 'Supabase client is not configured.' };
+    }
+
+    const shopId = await this.getActiveShopId();
+
+    try {
+      // 1. Check active Supabase products table
+      const { data: cloudProds } = await supabase.from('products').select('*');
+      if (cloudProds && cloudProds.length > 0) {
+        let count = 0;
+        for (const p of cloudProds) {
+          await db.products.put({
+            id: p.id,
+            shop_id: p.shop_id || shopId,
+            name: p.name,
+            marathi_name: p.marathi_name || undefined,
+            search_keywords: p.search_keywords || undefined,
+            short_code: p.short_code || p.name?.slice(0, 3)?.toUpperCase() || 'ITM',
+            barcode: p.barcode || '',
+            category: p.category || 'General',
+            unit_type: p.unit_type || 'PCS',
+            purchase_price: Number(p.purchase_price) || 0,
+            selling_price: Number(p.selling_price) || 0,
+            mrp: Number(p.mrp) || Number(p.selling_price) || 0,
+            current_stock: Number(p.current_stock) || 0,
+            low_stock_threshold: Number(p.low_stock_threshold) || 5,
+            last_supplier_name: p.last_supplier_name || 'General Wholesaler',
+            supplier_phone: p.supplier_phone || undefined,
+            wholesaler_id: p.wholesaler_id || null,
+            loan_account_id: p.loan_account_id || null,
+            image_url: p.image_url || null,
+            expiry_date: p.expiry_date || null,
+            is_quick_tap: Boolean(p.is_quick_tap),
+            updated_at: p.updated_at || new Date().toISOString(),
+          });
+          count++;
+        }
+        return {
+          restoredCount: count,
+          source: 'CLOUD_PRODUCTS',
+          message: `Restored ${count} products from your Supabase Cloud database!`,
+        };
+      }
+
+      // 2. Check Supabase store_backup_archives table for pre-wipe snapshots
+      const { data: archives } = await supabase
+        .from('store_backup_archives')
+        .select('archive_payload, wiped_at')
+        .order('wiped_at', { ascending: false })
+        .limit(5);
+
+      if (archives && archives.length > 0) {
+        for (const arch of archives) {
+          const payload = arch.archive_payload as { products?: Record<string, any>[] } | null;
+          if (payload?.products && Array.isArray(payload.products) && payload.products.length > 0) {
+            let count = 0;
+            for (const p of payload.products) {
+              await db.products.put({
+                id: p.id,
+                shop_id: p.shop_id || shopId,
+                name: p.name,
+                marathi_name: p.marathi_name || undefined,
+                search_keywords: p.search_keywords || undefined,
+                short_code: p.short_code || 'ITM',
+                barcode: p.barcode || '',
+                category: p.category || 'General',
+                unit_type: p.unit_type || 'PCS',
+                purchase_price: Number(p.purchase_price) || 0,
+                selling_price: Number(p.selling_price) || 0,
+                mrp: Number(p.mrp) || Number(p.selling_price) || 0,
+                current_stock: Number(p.current_stock) || 0,
+                low_stock_threshold: Number(p.low_stock_threshold) || 5,
+                last_supplier_name: p.last_supplier_name || 'General Wholesaler',
+                supplier_phone: p.supplier_phone || undefined,
+                wholesaler_id: p.wholesaler_id || null,
+                loan_account_id: p.loan_account_id || null,
+                image_url: p.image_url || null,
+                expiry_date: p.expiry_date || null,
+                is_quick_tap: Boolean(p.is_quick_tap),
+                updated_at: new Date().toISOString(),
+              });
+              count++;
+            }
+            // Re-sync restored products to active Supabase table
+            await this.syncAllToCloud();
+            return {
+              restoredCount: count,
+              source: 'BACKUP_ARCHIVE',
+              message: `Restored ${count} products from your Supabase Backup Archive snapshot!`,
+            };
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Cloud archive recovery check failed:', err);
+    }
+
+    return {
+      restoredCount: 0,
+      source: 'NONE',
+      message: 'No cloud backup found. Use "⚡ 1-Click Restore 105 Marathi/English Catalog" to populate all 105 Kirana items immediately.',
+    };
   }
 
   /**

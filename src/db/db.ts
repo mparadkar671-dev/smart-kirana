@@ -367,6 +367,7 @@ export class KiranaDatabase extends Dexie {
         this.wholesalers,
       ],
       async () => {
+        const existingProfile = await this.shop_profile.get(DEFAULT_SHOP_PROFILE.id);
         await this.products.clear();
         await this.inventory_logs.clear();
         await this.customers.clear();
@@ -378,7 +379,10 @@ export class KiranaDatabase extends Dexie {
         await this.shop_profile.clear();
         await this.wholesalers.clear();
 
-        await this.shop_profile.add(DEFAULT_SHOP_PROFILE);
+        await this.shop_profile.add({
+          ...DEFAULT_SHOP_PROFILE,
+          reset_epoch: existingProfile?.reset_epoch || DEFAULT_SHOP_PROFILE.reset_epoch || 1,
+        });
         await this.customers.bulkAdd(INITIAL_CUSTOMERS);
         await this.products.bulkAdd(INITIAL_PRODUCTS);
         await this.wholesalers.bulkAdd(INITIAL_WHOLESALERS);
