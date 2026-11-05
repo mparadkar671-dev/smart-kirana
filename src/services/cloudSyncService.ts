@@ -122,9 +122,7 @@ class CloudSyncService {
   ): Promise<{ success: boolean; error?: string; resetEpoch?: number }> {
     const shopId = await this.getActiveShopId();
     let resetEpoch = Date.now();
-    const isTestEnv =
-      (typeof process !== 'undefined' && Boolean(process.env?.VITEST)) ||
-      (typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test');
+    const isTestEnv = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
 
     if (supabase && !isTestEnv) {
       try {

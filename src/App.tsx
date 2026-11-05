@@ -25,9 +25,7 @@ const MainApp: React.FC = () => {
   // Initialize DB on mount and auto-populate the 105 Marathi/English catalog if empty in browser
   useEffect(() => {
     let mounted = true;
-    const isTestEnv =
-      (typeof process !== 'undefined' && Boolean(process.env?.VITEST)) ||
-      (typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test');
+    const isTestEnv = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
 
     db.initializeDatabase().then(async () => {
       if (!isTestEnv) {
