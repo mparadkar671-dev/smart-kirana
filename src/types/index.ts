@@ -1,7 +1,9 @@
 // Core Type Definitions for Smart Kirana POS, Inventory & Udhari System
 // Conforming strictly to SRS-KIRANA-POS-V1
 
-export type UnitType = 'PCS' | 'KG_LOOSE' | 'LTR' | 'PACK';
+export type BusinessType = 'KIRANA_RETAIL' | 'HOMEMADE_FOOD';
+
+export type UnitType = 'PCS' | 'KG_LOOSE' | 'LTR' | 'PACK' | 'PLATE' | 'DOZEN';
 
 export interface Product {
   id: string; // UUID PK
@@ -63,6 +65,7 @@ export interface Wholesaler {
 
 export type InventoryReason = 
   | 'PURCHASE_IN' 
+  | 'BATCH_MADE_IN'
   | 'SALE_OUT' 
   | 'RETURN_IN' 
   | 'SELF_USE_OUT' 
@@ -160,11 +163,20 @@ export interface KhataTransaction {
   created_at: string; // ISO Timestamp
 }
 
+export type ExpenseEntryType =
+  | 'INITIAL_INVESTMENT'
+  | 'RAW_MATERIAL_EXPENSE'
+  | 'BUSINESS_EXPENSE'
+  | 'HOME_FAMILY_EXPENSE';
+
 export type ExpenseCategory = 
   | 'SHOP_EXPENSE_RENT_ELEC' 
   | 'SHOP_EXPENSE_TRANSPORT_BAGS' 
   | 'HOME_SELF_USE_GOODS' 
-  | 'OWNER_CASH_DRAWING';
+  | 'OWNER_CASH_DRAWING'
+  | 'INITIAL_INVESTMENT_SETUP'
+  | 'RAW_MATERIAL_INGREDIENTS'
+  | 'HOME_FAMILY_EXPENSE';
 
 export type ExpensePaidVia = 'CASH_GALLA' | 'UPI_BANK' | 'INVENTORY_DEDUCTION';
 
@@ -187,6 +199,7 @@ export interface StoreUser {
 export interface ExpenseAndDrawing {
   id: string; // UUID PK
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  entry_type?: ExpenseEntryType; // 'INITIAL_INVESTMENT' | 'RAW_MATERIAL_EXPENSE' | 'BUSINESS_EXPENSE' | 'HOME_FAMILY_EXPENSE'
   category: ExpenseCategory;
   amount: number; // Numeric 10,2
   paid_via: ExpensePaidVia;
@@ -208,9 +221,11 @@ export interface DailyGallaSession {
 }
 
 export interface ShopProfile {
-  id: string; // 'current_shop'
+  id: string; // 'current_shop' or 'homemade_food_shop'
   shop_id?: string;
   owner_user_id?: string;
+  business_type?: BusinessType; // 'KIRANA_RETAIL' | 'HOMEMADE_FOOD'
+  invoice_prefix?: string; // 'KRN' for Kirana, 'HMF' for Homemade Food, 'INV' default
   invite_code?: string; // 6-digit Store Invite Code, e.g. "KRN-4829"
   reset_epoch?: number; // Multi-device watermark check to detect remote wipes
   last_wiped_at?: string;
@@ -220,6 +235,46 @@ export interface ShopProfile {
   upi_vpa: string; // e.g., 'kirana@upi' or phone@oksbi
   address: string;
   gst_footer_note: string;
+  updated_at: string;
+}
+
+export type AdvanceOrderStatus = 'PENDING' | 'PREPARING' | 'READY' | 'DELIVERED_BILLED' | 'CANCELLED';
+
+export interface AdvanceOrderItem {
+  product_id: string;
+  name?: string;
+  product_name?: string;
+  qty: number;
+  unit?: UnitType;
+  unit_type?: UnitType;
+  price?: number;
+  unit_selling_price?: number;
+  cost?: number;
+  unit_purchase_cost?: number;
+  line_total: number;
+}
+
+export interface AdvanceOrder {
+  id: string;
+  shop_id?: string;
+  order_number: string;
+  customer_id?: string | null;
+  customer_name: string;
+  customer_phone: string;
+  delivery_date: string;
+  delivery_date_time: string;
+  items_json: AdvanceOrderItem[];
+  items: AdvanceOrderItem[];
+  total_amount: number;
+  advance_paid: number;
+  advance_token_paid: number;
+  balance_due: number;
+  payment_mode: PaymentMode;
+  order_notes?: string;
+  special_instructions?: string;
+  status: AdvanceOrderStatus;
+  converted_invoice_id?: string | null;
+  created_at: string;
   updated_at: string;
 }
 

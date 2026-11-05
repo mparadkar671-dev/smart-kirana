@@ -351,10 +351,35 @@ ALTER TABLE public.khata_transactions ADD COLUMN IF NOT EXISTS created_at TIMEST
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS user_id TEXT;
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS entry_type TEXT DEFAULT 'BUSINESS_EXPENSE';
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) DEFAULT 0.00;
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS paid_via TEXT DEFAULT 'CASH_GALLA';
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS description TEXT;
 ALTER TABLE public.expenses_and_drawings ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
+ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS business_type TEXT DEFAULT 'KIRANA_RETAIL';
+ALTER TABLE public.shop_profile ADD COLUMN IF NOT EXISTS invoice_prefix TEXT DEFAULT 'KRN';
+
+CREATE TABLE IF NOT EXISTS public.advance_orders (
+    id TEXT PRIMARY KEY,
+    shop_id TEXT NOT NULL DEFAULT 'current_shop',
+    user_id TEXT,
+    order_number TEXT NOT NULL,
+    customer_id TEXT,
+    customer_name TEXT NOT NULL,
+    customer_phone TEXT NOT NULL DEFAULT '',
+    delivery_date_time TEXT NOT NULL,
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    special_instructions TEXT DEFAULT '',
+    total_amount NUMERIC(10,2) DEFAULT 0.00,
+    advance_token_paid NUMERIC(10,2) DEFAULT 0.00,
+    balance_due NUMERIC(10,2) DEFAULT 0.00,
+    payment_mode TEXT DEFAULT 'CASH',
+    status TEXT DEFAULT 'PENDING',
+    converted_invoice_id TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 ALTER TABLE public.daily_galla_sessions ADD COLUMN IF NOT EXISTS shop_id TEXT NOT NULL DEFAULT 'current_shop';
 ALTER TABLE public.daily_galla_sessions ADD COLUMN IF NOT EXISTS user_id TEXT;

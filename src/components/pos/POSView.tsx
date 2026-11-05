@@ -4,6 +4,7 @@ import { LooseItemModal } from './LooseItemModal';
 import { UpiCheckoutModal } from './UpiCheckoutModal';
 import { UdhariCheckoutModal } from './UdhariCheckoutModal';
 import { ReceiptModal } from './ReceiptModal';
+import { AdvanceOrdersModal } from './AdvanceOrdersModal';
 import { BillingService, CartItemInput } from '../../services/billingService';
 import { GallaService } from '../../services/gallaService';
 import { formatINR, roundCurrency, roundQty, toPaise, toRupees } from '../../utils/math';
@@ -81,6 +82,7 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const [isUpiModalOpen, setIsUpiModalOpen] = useState(false);
   const [isUdhariModalOpen, setIsUdhariModalOpen] = useState(false);
+  const [isAdvanceOrdersModalOpen, setIsAdvanceOrdersModalOpen] = useState(false);
 
   // Receipt Modal state
   const [completedInvoice, setCompletedInvoice] = useState<SalesInvoice | null>(null);
@@ -662,12 +664,26 @@ export const POSView: React.FC<POSViewProps> = ({
 
         {/* Top-24 Fast-Tap Visual Grid (REQ-07 / Section 5.1 Pareto Principle) */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-orange-500" />
-              <span>Top-24 Fast-Tap Counter Grid (1-Tap Billing)</span>
+              <span>
+                {shopProfile?.business_type === 'HOMEMADE_FOOD'
+                  ? '🍲 Homemade Food Menu & Fast-Tap Grid (1-Tap Billing)'
+                  : 'Top-24 Fast-Tap Counter Grid (1-Tap Billing)'}
+              </span>
             </h2>
-            <span className="text-[11px] text-slate-400">80/20 Daily Velocity</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="open-advance-orders-btn"
+                onClick={() => setIsAdvanceOrdersModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95"
+              >
+                <span>📅 Advance Orders &amp; Festival Pre-Booking</span>
+              </button>
+              <span className="text-[11px] text-slate-400 hidden sm:inline">80/20 Daily Velocity</span>
+            </div>
           </div>
 
           <div
@@ -682,6 +698,10 @@ export const POSView: React.FC<POSViewProps> = ({
                   ? 'L'
                   : prod.unit_type === 'PACK'
                   ? 'pack'
+                  : prod.unit_type === 'PLATE'
+                  ? 'plate'
+                  : prod.unit_type === 'DOZEN'
+                  ? 'doz'
                   : 'pc';
 
               const catInitial = (prod.category || prod.name || 'K').trim().charAt(0).toUpperCase();
@@ -1173,6 +1193,24 @@ export const POSView: React.FC<POSViewProps> = ({
         items={completedInvoiceItems}
         profile={shopProfile ?? null}
         customer={receiptCustomer}
+      />
+
+      {/* Advance Orders & Festival Pre-Booking Modal */}
+      <AdvanceOrdersModal
+        isOpen={isAdvanceOrdersModalOpen}
+        onClose={() => setIsAdvanceOrdersModalOpen(false)}
+        products={products}
+        shopProfile={shopProfile}
+        onOrderCompletedAndBilled={(res) => {
+          setCompletedInvoice(res.invoice);
+          setCompletedInvoiceItems(res.saleItems);
+          setReceiptCustomer(null);
+          setIsReceiptModalOpen(true);
+          setSuccessBanner(
+            `✅ Advance Order ${res.order.order_number} delivered & billed as Invoice ${res.invoice.invoice_number}!`
+          );
+          if (onCheckoutComplete) onCheckoutComplete();
+        }}
       />
 
       {/* 4-Second Mistake-Proofing Undo Cash Checkout Toast Bar (Iteration 4) */}

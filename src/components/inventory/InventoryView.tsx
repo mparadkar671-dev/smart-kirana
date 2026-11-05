@@ -4,6 +4,7 @@ import { ProductModal } from './ProductModal';
 import { StockAdjustmentModal } from './StockAdjustmentModal';
 import { RestockAlertsView } from './RestockAlertsView';
 import { InventoryService } from '../../services/inventoryService';
+import { HomemadeFoodService } from '../../services/homemadeFoodService';
 import {
   MAHARASHTRA_105_KIRANA_CATALOG,
   parseKiranaCatalogCsv,
@@ -206,6 +207,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
+  // Handle 1-Click Load of 12 Homemade Konkani/Maharashtrian Food Products
+  const handleLoadHomemadeFoodMenu = async () => {
+    setIsImportingCsv(true);
+    setImportFeedback(null);
+    try {
+      const res = await HomemadeFoodService.seedHomemadeFoodCatalog();
+      setImportFeedback(
+        `🍲 Loaded ${res.seededCount} new Homemade Food items (${res.totalHomemadeCount} total items ready with HMF- billing & 160x160px warm saffron thumbnails)!`
+      );
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`Homemade Food Menu load failed: ${err.message}`);
+    } finally {
+      setIsImportingCsv(false);
+    }
+  };
+
   // Handle 1-Click Built-in 105 Maharashtra Kirana Catalog Import
   const handleImport105BuiltInCatalog = async () => {
     setIsImportingCsv(true);
@@ -265,6 +283,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          {shopProfile?.business_type === 'HOMEMADE_FOOD' && (
+            <button
+              type="button"
+              data-testid="load-homemade-food-menu-btn"
+              disabled={isImportingCsv}
+              onClick={handleLoadHomemadeFoodMenu}
+              className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50"
+            >
+              <span>🍲 Load Homemade Food Menu (Laddus, Modak, Ghavane, Bhakri...)</span>
+            </button>
+          )}
+
           <button
             type="button"
             data-testid="import-csv-sheet-btn"
@@ -729,17 +759,33 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                           <div className="flex items-center justify-center gap-1.5">
                             <button
                               onClick={() => handleOpenStockIn(p)}
-                              title="Quick Restock (Stock In ++)"
-                              className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 transition"
+                              data-testid={`stock-in-btn-${p.id}`}
+                              title={
+                                shopProfile?.business_type === 'HOMEMADE_FOOD'
+                                  ? '🍳 + Fresh Batch Made Today'
+                                  : 'Quick Restock (Stock In ++)'
+                              }
+                              className="px-2 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 transition flex items-center gap-1 text-[11px] font-bold"
                             >
-                              <PlusCircle className="w-4 h-4" />
+                              <PlusCircle className="w-3.5 h-3.5 shrink-0" />
+                              {shopProfile?.business_type === 'HOMEMADE_FOOD' && (
+                                <span className="hidden xl:inline">🍳 + Fresh Batch Made</span>
+                              )}
                             </button>
                             <button
                               onClick={() => handleOpenStockOut(p)}
-                              title="Stock Out (-- Damage / Home Use)"
-                              className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 transition"
+                              data-testid={`stock-out-btn-${p.id}`}
+                              title={
+                                shopProfile?.business_type === 'HOMEMADE_FOOD'
+                                  ? '🏠 - Home Use / Leftover'
+                                  : 'Stock Out (-- Damage / Home Use)'
+                              }
+                              className="px-2 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 transition flex items-center gap-1 text-[11px] font-bold"
                             >
-                              <MinusCircle className="w-4 h-4" />
+                              <MinusCircle className="w-3.5 h-3.5 shrink-0" />
+                              {shopProfile?.business_type === 'HOMEMADE_FOOD' && (
+                                <span className="hidden xl:inline">🏠 - Home Use / Leftover</span>
+                              )}
                             </button>
                           </div>
                         </td>

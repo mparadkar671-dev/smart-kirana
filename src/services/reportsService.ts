@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { formatINR, roundCurrency, toPaise, toRupees } from '../utils/math';
 import { LoanAccountService } from './loanAccountService';
+import { HomemadeFoodService, CapitalAndExpenseSummary } from './homemadeFoodService';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -1838,5 +1839,115 @@ export class ReportsService {
 
   static async generateInventoryValuationReport(shopProfile: ShopProfile) {
     return this.generateStockValuationReport(shopProfile);
+  }
+
+  /**
+   * 11. HOMEMADE BUSINESS (GRUH UDYOG) MONTHLY, QUARTERLY, YEARLY & CAPITAL P&L REPORT
+   */
+  static async getHomemadeBusinessFinancialData(
+    range?: DateFilterRange
+  ): Promise<CapitalAndExpenseSummary> {
+    return HomemadeFoodService.getCapitalAndExpenseSummary(range);
+  }
+
+  static async generateHomemadeBusinessReport(
+    shopProfile: ShopProfile,
+    range?: DateFilterRange
+  ): Promise<{ xlsxBuffer: Uint8Array; pdfBuffer: ArrayBuffer; data: CapitalAndExpenseSummary }> {
+    const data = await this.getHomemadeBusinessFinancialData(range);
+    const dateRangeStr = range ? `${range.startDate} to ${range.endDate}` : 'All Time';
+
+    const sheets: SheetConfig[] = [
+      {
+        sheetName: '1_Item_Wise_Profitability',
+        shopName: shopProfile.shop_name,
+        reportTitle: 'Homemade Food Item-Wise Sales, Making Cost & Margin Report',
+        dateRangeStr,
+        generatedBy: shopProfile.owner_name,
+        headers: [
+          '#',
+          'Product Name (Marathi / English)',
+          'Category',
+          'Unit',
+          'Total Qty Sold',
+          'Total Revenue (₹)',
+          'Est. Making Cost (₹)',
+          'Gross Profit (₹)',
+          'Margin %',
+        ],
+        rows: data.itemWiseProfitability.map((it, idx) => [
+          idx + 1,
+          it.marathiName ? `${it.marathiName} (${it.productName})` : it.productName,
+          it.category,
+          it.unitType,
+          it.qtySold,
+          `₹ ${it.totalRevenue.toFixed(2)}`,
+          `₹ ${it.estimatedMakingCost.toFixed(2)}`,
+          `₹ ${it.grossProfit.toFixed(2)}`,
+          `${it.marginPct.toFixed(1)}%`,
+        ]),
+        totalsRow: [
+          'TOTALS',
+          `${data.itemWiseProfitability.length} Items Sold`,
+          '',
+          '',
+          '',
+          `₹ ${data.periodSalesRevenue.toFixed(2)}`,
+          `₹ ${data.periodEstimatedCOGS.toFixed(2)}`,
+          `₹ ${roundCurrency(data.periodSalesRevenue - data.periodEstimatedCOGS).toFixed(2)}`,
+          '',
+        ],
+      },
+      {
+        sheetName: '2_Income_Expense_Home_Statement',
+        shopName: shopProfile.shop_name,
+        reportTitle: 'Monthly / Yearly Income, Expense, Home-Support & Capital Payback Statement',
+        dateRangeStr,
+        generatedBy: shopProfile.owner_name,
+        headers: ['Statement Line Item', 'Classification', 'Amount (₹)', 'Notes / Formula'],
+        rows: [
+          ['1. Total Sales Revenue', 'INCOME', `₹ ${data.periodSalesRevenue.toFixed(2)}`, 'Completed HMF / POS Sales'],
+          ['2. Less: Raw Material & Packaging Expenses', 'RAW_MATERIAL_EXPENSE', `-₹ ${data.periodRawMaterialExpenses.toFixed(2)}`, 'Besan, Ghee, Coconut, Jaggery, LPG Gas, Boxes'],
+          ['3. Less: Operating Expenses', 'BUSINESS_EXPENSE', `-₹ ${data.periodOperatingExpenses.toFixed(2)}`, 'Transport, Helper, Electricity'],
+          ['4. (=) True Business Net Profit', 'TRUE_NET_PROFIT', `₹ ${data.trueBusinessNetProfit.toFixed(2)}`, 'Sales - (Raw Materials + Operating)'],
+          ['5. Less: Home & Family Expenses Supported by Business', 'HOME_FAMILY_EXPENSE', `-₹ ${data.periodHomeFamilyExpenses.toFixed(2)}`, 'Household expenses & personal drawings paid from business'],
+          ['6. (=) Net Retained Cash Savings', 'RETAINED_SAVINGS', `₹ ${data.netRetainedCashSavings.toFixed(2)}`, 'True Business Net Profit - Home & Family Expenses'],
+          ['7. Total Initial Capital Investment (All-Time)', 'INITIAL_INVESTMENT', `₹ ${data.totalInitialInvestmentAllTime.toFixed(2)}`, 'Bhatti, Bhirda, Steamer, Scales, Setup'],
+          ['8. Capital Recovered %', 'CAPITAL_RECOVERY', `${data.capitalRecoveredPct.toFixed(1)}%`, 'Cumulative True Net Profit / Initial Investment'],
+          ['9. Remaining Amount to Break Even', 'BREAK_EVEN_BALANCE', `₹ ${data.remainingToBreakEven.toFixed(2)}`, 'Remaining Capital to Recover'],
+          ['10. Net Profit After Capital Payback', 'NET_PROFIT_AFTER_CAPITAL', `₹ ${data.netProfitAfterCapitalPayback.toFixed(2)}`, 'Cumulative Net Profit - Initial Investment'],
+        ],
+      },
+    ];
+
+    const xlsxBuffer = createMultiSheetExcelWorkbook(sheets);
+
+    const doc = new jsPDF({ orientation: 'landscape' });
+    doc.setFontSize(16);
+    doc.text(shopProfile.shop_name, 14, 15);
+    doc.setFontSize(11);
+    doc.text('Homemade Business Financial, Item-Wise & Capital Payback Report', 14, 22);
+    doc.setFontSize(9);
+    doc.text(`Date Range: ${dateRangeStr} | Generated: ${new Date().toLocaleDateString('en-IN')}`, 14, 28);
+
+    autoTable(doc, {
+      startY: 38,
+      head: [['Statement Line Item', 'Classification', 'Amount (INR)', 'Notes']],
+      body: [
+        ['1. Total Sales Revenue', 'INCOME', `Rs. ${data.periodSalesRevenue.toFixed(2)}`, 'Total Sales'],
+        ['2. Less: Raw Material & Packaging', 'RAW_MATERIAL_EXPENSE', `-Rs. ${data.periodRawMaterialExpenses.toFixed(2)}`, 'Ingredients, Gas, Packaging'],
+        ['3. Less: Operating Expenses', 'BUSINESS_EXPENSE', `-Rs. ${data.periodOperatingExpenses.toFixed(2)}`, 'Delivery, Helper, Electricity'],
+        ['4. (=) True Business Net Profit', 'TRUE_NET_PROFIT', `Rs. ${data.trueBusinessNetProfit.toFixed(2)}`, 'True Business Profit'],
+        ['5. Less: Home & Family Expenses Supported', 'HOME_FAMILY_EXPENSE', `-Rs. ${data.periodHomeFamilyExpenses.toFixed(2)}`, 'Household support from business'],
+        ['6. (=) Net Retained Cash Savings', 'RETAINED_SAVINGS', `Rs. ${data.netRetainedCashSavings.toFixed(2)}`, 'Cash retained after home support'],
+        ['7. Total Initial Investment (All-Time)', 'INITIAL_INVESTMENT', `Rs. ${data.totalInitialInvestmentAllTime.toFixed(2)}`, `Recovered: ${data.capitalRecoveredPct.toFixed(1)}%`],
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: [217, 119, 6], fontSize: 9 },
+      bodyStyles: { fontSize: 8.5 },
+    });
+
+    const pdfBuffer = doc.output('arraybuffer');
+    return { xlsxBuffer, pdfBuffer, data };
   }
 }

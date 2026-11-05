@@ -213,6 +213,7 @@ export class InventoryService {
     unitCost?: number;
     supplierName?: string;
     loanAccountId?: string | null;
+    reasonType?: 'PURCHASE_IN' | 'BATCH_MADE_IN';
     notes?: string;
   }): Promise<{ product: Product; log: InventoryLog }> {
     if (params.qty <= 0) throw new Error('Restock quantity must be positive');
@@ -254,11 +255,15 @@ export class InventoryService {
         shop_id: product.shop_id || 'current_shop',
         product_id: params.productId,
         change_qty: roundQty(params.qty),
-        reason_type: 'PURCHASE_IN',
+        reason_type: params.reasonType || 'PURCHASE_IN',
         unit_cost_at_time: cost,
         reference_id: null,
         loan_account_id: params.loanAccountId !== undefined ? (params.loanAccountId || null) : (product.loan_account_id || null),
-        notes: params.notes?.trim() || `Restocked +${params.qty} from ${updates.last_supplier_name || product.last_supplier_name}`,
+        notes:
+          params.notes?.trim() ||
+          (params.reasonType === 'BATCH_MADE_IN'
+            ? `🍳 Fresh Batch Made Today (+${params.qty} ${product.unit_type})`
+            : `Restocked +${params.qty} from ${updates.last_supplier_name || product.last_supplier_name}`),
         created_at: new Date().toISOString(),
       };
 

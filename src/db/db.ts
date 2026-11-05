@@ -16,6 +16,8 @@ import {
   SalesReturnReason,
   Wholesaler,
   LoanAccount,
+  AdvanceOrder,
+  BusinessType,
   WALK_IN_CUSTOMER_RECORD,
   WALK_IN_CUSTOMER_ID,
 } from '../types';
@@ -58,6 +60,7 @@ export class KiranaDatabase extends Dexie {
   credit_notes!: EntityTable<CreditNote, 'id'>;
   wholesalers!: EntityTable<Wholesaler, 'id'>;
   loan_accounts!: EntityTable<LoanAccount, 'id'>;
+  advance_orders!: EntityTable<AdvanceOrder, 'id'>;
 
   constructor() {
     super('SmartKiranaDB');
@@ -169,6 +172,24 @@ export class KiranaDatabase extends Dexie {
       loan_accounts: 'id, shop_id, name, lender_name, is_active, created_at',
     });
 
+    this.version(9).stores({
+      products: 'id, shop_id, barcode, short_code, name, marathi_name, search_keywords, category, is_quick_tap, wholesaler_id, loan_account_id, updated_at',
+      inventory_logs: 'id, shop_id, product_id, reason_type, reference_id, loan_account_id, created_at',
+      customers: 'id, shop_id, phone, name, current_udhari_balance, created_at',
+      sales_invoices: 'id, shop_id, invoice_number, customer_id, payment_mode, status, credit_note_number, created_at',
+      sale_items: 'id, shop_id, invoice_id, product_id, loan_account_id',
+      khata_transactions: 'id, shop_id, customer_id, entry_type, invoice_id, payment_channel, created_at',
+      expenses_and_drawings: 'id, shop_id, entry_type, category, paid_via, created_at',
+      daily_galla_sessions: 'id, shop_id, &session_date, created_at',
+      shop_profile: 'id, shop_id, invite_code, business_type',
+      store_users: 'id, user_id, email, role, shop_id, created_at',
+      sync_outbox: 'id, table_name, shop_id, status, created_at, retry_count',
+      credit_notes: 'id, shop_id, credit_note_number, original_invoice_id, customer_id, created_at',
+      wholesalers: 'id, shop_id, name, phone, agency_or_brand, is_active, created_at',
+      loan_accounts: 'id, shop_id, name, lender_name, is_active, created_at',
+      advance_orders: 'id, shop_id, customer_id, delivery_date, status, created_at',
+    });
+
     // Multi-tenant Hook: Ensure all records are always tagged with shop_id and invite code
     const tenantTables = [
       this.products,
@@ -183,6 +204,7 @@ export class KiranaDatabase extends Dexie {
       this.credit_notes,
       this.wholesalers,
       this.loan_accounts,
+      this.advance_orders,
     ];
 
     tenantTables.forEach((table) => {
@@ -290,6 +312,7 @@ export class KiranaDatabase extends Dexie {
         this.inventory_logs,
         this.wholesalers,
         this.loan_accounts,
+        this.advance_orders,
       ],
       async () => {
         await this.products.clear();
@@ -302,6 +325,7 @@ export class KiranaDatabase extends Dexie {
         await this.inventory_logs.clear();
         await this.wholesalers.clear();
         await this.loan_accounts.clear();
+        await this.advance_orders.clear();
 
         // Re-insert mandatory WALK_IN_CUSTOMER
         await this.customers.add(WALK_IN_CUSTOMER_RECORD);
@@ -324,6 +348,7 @@ export class KiranaDatabase extends Dexie {
         this.daily_galla_sessions,
         this.inventory_logs,
         this.customers,
+        this.advance_orders,
       ],
       async () => {
         await this.sales_invoices.clear();
@@ -332,6 +357,7 @@ export class KiranaDatabase extends Dexie {
         await this.expenses_and_drawings.clear();
         await this.daily_galla_sessions.clear();
         await this.inventory_logs.clear();
+        await this.advance_orders.clear();
 
         // Reset non-walkin customer balances to 0
         const allCustomers = await this.customers.toArray();
@@ -365,6 +391,7 @@ export class KiranaDatabase extends Dexie {
         this.daily_galla_sessions,
         this.shop_profile,
         this.wholesalers,
+        this.advance_orders,
       ],
       async () => {
         const existingProfile = await this.shop_profile.get(DEFAULT_SHOP_PROFILE.id);
@@ -378,6 +405,7 @@ export class KiranaDatabase extends Dexie {
         await this.daily_galla_sessions.clear();
         await this.shop_profile.clear();
         await this.wholesalers.clear();
+        await this.advance_orders.clear();
 
         await this.shop_profile.add({
           ...DEFAULT_SHOP_PROFILE,

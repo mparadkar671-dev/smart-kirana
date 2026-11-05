@@ -1,9 +1,10 @@
 import { supabase } from '../lib/supabase';
 import { User, Session } from '@supabase/supabase-js';
 import { db, generateInviteCode } from '../db/db';
-import { UserRole, StoreUser, RegisteredShop } from '../types';
+import { UserRole, StoreUser, RegisteredShop, BusinessType } from '../types';
 import { cloudSyncService } from './cloudSyncService';
 import { notificationService } from './notificationService';
+import { HomemadeFoodService } from './homemadeFoodService';
 
 export interface PasswordValidationResult {
   isValid: boolean;
@@ -75,6 +76,7 @@ export interface SignUpShopData {
   shopId?: string;
   inviteCode?: string;
   isJoiningExisting?: boolean;
+  businessType?: BusinessType;
 }
 
 export const authService = {
@@ -228,16 +230,23 @@ export const authService = {
       }
     }
 
-    // If Owner registering a new shop, update local shop profile with new invite code
+    // If Owner registering a new shop, update local shop profile with new invite code and business_type
     const ownerInviteCode = generateInviteCode();
+    const selectedBusinessType: BusinessType = shopData.businessType || 'KIRANA_RETAIL';
+    const defaultPrefix = selectedBusinessType === 'HOMEMADE_FOOD' ? 'HMF' : 'KRN';
     if (!isJoining) {
       try {
+        if (selectedBusinessType === 'HOMEMADE_FOOD') {
+          await HomemadeFoodService.switchBusinessWorkspace('HOMEMADE_FOOD', { autoSeedHomemadeMenu: true });
+        }
         await db.updateShopProfile({
-          shop_name: shopData.shopName || 'My Kirana Store',
+          shop_name: shopData.shopName || (selectedBusinessType === 'HOMEMADE_FOOD' ? 'Gruh Udyog & Homemade Foods' : 'My Kirana Store'),
           owner_name: shopData.ownerName || 'Store Owner',
           phone: shopData.phone || '',
           upi_vpa: `${shopData.phone || 'kirana'}@upi`,
           invite_code: ownerInviteCode,
+          business_type: selectedBusinessType,
+          invoice_prefix: defaultPrefix,
         });
       } catch (e) {
         console.warn('Failed to save local shop profile on signup:', e);
@@ -296,13 +305,15 @@ export const authService = {
       if (!isJoining) {
         try {
           await supabase.from('shop_profile').upsert({
-            id: 'current_shop',
+            id: selectedBusinessType === 'HOMEMADE_FOOD' ? 'homemade_food_shop' : 'current_shop',
             user_id: data.user.id,
             shop_name: shopData.shopName || 'My Kirana Store',
             owner_name: shopData.ownerName || 'Store Owner',
             phone: shopData.phone || '',
             upi_vpa: `${shopData.phone || 'kirana'}@upi`,
             invite_code: ownerInviteCode,
+            business_type: selectedBusinessType,
+            invoice_prefix: defaultPrefix,
             updated_at: new Date().toISOString(),
           });
         } catch (err) {

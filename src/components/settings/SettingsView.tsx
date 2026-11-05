@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../db/db';
-import { ShopProfile, StoreUser, UserRole } from '../../types';
+import { ShopProfile, StoreUser, UserRole, BusinessType } from '../../types';
 import { BackupService } from '../../services/backupService';
 import { cloudSyncService, CloudSyncStatus } from '../../services/cloudSyncService';
 import { authService } from '../../services/authService';
 import { notificationService } from '../../services/notificationService';
+import { HomemadeFoodService } from '../../services/homemadeFoodService';
 import { useAuth } from '../../context/AuthContext';
 import {
   supabase,
@@ -375,6 +376,47 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
           text: 'Failed to seed demo products: ' + (e instanceof Error ? e.message : String(e)),
         });
       }
+    }
+  };
+
+  const handleSeedHomemadeFoodCatalog = async () => {
+    try {
+      const res = await HomemadeFoodService.seedHomemadeFoodCatalog();
+      await cloudSyncService.syncAllToCloud();
+      const updatedProfile = await db.getShopProfile();
+      setProfile(updatedProfile);
+      setStatusMsg({
+        type: 'success',
+        text: `🍲 Homemade Food Menu loaded (${res.seededCount} new items added, ${res.totalHomemadeCount} total items ready with HMF- billing)!`,
+      });
+      if (onDataReset) onDataReset();
+    } catch (e: unknown) {
+      setStatusMsg({
+        type: 'error',
+        text: 'Failed to load Homemade Food menu: ' + (e instanceof Error ? e.message : String(e)),
+      });
+    }
+  };
+
+  const handleSwitchBusinessFromSettings = async (targetType: BusinessType) => {
+    try {
+      const res = await HomemadeFoodService.switchBusinessWorkspace(targetType, {
+        seedCatalogIfEmpty: targetType === 'HOMEMADE_FOOD',
+      });
+      setProfile(res.activeProfile);
+      setStatusMsg({
+        type: 'success',
+        text:
+          targetType === 'HOMEMADE_FOOD'
+            ? `🍲 Switched active workspace to Homemade Food & Gruh Udyog (${res.productCount} products, Prefix: ${res.activeProfile.invoice_prefix || 'HMF'})!`
+            : `🏪 Switched active workspace to Kirana Retail Store (${res.productCount} products, Prefix: ${res.activeProfile.invoice_prefix || 'KRN'})!`,
+      });
+      if (onDataReset) onDataReset();
+    } catch (e: unknown) {
+      setStatusMsg({
+        type: 'error',
+        text: 'Failed switching business: ' + (e instanceof Error ? e.message : String(e)),
+      });
     }
   };
 
@@ -869,10 +911,99 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
 
       {/* 1. Shop Identity Form */}
       <form onSubmit={handleSaveProfile} className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
-          <Store className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-          Shop Identity &amp; Contact
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
+            <Store className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            Shop Identity, Business Category &amp; Contact
+          </h2>
+
+          {profile.business_type === 'HOMEMADE_FOOD' && (
+            <button
+              type="button"
+              data-testid="settings-seed-homemade-btn"
+              onClick={handleSeedHomemadeFoodCatalog}
+              className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95"
+            >
+              <span>🍲 Load Homemade Food Menu (Laddus, Modak, Ghavane, Bhakri...)</span>
+            </button>
+          )}
+        </div>
+
+        {/* Multi-Business Category & Workspace Switcher */}
+        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-700 dark:text-slate-200">
+                Active Business Category &amp; Workspace Isolation
+              </label>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Switch between your Kirana Retail Store and Homemade Food (Gruh Udyog) business with 100% separate products, bills &amp; P&amp;L reports.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="settings-switch-kirana-btn"
+                onClick={() => handleSwitchBusinessFromSettings('KIRANA_RETAIL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                  (profile.business_type || 'KIRANA_RETAIL') === 'KIRANA_RETAIL'
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                }`}
+              >
+                🏪 Kirana Store
+              </button>
+              <button
+                type="button"
+                data-testid="settings-switch-homemade-btn"
+                onClick={() => handleSwitchBusinessFromSettings('HOMEMADE_FOOD')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                  profile.business_type === 'HOMEMADE_FOOD'
+                    ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+                }`}
+              >
+                🍲 Homemade Food / Gruh Udyog
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            <div>
+              <label className="block text-[11px] font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
+                Business Type (`business_type`)
+              </label>
+              <select
+                value={profile.business_type || 'KIRANA_RETAIL'}
+                onChange={(e) => {
+                  const nextType = e.target.value as BusinessType;
+                  setProfile({
+                    ...profile,
+                    business_type: nextType,
+                    invoice_prefix: nextType === 'HOMEMADE_FOOD' ? 'HMF' : profile.invoice_prefix === 'HMF' ? 'KRN' : profile.invoice_prefix || 'KRN',
+                  });
+                }}
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg text-xs font-bold"
+              >
+                <option value="KIRANA_RETAIL">🏪 General / Kirana Store (KIRANA_RETAIL)</option>
+                <option value="HOMEMADE_FOOD">🍲 Homemade Food &amp; Gruh Udyog (HOMEMADE_FOOD)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
+                Invoice Number Prefix (`invoice_prefix`)
+              </label>
+              <input
+                type="text"
+                value={profile.invoice_prefix || (profile.business_type === 'HOMEMADE_FOOD' ? 'HMF' : 'KRN')}
+                onChange={(e) => setProfile({ ...profile, invoice_prefix: e.target.value.toUpperCase() })}
+                placeholder="e.g. KRN or HMF"
+                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg text-xs font-mono font-bold uppercase"
+              />
+            </div>
+          </div>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>

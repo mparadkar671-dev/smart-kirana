@@ -3,6 +3,7 @@ import {
   DailyGallaSession,
   ExpenseAndDrawing,
   ExpenseCategory,
+  ExpenseEntryType,
   ExpensePaidVia,
   SalesInvoice,
   PaymentMode,
@@ -86,6 +87,7 @@ export class GallaService {
    */
   static async recordExpense(params: {
     category: ExpenseCategory;
+    entryType?: ExpenseEntryType;
     amount: number;
     paidVia: ExpensePaidVia;
     description: string;
@@ -95,10 +97,23 @@ export class GallaService {
     const expAmount = roundCurrency(params.amount);
     const todayDate = new Date().toISOString().split('T')[0];
 
+    const resolvedEntryType: ExpenseEntryType =
+      params.entryType ||
+      (params.category === 'INITIAL_INVESTMENT_SETUP'
+        ? 'INITIAL_INVESTMENT'
+        : params.category === 'RAW_MATERIAL_INGREDIENTS'
+        ? 'RAW_MATERIAL_EXPENSE'
+        : params.category === 'HOME_FAMILY_EXPENSE' ||
+          params.category === 'OWNER_CASH_DRAWING' ||
+          params.category === 'HOME_SELF_USE_GOODS'
+        ? 'HOME_FAMILY_EXPENSE'
+        : 'BUSINESS_EXPENSE');
+
     const expense: ExpenseAndDrawing = {
       id: `exp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       shop_id: 'current_shop',
       category: params.category,
+      entry_type: resolvedEntryType,
       amount: expAmount,
       paid_via: params.paidVia,
       description: params.description.trim(),

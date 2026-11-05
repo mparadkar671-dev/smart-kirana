@@ -23,6 +23,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
   const [qty, setQty] = useState<number>(1);
   const [unitCost, setUnitCost] = useState<number>(product?.purchase_price || 0);
   const [supplierName, setSupplierName] = useState<string>(product?.last_supplier_name || '');
+  const [stockInReason, setStockInReason] = useState<'PURCHASE_IN' | 'BATCH_MADE_IN'>('PURCHASE_IN');
   const [stockOutReason, setStockOutReason] = useState<'SELF_USE_OUT' | 'DAMAGE_EXPIRED_OUT' | 'AUDIT_ADJUST'>('SELF_USE_OUT');
   const [notes, setNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -54,6 +55,11 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
       setUnitCost(product.purchase_price);
       setSupplierName(product.last_supplier_name || '');
       setQty(product.unit_type === 'KG_LOOSE' || product.unit_type === 'LTR' ? 1.0 : 1);
+      setStockInReason(
+        product.last_supplier_name?.includes('Home Kitchen') || product.id.startsWith('hmf-')
+          ? 'BATCH_MADE_IN'
+          : 'PURCHASE_IN'
+      );
       setIsFromLoan(Boolean(product.loan_account_id));
       setSelectedLoanId(product.loan_account_id || '');
       setShowInlineLoan(false);
@@ -132,6 +138,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
           unitCost,
           supplierName,
           loanAccountId: isFromLoan ? selectedLoanId : null,
+          reasonType: stockInReason,
           notes,
         });
       } else {
@@ -205,6 +212,46 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {/* Reason selector if Stock In */}
+          {mode === 'STOCK_IN' && (
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                Stock Addition Type
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  data-testid="stock-in-reason-purchase"
+                  onClick={() => setStockInReason('PURCHASE_IN')}
+                  className={`p-2.5 rounded-xl border text-left transition ${
+                    stockInReason === 'PURCHASE_IN'
+                      ? 'border-emerald-600 bg-emerald-50/80 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 ring-2 ring-emerald-500/20 font-bold'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  <div className="text-xs font-bold">📦 Supplier Purchase In</div>
+                  <div className="text-[10px] text-slate-500">Wholesaler / Distributor</div>
+                </button>
+                <button
+                  type="button"
+                  data-testid="stock-in-reason-batch"
+                  onClick={() => {
+                    setStockInReason('BATCH_MADE_IN');
+                    if (!supplierName) setSupplierName('Home Kitchen Batch');
+                  }}
+                  className={`p-2.5 rounded-xl border text-left transition ${
+                    stockInReason === 'BATCH_MADE_IN'
+                      ? 'border-amber-600 bg-amber-50/80 dark:bg-amber-950/50 text-amber-900 dark:text-amber-200 ring-2 ring-amber-500/20 font-bold'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  <div className="text-xs font-bold">🍳 + Fresh Batch Made</div>
+                  <div className="text-[10px] text-slate-500">Today's Homemade Kitchen Batch</div>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Reason selector if Stock Out */}
           {mode === 'STOCK_OUT' && (
             <div className="space-y-2">

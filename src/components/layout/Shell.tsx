@@ -20,13 +20,14 @@ import {
   Users,
   Bell,
 } from 'lucide-react';
-import { ShopProfile, UserRole } from '../../types';
+import { ShopProfile, UserRole, BusinessType } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { AuthModal } from '../auth/AuthModal';
 import { NotificationDrawer } from '../notifications/NotificationDrawer';
 import { notificationService } from '../../services/notificationService';
 import { cloudSyncService, CloudSyncStatus } from '../../services/cloudSyncService';
+import { HomemadeFoodService } from '../../services/homemadeFoodService';
 
 export type ActiveTab = 'pos' | 'inventory' | 'khata' | 'galla' | 'reports' | 'settings';
 
@@ -51,6 +52,31 @@ export const Shell: React.FC<ShellProps> = ({
   const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>(() => cloudSyncService.getStatus());
   const [syncToast, setSyncToast] = useState<string | null>(null);
+  const [isSwitchingBusiness, setIsSwitchingBusiness] = useState(false);
+
+  const currentBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+  const isHomemadeFood = currentBusinessType === 'HOMEMADE_FOOD';
+
+  const handleSwitchBusiness = async (targetType: BusinessType) => {
+    if (targetType === currentBusinessType || isSwitchingBusiness) return;
+    setIsSwitchingBusiness(true);
+    try {
+      await HomemadeFoodService.switchBusinessWorkspace(targetType, {
+        seedCatalogIfEmpty: targetType === 'HOMEMADE_FOOD',
+      });
+      setSyncToast(
+        targetType === 'HOMEMADE_FOOD'
+          ? '🍲 Switched to Homemade Food / Gruh Udyog!'
+          : '🏪 Switched to Kirana Retail Store!'
+      );
+      setTimeout(() => setSyncToast(null), 3000);
+    } catch (e) {
+      setSyncToast('Error switching business: ' + (e instanceof Error ? e.message : String(e)));
+      setTimeout(() => setSyncToast(null), 3000);
+    } finally {
+      setIsSwitchingBusiness(false);
+    }
+  };
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -109,53 +135,96 @@ export const Shell: React.FC<ShellProps> = ({
       {/* Desktop Sidebar (>= 1024px) */}
       <aside className="hidden lg:flex lg:flex-col w-64 bg-slate-900 dark:bg-slate-950 text-slate-100 border-r border-slate-800 shrink-0 z-30 select-none">
         {/* Brand Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-10 h-10 rounded-xl bg-orange-600 flex items-center justify-center text-white shadow-md shrink-0">
-              <Store className="w-6 h-6" />
-            </div>
-            <div className="overflow-hidden">
-              <h1 className="font-bold text-sm tracking-wide text-white truncate" title={shopName}>
-                {shopName}
-              </h1>
-              <div className="flex items-center gap-1.5 text-xs font-medium">
-                {isOnline ? (
-                  <span className="flex items-center gap-1 text-emerald-400">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span>Online Sync</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-amber-400">
-                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                    <span>Offline Ready</span>
-                  </span>
-                )}
+        <div className="p-4 border-b border-slate-800 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3 overflow-hidden">
+              <div
+                className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-md shrink-0 ${
+                  isHomemadeFood
+                    ? 'bg-gradient-to-br from-amber-500 to-orange-600 ring-2 ring-amber-400/40'
+                    : 'bg-orange-600'
+                }`}
+              >
+                {isHomemadeFood ? <span className="text-lg">🍲</span> : <Store className="w-6 h-6" />}
               </div>
+              <div className="overflow-hidden">
+                <h1 className="font-bold text-sm tracking-wide text-white truncate" title={shopName}>
+                  {shopName}
+                </h1>
+                <div className="flex items-center gap-1.5 text-xs font-medium">
+                  {isOnline ? (
+                    <span className="flex items-center gap-1 text-emerald-400">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span>Online Sync</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-amber-400">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      <span>Offline Ready</span>
+                    </span>
+                  )}
+                  <span
+                    className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                      isHomemadeFood
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                    }`}
+                  >
+                    {isHomemadeFood ? 'HMF' : 'KRN'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Header Buttons: Notifications & Theme */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => setIsNotificationOpen(true)}
+                aria-label="Store Notifications"
+                title="Store Notifications"
+                className="relative p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <Bell className="w-4 h-4 text-slate-300" />
+                {unreadNotifsCount > 0 && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 animate-pulse ring-2 ring-slate-900" />
+                )}
+              </button>
+
+              <button
+                onClick={toggleTheme}
+                aria-label="Toggle theme"
+                title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
+                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-blue-300" />}
+              </button>
             </div>
           </div>
 
-          {/* Right Header Buttons: Notifications & Theme */}
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={() => setIsNotificationOpen(true)}
-              aria-label="Store Notifications"
-              title="Store Notifications"
-              className="relative p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+          {/* 1-Click Multi-Business Workspace Switcher */}
+          <div className="pt-1">
+            <label htmlFor="sidebar-business-switcher" className="sr-only">
+              Switch Active Business Workspace
+            </label>
+            <select
+              id="sidebar-business-switcher"
+              data-testid="sidebar-business-switcher"
+              value={currentBusinessType}
+              disabled={isSwitchingBusiness}
+              onChange={(e) => handleSwitchBusiness(e.target.value as BusinessType)}
+              className={`w-full px-2.5 py-1.5 rounded-lg text-[11px] font-bold border outline-none cursor-pointer transition ${
+                isHomemadeFood
+                  ? 'bg-amber-950/60 border-amber-500/50 text-amber-200 hover:bg-amber-900/60'
+                  : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-750'
+              }`}
             >
-              <Bell className="w-4 h-4 text-slate-300" />
-              {unreadNotifsCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 animate-pulse ring-2 ring-slate-900" />
-              )}
-            </button>
-
-            <button
-              onClick={toggleTheme}
-              aria-label="Toggle theme"
-              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
-              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-            >
-              {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-blue-300" />}
-            </button>
+              <option value="KIRANA_RETAIL" className="bg-slate-900 text-white">
+                🏪 Kirana Retail Store (INV / KRN)
+              </option>
+              <option value="HOMEMADE_FOOD" className="bg-slate-900 text-amber-300">
+                🍲 Homemade Food / Gruh Udyog (HMF)
+              </option>
+            </select>
           </div>
         </div>
 

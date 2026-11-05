@@ -36,14 +36,20 @@ export interface CheckoutParams {
 
 export class BillingService {
   /**
-   * Generates next invoice number for today: INV-YYYYMMDD-001
+   * Generates next invoice number for today: INV-YYYYMMDD-001 (or HMF-YYYYMMDD-001 for Homemade Food)
    */
   static async generateInvoiceNumber(): Promise<string> {
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
-    const prefix = `INV-${yyyy}${mm}${dd}-`;
+    const profile = await db.getShopProfile();
+    const customPrefix = profile?.invoice_prefix
+      ? profile.invoice_prefix.replace(/-+$/, '')
+      : profile?.business_type === 'HOMEMADE_FOOD'
+      ? 'HMF'
+      : 'INV';
+    const prefix = `${customPrefix}-${yyyy}${mm}${dd}-`;
 
     const count = await db.sales_invoices.count();
     const nextSeq = String(count + 1).padStart(3, '0');

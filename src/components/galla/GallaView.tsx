@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { DailyGallaSession, ExpenseAndDrawing, ExpenseCategory, ExpensePaidVia } from '../../types';
+import {
+  DailyGallaSession,
+  ExpenseAndDrawing,
+  ExpenseCategory,
+  ExpenseEntryType,
+  ExpensePaidVia,
+} from '../../types';
 import { db } from '../../db/db';
 import { GallaService } from '../../services/gallaService';
+import { HomemadeFoodService, CapitalAndExpenseSummary } from '../../services/homemadeFoodService';
 import { formatINR, roundCurrency } from '../../utils/math';
 import {
   Wallet,
@@ -26,10 +33,12 @@ export const GallaView: React.FC = () => {
 
   // Expense Modal State
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [expEntryType, setExpEntryType] = useState<ExpenseEntryType>('BUSINESS_EXPENSE');
   const [expCategory, setExpCategory] = useState<ExpenseCategory>('SHOP_EXPENSE_TRANSPORT_BAGS');
   const [expAmount, setExpAmount] = useState<number>(0);
   const [expPaidVia, setExpPaidVia] = useState<ExpensePaidVia>('CASH_GALLA');
   const [expDesc, setExpDesc] = useState('');
+  const [capitalSummary, setCapitalSummary] = useState<CapitalAndExpenseSummary | null>(null);
 
   useEffect(() => {
     loadGallaData();
@@ -49,6 +58,9 @@ export const GallaView: React.FC = () => {
       .reverse()
       .sortBy('created_at');
     setExpenses(expList);
+
+    const capSum = await HomemadeFoodService.getCapitalAndExpenseSummary();
+    setCapitalSummary(capSum);
   };
 
   const handleUpdateOpeningCash = async () => {
@@ -73,6 +85,7 @@ export const GallaView: React.FC = () => {
 
     await GallaService.recordExpense({
       category: expCategory,
+      entryType: expEntryType,
       amount: expAmount,
       paidVia: expPaidVia,
       description: expDesc,
@@ -272,6 +285,95 @@ export const GallaView: React.FC = () => {
         </div>
       </div>
 
+      {/* Capital Investment Recovery & Expense Classification Card (Step 4) */}
+      {capitalSummary && (
+        <div
+          data-testid="capital-investment-recovery-card"
+          className="bg-gradient-to-r from-amber-50/70 via-white to-orange-50/70 dark:from-slate-900 dark:via-slate-900 dark:to-amber-950/20 rounded-2xl border border-amber-200 dark:border-amber-800/60 p-5 shadow-2xs space-y-4 transition-colors"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/70 dark:border-slate-800 pb-3">
+            <div>
+              <h2 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>🏗️ Capital Investment Recovery &amp; Business vs. Home Expense Tracker</span>
+                <span
+                  data-testid="capital-recovered-pct-badge"
+                  className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-amber-600 text-white"
+                >
+                  {capitalSummary.capitalRecoveredPct.toFixed(1)}% Capital Recovered
+                </span>
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Tracks One-Time Initial Setup Investments (Bhatti, Bhirda, Steamer, Scales) separately from Daily Raw Material, Operating &amp; Family Drawings
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+              <div className="text-[10px] font-bold uppercase text-slate-500">1. Total Initial Investment</div>
+              <div
+                data-testid="cap-total-initial-investment"
+                className="text-lg font-extrabold text-indigo-700 dark:text-indigo-400 mt-0.5"
+              >
+                {formatINR(capitalSummary.totalInitialInvestmentAllTime)}
+              </div>
+              <div className="text-[10px] text-slate-400">Setup, Utensils, Bhatti, Scales</div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+              <div className="text-[10px] font-bold uppercase text-slate-500">2. Cumulative True Net Profit</div>
+              <div
+                data-testid="cap-cumulative-net-profit"
+                className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5"
+              >
+                {formatINR(capitalSummary.cumulativeTrueNetProfit)}
+              </div>
+              <div className="text-[10px] text-slate-400">After Raw Material &amp; Operating Cost</div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+              <div className="text-[10px] font-bold uppercase text-slate-500">3. Remaining to Break Even</div>
+              <div
+                data-testid="cap-remaining-breakeven"
+                className="text-lg font-extrabold text-amber-600 dark:text-amber-400 mt-0.5"
+              >
+                {formatINR(capitalSummary.remainingToBreakEven)}
+              </div>
+              <div className="text-[10px] text-slate-400">
+                {capitalSummary.remainingToBreakEven === 0 && capitalSummary.totalInitialInvestmentAllTime > 0
+                  ? '🎉 100% Capital Recovered!'
+                  : 'Capital Payback Balance'}
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+              <div className="text-[10px] font-bold uppercase text-slate-500">4. Home &amp; Family Supported</div>
+              <div
+                data-testid="cap-home-family-expenses"
+                className="text-lg font-extrabold text-purple-700 dark:text-purple-400 mt-0.5"
+              >
+                {formatINR(capitalSummary.periodHomeFamilyExpenses)}
+              </div>
+              <div className="text-[10px] text-slate-400">Home expenses paid from business</div>
+            </div>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-[11px] font-bold text-slate-600 dark:text-slate-300">
+              <span>Capital Payback Progress</span>
+              <span>{Math.min(100, capitalSummary.capitalRecoveredPct).toFixed(1)}%</span>
+            </div>
+            <div className="w-full h-2.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 transition-all duration-300"
+                style={{ width: `${Math.min(100, Math.max(0, capitalSummary.capitalRecoveredPct))}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Today's Recorded Expenses Table */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden transition-colors">
         <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
@@ -352,19 +454,88 @@ export const GallaView: React.FC = () => {
             </div>
 
             <form onSubmit={handleRecordExpense} className="p-6 space-y-4">
+              {/* 4-Category Expense Entry Type Selector (Step 4) */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1.5">
+                  1. Entry Classification (Capital / Raw Material / Operating / Home) *
+                </label>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {[
+                    {
+                      id: 'INITIAL_INVESTMENT' as ExpenseEntryType,
+                      cat: 'INITIAL_INVESTMENT_SETUP' as ExpenseCategory,
+                      label: '🏗️ Initial Investment / Capital Asset (INITIAL_INVESTMENT)',
+                      desc: 'Gas Bhatti, Cast-Iron Bhirda/Tava, Modak Steamer, Weighing Scale, Setup',
+                    },
+                    {
+                      id: 'RAW_MATERIAL_EXPENSE' as ExpenseEntryType,
+                      cat: 'RAW_MATERIAL_INGREDIENTS' as ExpenseCategory,
+                      label: '🥥 Raw Material & Packaging Expense (RAW_MATERIAL_EXPENSE)',
+                      desc: 'Besan, Pure Ghee, Fresh Coconut, Jaggery, Rice Flour, LPG Gas, Boxes',
+                    },
+                    {
+                      id: 'BUSINESS_EXPENSE' as ExpenseEntryType,
+                      cat: 'SHOP_EXPENSE_TRANSPORT_BAGS' as ExpenseCategory,
+                      label: '⚡ Operating Expense (BUSINESS_EXPENSE)',
+                      desc: 'Delivery auto fare, helper wages, electricity, shop polybags',
+                    },
+                    {
+                      id: 'HOME_FAMILY_EXPENSE' as ExpenseEntryType,
+                      cat: 'HOME_FAMILY_EXPENSE' as ExpenseCategory,
+                      label: '🏠 Home & Family Expense Paid from Business (HOME_FAMILY_EXPENSE)',
+                      desc: 'Home grocery bill, school fees, medical bill, personal withdrawal',
+                    },
+                  ].map((opt) => (
+                    <button
+                      type="button"
+                      key={opt.id}
+                      data-testid={`exp-entry-type-${opt.id}`}
+                      onClick={() => {
+                        setExpEntryType(opt.id);
+                        setExpCategory(opt.cat);
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition ${
+                        expEntryType === opt.id
+                          ? 'border-red-600 bg-red-50/70 dark:bg-red-950/40 text-slate-900 dark:text-white ring-1 ring-red-500/30'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="text-xs font-bold">{opt.label}</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-1">
-                  Category *
+                  2. Sub-Category *
                 </label>
                 <select
+                  data-testid="expense-category-select"
                   value={expCategory}
-                  onChange={(e) => setExpCategory(e.target.value as ExpenseCategory)}
+                  onChange={(e) => {
+                    const nextCat = e.target.value as ExpenseCategory;
+                    setExpCategory(nextCat);
+                    if (nextCat === 'INITIAL_INVESTMENT_SETUP') setExpEntryType('INITIAL_INVESTMENT');
+                    else if (nextCat === 'RAW_MATERIAL_INGREDIENTS') setExpEntryType('RAW_MATERIAL_EXPENSE');
+                    else if (
+                      nextCat === 'HOME_FAMILY_EXPENSE' ||
+                      nextCat === 'OWNER_CASH_DRAWING' ||
+                      nextCat === 'HOME_SELF_USE_GOODS'
+                    )
+                      setExpEntryType('HOME_FAMILY_EXPENSE');
+                    else setExpEntryType('BUSINESS_EXPENSE');
+                  }}
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                 >
-                  <option value="SHOP_EXPENSE_TRANSPORT_BAGS">Transport, Polybags &amp; Supplies (Shop Expense)</option>
-                  <option value="SHOP_EXPENSE_RENT_ELEC">Electricity, Rent &amp; Tea (Shop Expense)</option>
-                  <option value="OWNER_CASH_DRAWING">Owner Cash Drawing (Personal Household Use)</option>
-                  <option value="HOME_SELF_USE_GOODS">Home Grocery Consumption</option>
+                  <option value="INITIAL_INVESTMENT_SETUP">🏗️ Initial Setup &amp; Utensils Investment (INITIAL_INVESTMENT)</option>
+                  <option value="RAW_MATERIAL_INGREDIENTS">🥥 Raw Material, LPG Gas &amp; Packaging (RAW_MATERIAL_EXPENSE)</option>
+                  <option value="SHOP_EXPENSE_TRANSPORT_BAGS">⚡ Transport, Polybags &amp; Supplies (BUSINESS_EXPENSE)</option>
+                  <option value="SHOP_EXPENSE_RENT_ELEC">⚡ Electricity, Rent, Helper &amp; Tea (BUSINESS_EXPENSE)</option>
+                  <option value="HOME_FAMILY_EXPENSE">🏠 Home &amp; Family Expense Paid from Business (HOME_FAMILY_EXPENSE)</option>
+                  <option value="OWNER_CASH_DRAWING">🏠 Owner Cash Drawing (Personal Household Use)</option>
+                  <option value="HOME_SELF_USE_GOODS">🏠 Home Grocery / Food Consumption</option>
                 </select>
               </div>
 

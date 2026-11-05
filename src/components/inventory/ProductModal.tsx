@@ -32,6 +32,10 @@ interface ProductModalProps {
 const CATEGORIES = [
   'Groceries',
   'Loose Staples',
+  'Homemade Laddus & Sweets',
+  'Festival Specials',
+  'Konkani Breakfast',
+  'Fresh Bhakri & Chapati',
   'Dairy',
   'Bakery & Dairy',
   'Oils',
@@ -557,10 +561,12 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 }}
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium"
               >
-                <option value="PCS">PCS (Standard Items / Soap / Biscuits)</option>
-                <option value="KG_LOOSE">KG_LOOSE (Sugar, Atta, Dal, Rice)</option>
+                <option value="PCS">PCS (Per Piece - Chapati, Bhakri, Modak, Soap, Biscuits)</option>
+                <option value="PLATE">PLATE (Per Plate - Ghavane, Amboli, Snacks)</option>
+                <option value="DOZEN">DOZEN (Per 12 Pcs - Modak Box, Chapati Pack)</option>
+                <option value="KG_LOOSE">KG_LOOSE (Per Kg / Gram - Laddus, Kapa, Sugar, Dal, Rice)</option>
+                <option value="PACK">PACK (250g / 500g / 1kg Sealed Box / Packet)</option>
                 <option value="LTR">LTR (Loose Oil, Milk, Liquids)</option>
-                <option value="PACK">PACK (Pre-packaged Multi-pack / Boxes)</option>
               </select>
             </div>
 

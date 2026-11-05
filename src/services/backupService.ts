@@ -11,6 +11,8 @@ import {
   ShopProfile,
   StoreUser,
   Wholesaler,
+  LoanAccount,
+  AdvanceOrder,
 } from '../types';
 
 export interface DatabaseSnapshot {
@@ -27,6 +29,8 @@ export interface DatabaseSnapshot {
   daily_galla_sessions: DailyGallaSession[];
   store_users?: StoreUser[];
   wholesalers?: Wholesaler[];
+  loan_accounts?: LoanAccount[];
+  advance_orders?: AdvanceOrder[];
 }
 
 export class BackupService {
@@ -46,6 +50,8 @@ export class BackupService {
       daily_galla_sessions,
       store_users,
       wholesalers,
+      loan_accounts,
+      advance_orders,
     ] = await Promise.all([
       db.shop_profile.toArray(),
       db.products.toArray(),
@@ -58,6 +64,8 @@ export class BackupService {
       db.daily_galla_sessions.toArray(),
       db.store_users.toArray(),
       db.wholesalers.toArray(),
+      db.loan_accounts.toArray(),
+      db.advance_orders.toArray(),
     ]);
 
     return {
@@ -74,6 +82,8 @@ export class BackupService {
       daily_galla_sessions,
       store_users,
       wholesalers,
+      loan_accounts,
+      advance_orders,
     };
   }
 
@@ -190,6 +200,8 @@ export class BackupService {
         db.daily_galla_sessions,
         db.store_users,
         db.wholesalers,
+        db.loan_accounts,
+        db.advance_orders,
       ],
       async () => {
         // Clear all tables
@@ -204,6 +216,8 @@ export class BackupService {
         await db.daily_galla_sessions.clear();
         await db.store_users.clear();
         await db.wholesalers.clear();
+        await db.loan_accounts.clear();
+        await db.advance_orders.clear();
 
         // Restore tables
         if (snapshot.shop_profile?.length) await db.shop_profile.bulkAdd(snapshot.shop_profile);
@@ -217,6 +231,8 @@ export class BackupService {
         if (snapshot.daily_galla_sessions?.length) await db.daily_galla_sessions.bulkAdd(snapshot.daily_galla_sessions);
         if (snapshot.store_users?.length) await db.store_users.bulkAdd(snapshot.store_users);
         if (snapshot.wholesalers?.length) await db.wholesalers.bulkAdd(snapshot.wholesalers);
+        if (snapshot.loan_accounts?.length) await db.loan_accounts.bulkAdd(snapshot.loan_accounts);
+        if (snapshot.advance_orders?.length) await db.advance_orders.bulkAdd(snapshot.advance_orders);
       }
     );
   }
