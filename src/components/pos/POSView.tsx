@@ -31,8 +31,18 @@ import {
   Clock,
   ChevronDown,
   Check,
+  CheckCircle2,
+  X,
   Undo2,
 } from 'lucide-react';
+
+interface StockWarningInfo {
+  product: Product;
+  qtyToAdd: number;
+  explicitLineTotal?: number;
+  currentStock: number;
+  requestedQty: number;
+}
 
 interface POSViewProps {
   products: Product[];
@@ -83,6 +93,8 @@ export const POSView: React.FC<POSViewProps> = ({
   const [isUpiModalOpen, setIsUpiModalOpen] = useState(false);
   const [isUdhariModalOpen, setIsUdhariModalOpen] = useState(false);
   const [isAdvanceOrdersModalOpen, setIsAdvanceOrdersModalOpen] = useState(false);
+  const [stockWarningProduct, setStockWarningProduct] = useState<StockWarningInfo | null>(null);
+  const [isStockWarningOpen, setIsStockWarningOpen] = useState(false);
 
   // Receipt Modal state
   const [completedInvoice, setCompletedInvoice] = useState<SalesInvoice | null>(null);
@@ -240,7 +252,25 @@ export const POSView: React.FC<POSViewProps> = ({
         isUdhariModalOpen ||
         isLooseModalOpen ||
         isReceiptModalOpen ||
-        isCustomerSelectorOpen;
+        isCustomerSelectorOpen ||
+        isAdvanceOrdersModalOpen ||
+        isStockWarningOpen;
+
+      if (isStockWarningOpen && stockWarningProduct) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const { product, qtyToAdd, explicitLineTotal } = stockWarningProduct;
+          setIsStockWarningOpen(false);
+          setStockWarningProduct(null);
+          addItemToCart(product, qtyToAdd, explicitLineTotal, true);
+          return;
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          setIsStockWarningOpen(false);
+          setStockWarningProduct(null);
+          return;
+        }
+      }
 
       if (e.key === 'F2' || (e.key === '/' && !isInput && !isModalOpen)) {
         e.preventDefault();
@@ -304,11 +334,12 @@ export const POSView: React.FC<POSViewProps> = ({
       ? roundCurrency(subtotalRupees % 50)
       : 0;
 
-  // Add Item to Active Cart
+  // Add Item to Active Cart (with Zero / Low Stock Warning & Offline Physical Permission)
   const addItemToCart = (
     product: Product,
     qtyToAdd: number = 1,
-    explicitLineTotal?: number
+    explicitLineTotal?: number,
+    bypassStockCheck: boolean = false
   ) => {
     // If loose item and no explicit qty/line total, open LooseItemModal
     if (
@@ -317,6 +348,27 @@ export const POSView: React.FC<POSViewProps> = ({
     ) {
       setLooseModalProduct(product);
       setIsLooseModalOpen(true);
+      return;
+    }
+
+    const currentStock = product.current_stock ?? 0;
+    const existingIndex = activeCart.items.findIndex(
+      (i) => i.product.id === product.id
+    );
+    const existingQty = existingIndex >= 0 ? activeCart.items[existingIndex].qty : 0;
+    const requestedTotal = roundQty(existingQty + qtyToAdd);
+
+    // If product is out of stock (currentStock <= 0) or requested qty exceeds available stock,
+    // prompt for cashier confirmation if physical stock is available offline on the shelf
+    if (!bypassStockCheck && (currentStock <= 0 || requestedTotal > currentStock)) {
+      setStockWarningProduct({
+        product,
+        qtyToAdd,
+        explicitLineTotal,
+        currentStock,
+        requestedQty: requestedTotal,
+      });
+      setIsStockWarningOpen(true);
       return;
     }
 
@@ -1212,6 +1264,117 @@ export const POSView: React.FC<POSViewProps> = ({
           if (onCheckoutComplete) onCheckoutComplete();
         }}
       />
+
+      {/* Low / Zero Stock Warning Modal with Offline Physical Stock Permission */}
+      {isStockWarningOpen && stockWarningProduct && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="stock-warning-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
+          data-testid="stock-warning-modal"
+        >
+          <div className="bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl shrink-0 border border-amber-500/20">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h3 id="stock-warning-title" className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <span>⚠️ कमी स्टॉक / माल शिल्लक नाही</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Stock Availability Warning &amp; Physical Stock Permission
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsStockWarningOpen(false);
+                  setStockWarningProduct(null);
+                }}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Product & Stock Overview Card */}
+            <div className="p-3.5 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-bold text-slate-900 dark:text-white">
+                  {stockWarningProduct.product.marathi_name
+                    ? `${stockWarningProduct.product.marathi_name} (${stockWarningProduct.product.name})`
+                    : stockWarningProduct.product.name}
+                </span>
+                <span className="text-xs font-bold text-amber-700 dark:text-amber-300">
+                  {formatINR(stockWarningProduct.product.selling_price)} / {stockWarningProduct.product.unit_type}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-amber-200/60 dark:border-amber-800/40">
+                <div className="bg-white/80 dark:bg-slate-900/80 p-2 rounded-lg border border-amber-200 dark:border-amber-800">
+                  <span className="text-[11px] text-slate-500 block">सिस्टीम स्टॉक (System Stock):</span>
+                  <span className={`font-extrabold text-xs ${stockWarningProduct.currentStock <= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                    {stockWarningProduct.currentStock <= 0
+                      ? '0 (Out of Stock / निरंक)'
+                      : `${stockWarningProduct.currentStock} ${stockWarningProduct.product.unit_type}`}
+                  </span>
+                </div>
+                <div className="bg-white/80 dark:bg-slate-900/80 p-2 rounded-lg border border-amber-200 dark:border-amber-800">
+                  <span className="text-[11px] text-slate-500 block">बिलात जोडायचा (Add to Bill):</span>
+                  <span className="font-extrabold text-xs text-blue-600 dark:text-blue-400">
+                    +{stockWarningProduct.qtyToAdd} {stockWarningProduct.product.unit_type}
+                    {stockWarningProduct.requestedQty > stockWarningProduct.qtyToAdd && ` (Total: ${stockWarningProduct.requestedQty})`}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Permission explanation in Marathi & English */}
+            <div className="text-xs text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60 leading-relaxed">
+              <p className="font-semibold text-slate-900 dark:text-white mb-1">
+                🛍️ दुकानात प्रत्यक्ष माल उपलब्ध आहे का?
+              </p>
+              <p>
+                सिस्टीममधील नोंद संपलेली असली, तरी तुमच्या दुकानाच्या शेल्फवर हा माल प्रत्यक्ष उपलब्ध असल्यास आपण बिलामध्ये हा माल जोडून ग्राहकाला बिल देऊ शकता.
+              </p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                (If you have physical inventory on shelf, confirm to add to bill anyway.)
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2.5 pt-1">
+              <button
+                type="button"
+                data-testid="cancel-add-zero-stock-btn"
+                onClick={() => {
+                  setIsStockWarningOpen(false);
+                  setStockWarningProduct(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition"
+              >
+                रद्द करा / Cancel (Esc)
+              </button>
+              <button
+                type="button"
+                data-testid="confirm-add-zero-stock-btn"
+                onClick={() => {
+                  const { product, qtyToAdd, explicitLineTotal } = stockWarningProduct;
+                  setIsStockWarningOpen(false);
+                  setStockWarningProduct(null);
+                  addItemToCart(product, qtyToAdd, explicitLineTotal, true);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-md flex items-center justify-center gap-1.5"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>होय, बिलात जोडा (Enter)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 4-Second Mistake-Proofing Undo Cash Checkout Toast Bar (Iteration 4) */}
       {undoCheckout && (

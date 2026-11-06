@@ -341,5 +341,22 @@ export interface SyncOutboxItem {
   error_message?: string | null;
 }
 
+export interface BusinessWorkspaceRecord {
+  business_type: BusinessType;
+  shop_profile: ShopProfile;
+  products: Product[];
+  inventory_logs: InventoryLog[];
+  customers: Customer[];
+  sales_invoices: SalesInvoice[];
+  sale_items: SaleItem[];
+  khata_transactions: KhataTransaction[];
+  expenses_and_drawings: ExpenseAndDrawing[];
+  daily_galla_sessions: DailyGallaSession[];
+  advance_orders: AdvanceOrder[];
+  loan_accounts: LoanAccount[];
+  wholesalers: Wholesaler[];
+  updated_at: string;
+}
+
 
 

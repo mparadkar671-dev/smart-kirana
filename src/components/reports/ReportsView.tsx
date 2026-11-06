@@ -503,6 +503,41 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         </div>
       </div>
 
+      {/* Business Scope & Isolation Indicator Banner */}
+      <div
+        data-testid="reports-business-scope-banner"
+        className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          shopProfile?.business_type === 'HOMEMADE_FOOD'
+            ? 'bg-amber-950/25 border-amber-500/40 text-amber-200'
+            : 'bg-blue-950/25 border-blue-500/40 text-blue-200'
+        }`}
+      >
+        <div className="flex items-center gap-2.5">
+          <span className="text-xl shrink-0">{shopProfile?.business_type === 'HOMEMADE_FOOD' ? '🍲' : '🏪'}</span>
+          <div>
+            <div className="font-extrabold text-xs uppercase tracking-wider flex items-center gap-2">
+              <span>
+                {shopProfile?.business_type === 'HOMEMADE_FOOD'
+                  ? '🍲 Homemade Food & Gruh Udyog Financial Suite'
+                  : '🏪 Kirana Retail Store Financial Suite'}
+              </span>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                shopProfile?.business_type === 'HOMEMADE_FOOD'
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
+                  : 'bg-blue-500/20 text-blue-300 border-blue-500/50'
+              }`}>
+                {shopProfile?.business_type === 'HOMEMADE_FOOD' ? 'Isolated HMF Workspace' : 'Isolated KRN Workspace'}
+              </span>
+            </div>
+            <p className="text-[11px] opacity-80 mt-0.5">
+              {shopProfile?.business_type === 'HOMEMADE_FOOD'
+                ? 'All figures, bills (HMF-), raw material expenses, initial setup recovery, and profits below belong strictly to Gruh Udyog.'
+                : 'All figures, bills (KRN-), inventory valuation, GST taxes, and profits below belong strictly to Kirana Retail.'}
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* View Mode Toggle & Date Range Presets */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         {/* View Mode Switcher */}

@@ -226,6 +226,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   // Handle 1-Click Built-in 105 Maharashtra Kirana Catalog Import
   const handleImport105BuiltInCatalog = async () => {
+    if (shopProfile?.business_type === 'HOMEMADE_FOOD') {
+      alert(
+        '⚠️ You are currently in Homemade Food / Gruh Udyog mode! Please switch to Kirana Retail Store from the sidebar before importing the Kirana grocery catalog, to keep your food products completely separate.'
+      );
+      return;
+    }
     setIsImportingCsv(true);
     setImportFeedback(null);
     try {

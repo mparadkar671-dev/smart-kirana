@@ -14,6 +14,7 @@ import { AuthPage } from './components/auth/AuthPage';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Sparkles, PlusCircle, CloudDownload } from 'lucide-react';
 import { MAHARASHTRA_105_KIRANA_CATALOG, bulkImportKiranaProducts } from './services/csvCatalogImporter';
+import { HomemadeFoodService } from './services/homemadeFoodService';
 import { cloudSyncService } from './services/cloudSyncService';
 
 const MainApp: React.FC = () => {
@@ -29,9 +30,15 @@ const MainApp: React.FC = () => {
 
     db.initializeDatabase().then(async () => {
       if (!isTestEnv) {
+        const profile = await db.getShopProfile();
+        const bizType = profile?.business_type || 'KIRANA_RETAIL';
         const count = await db.products.count();
         if (count < 10) {
-          await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+          if (bizType === 'HOMEMADE_FOOD') {
+            await HomemadeFoodService.seedHomemadeFoodCatalog();
+          } else {
+            await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+          }
         }
       }
       if (mounted) setIsDbReady(true);
@@ -93,39 +100,67 @@ const MainApp: React.FC = () => {
       {isStoreFreshEmpty && (activeTab === 'pos' || activeTab === 'inventory') && (
         <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-blue-800 text-white p-3 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md border-b border-blue-700 select-none">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-orange-500 rounded-lg text-white shrink-0">
+            <div className={`p-2 rounded-lg text-white shrink-0 ${shopProfile?.business_type === 'HOMEMADE_FOOD' ? 'bg-amber-600' : 'bg-orange-500'}`}>
               <PlusCircle className="w-5 h-5" />
             </div>
             <div>
-              <div className="font-bold text-sm">Welcome! Your Kirana Store is fresh and ready.</div>
+              <div className="font-bold text-sm">
+                {shopProfile?.business_type === 'HOMEMADE_FOOD'
+                  ? 'Welcome! Your Homemade Food / Gruh Udyog store is fresh and ready.'
+                  : 'Welcome! Your Kirana Store is fresh and ready.'}
+              </div>
               <div className="text-xs text-blue-200">
-                Your inventory is currently empty. Tap &quot;+ Add Product&quot; to begin adding your store items.
+                {shopProfile?.business_type === 'HOMEMADE_FOOD'
+                  ? 'Your menu is currently empty. Tap "Load Homemade Food Menu" to populate Modak, Laddus & Bhakri.'
+                  : 'Your inventory is currently empty. Tap "+ Add Product" to begin adding your store items.'}
               </div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={async () => {
-                setIsRecovering(true);
-                try {
-                  await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
-                } finally {
-                  setIsRecovering(false);
-                }
-              }}
-              disabled={isRecovering}
-              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              {isRecovering ? 'Restoring...' : '⚡ 1-Click Restore 105 Marathi/English Products'}
-            </button>
+            {shopProfile?.business_type === 'HOMEMADE_FOOD' ? (
+              <button
+                onClick={async () => {
+                  setIsRecovering(true);
+                  try {
+                    await HomemadeFoodService.seedHomemadeFoodCatalog();
+                  } finally {
+                    setIsRecovering(false);
+                  }
+                }}
+                disabled={isRecovering}
+                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                {isRecovering ? 'Loading Menu...' : '🍲 1-Click Load Homemade Food Menu'}
+              </button>
+            ) : (
+              <button
+                onClick={async () => {
+                  setIsRecovering(true);
+                  try {
+                    await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+                  } finally {
+                    setIsRecovering(false);
+                  }
+                }}
+                disabled={isRecovering}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                {isRecovering ? 'Restoring...' : '⚡ 1-Click Restore 105 Marathi/English Products'}
+              </button>
+            )}
             <button
               onClick={async () => {
                 setIsRecovering(true);
                 try {
                   const res = await cloudSyncService.restoreProductsFromCloudOrArchive();
                   if (res.restoredCount === 0) {
-                    await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+                    if (shopProfile?.business_type === 'HOMEMADE_FOOD') {
+                      await HomemadeFoodService.seedHomemadeFoodCatalog();
+                    } else {
+                      await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+                    }
                   }
                 } finally {
                   setIsRecovering(false);
@@ -135,7 +170,7 @@ const MainApp: React.FC = () => {
               className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
             >
               <CloudDownload className="w-3.5 h-3.5" />
-              ☁️ Recover from Cloud / Archive
+              {isRecovering ? 'Restoring...' : '☁️ Cloud Restore'}
             </button>
             <button
               onClick={() => setActiveTab('inventory')}

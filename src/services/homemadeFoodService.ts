@@ -11,6 +11,7 @@ import {
   SalesInvoice,
   SaleItem,
   ExpenseAndDrawing,
+  BusinessWorkspaceRecord,
   WALK_IN_CUSTOMER_ID,
   WALK_IN_CUSTOMER_RECORD,
   InventoryLog,
@@ -283,9 +284,14 @@ export class HomemadeFoodService {
   /**
    * Resets in-memory workspace snapshots (used when wiping records or between isolated tests)
    */
-  static resetWorkspaceSnapshots(): void {
+  static async resetWorkspaceSnapshots(): Promise<void> {
     for (const key of Object.keys(inMemoryWorkspaces)) {
       delete inMemoryWorkspaces[key];
+    }
+    try {
+      await db.business_workspaces.clear();
+    } catch {
+      // Ignore if table not yet initialized
     }
   }
 
@@ -410,9 +416,10 @@ export class HomemadeFoodService {
     const currentProfile = await db.getShopProfile();
     const currentBusinessType: BusinessType = currentProfile?.business_type || 'KIRANA_RETAIL';
 
-    // 1. Save current business snapshot before switching
-    const currentSnapshot = {
-      shop_profile: currentProfile,
+    // 1. Save current business snapshot before switching to IndexedDB (unlimited quota) + inMemory
+    const currentSnapshot: BusinessWorkspaceRecord = {
+      business_type: currentBusinessType,
+      shop_profile: currentProfile || DEFAULT_SHOP_PROFILE,
       products: await db.products.toArray(),
       inventory_logs: await db.inventory_logs.toArray(),
       customers: await db.customers.toArray(),
@@ -424,28 +431,29 @@ export class HomemadeFoodService {
       advance_orders: await db.advance_orders.toArray(),
       loan_accounts: await db.loan_accounts.toArray(),
       wholesalers: await db.wholesalers.toArray(),
+      updated_at: new Date().toISOString(),
     };
 
     const currentKey = getWorkspaceStorageKey(currentBusinessType);
     inMemoryWorkspaces[currentKey] = currentSnapshot;
     try {
+      await db.business_workspaces.put(currentSnapshot);
+    } catch (e) {
+      console.warn('Failed to save workspace snapshot to IndexedDB:', e);
+    }
+    try {
       if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(currentKey, JSON.stringify(currentSnapshot));
+        localStorage.setItem(currentKey, JSON.stringify({ business_type: currentBusinessType, saved: true }));
       }
     } catch {
-      // Ignore localStorage quota limits; inMemoryWorkspaces holds full data
+      // Ignore
     }
 
-    // 2. Load target business snapshot if it exists
+    // 2. Load target business snapshot from IndexedDB first, then inMemory
     const targetKey = getWorkspaceStorageKey(targetBusinessType);
-    let targetSnapshot = inMemoryWorkspaces[targetKey];
-    if (!targetSnapshot && typeof localStorage !== 'undefined') {
-      try {
-        const raw = localStorage.getItem(targetKey);
-        if (raw) targetSnapshot = JSON.parse(raw);
-      } catch {
-        targetSnapshot = null;
-      }
+    let targetSnapshot = await db.business_workspaces.get(targetBusinessType);
+    if (!targetSnapshot && inMemoryWorkspaces[targetKey]) {
+      targetSnapshot = inMemoryWorkspaces[targetKey];
     }
 
     const targetShopId = targetBusinessType === 'HOMEMADE_FOOD' ? 'homemade_food_shop' : 'current_shop';
