@@ -478,6 +478,7 @@ export async function bulkImportKiranaProducts(
     const productRecord: Product = {
       id: existingMatch?.id || `prod-105-${Date.now()}-${index}`,
       shop_id: shopId,
+      business_type: 'KIRANA_RETAIL',
       name: bilingualDisplayName,
       marathi_name: marathi,
       search_keywords: combinedKeywords,

@@ -3,11 +3,38 @@
 
 export type BusinessType = 'KIRANA_RETAIL' | 'HOMEMADE_FOOD';
 
+export const KIRANA_CATEGORIES = [
+  'All Categories',
+  'Dals & Pulses',
+  'Grains & Flours',
+  'Spices & Masala',
+  'Edible Oil & Ghee',
+  'Packaged Food & Snacks',
+  'Beverages & Tea/Coffee',
+  'Personal Care',
+  'Cleaning & Household',
+  'Puja Needs',
+  'General & Hardware',
+  'Vegetables',
+  'Paan & Tobacco',
+];
+
+export const HOMEMADE_FOOD_CATEGORIES = [
+  'All Homemade Items',
+  'Traditional Laddus (लाडू)',
+  'Modak & Festive Specials (मोदक / पुरणपोळी)',
+  'Konkani Breakfast (घावणे / आंबोळी)',
+  'Fresh Bhakri & Chapati (भाकरी / चपाती)',
+  'Homemade Vadi & Kapa (खोबऱ्याच्या कापा)',
+  'Homemade Pickles & Chutney (लोणचे / चटणी)',
+];
+
 export type UnitType = 'PCS' | 'KG_LOOSE' | 'LTR' | 'PACK' | 'PLATE' | 'DOZEN';
 
 export interface Product {
   id: string; // UUID PK
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  business_type?: BusinessType; // 'KIRANA_RETAIL' | 'HOMEMADE_FOOD' (indexed)
   name: string; // Text (English or Bilingual display name)
   marathi_name?: string; // Marathi product name (e.g. "तूर डाळ", "पारले-जी")
   search_keywords?: string; // Hidden background POS search keywords (e.g. "toor dal, arhar dal, turdal, तुरीची डाळ, dal")
@@ -33,6 +60,7 @@ export interface Product {
 export interface LoanAccount {
   id: string; // UUID PK (e.g. "loan-1730000000-xyz")
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  business_type?: BusinessType;
   name: string; // e.g. "Mudra Loan ₹50,000", "Bajaj Finserv OD", "Wholesaler Credit Line"
   lender_name: string; // e.g. "State Bank of India", "Rameshwar Trader Credit"
   principal_amount: number; // Numeric 10,2 (Total sanctioned loan amount)
@@ -48,6 +76,7 @@ export interface LoanAccount {
 export interface Wholesaler {
   id: string; // UUID PK (e.g. "ws-1730000000-xyz")
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  business_type?: BusinessType;
   name: string; // e.g. "Rameshwar Bhai" or "APMC Mandi Sugar Mill"
   agency_or_brand?: string; // e.g. "HUL Distributor", "APMC Grain Merchant", "Amul Dairy"
   phone: string; // 10-digit Indian mobile number for direct WhatsApp / SMS orders
@@ -75,6 +104,7 @@ export type InventoryReason =
 export interface InventoryLog {
   id: string; // UUID PK
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  business_type?: BusinessType;
   product_id: string; // UUID FK
   change_qty: number; // Numeric 10,3 (signed: + or -)
   reason_type: InventoryReason;
@@ -88,6 +118,7 @@ export interface InventoryLog {
 export interface Customer {
   id: string; // UUID PK
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  business_type?: BusinessType;
   name: string; // Text
   phone: string; // Text (10-digit Indian WhatsApp number)
   address_landmark?: string | null; // Text
@@ -118,6 +149,7 @@ export interface CreditNote {
 export interface SalesInvoice {
   id: string; // UUID PK
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  business_type?: BusinessType;
   invoice_number: string; // Text, e.g. INV-20261030-001
   customer_id: string; // UUID FK
   subtotal_amount: number; // Numeric 10,2
@@ -137,6 +169,7 @@ export interface SalesInvoice {
 export interface SaleItem {
   id: string; // UUID PK
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  business_type?: BusinessType;
   invoice_id: string; // UUID FK
   product_id: string; // UUID FK
   product_name_snapshot: string;
@@ -153,6 +186,7 @@ export type KhataPaymentChannel = 'BILL_CREDIT' | 'CASH' | 'UPI' | 'DISCOUNT_SET
 export interface KhataTransaction {
   id: string; // UUID PK
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  business_type?: BusinessType;
   customer_id: string; // UUID FK
   entry_type: KhataEntryType;
   amount: number; // Numeric 10,2
@@ -199,6 +233,7 @@ export interface StoreUser {
 export interface ExpenseAndDrawing {
   id: string; // UUID PK
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  business_type?: BusinessType;
   entry_type?: ExpenseEntryType; // 'INITIAL_INVESTMENT' | 'RAW_MATERIAL_EXPENSE' | 'BUSINESS_EXPENSE' | 'HOME_FAMILY_EXPENSE'
   category: ExpenseCategory;
   amount: number; // Numeric 10,2
@@ -210,6 +245,7 @@ export interface ExpenseAndDrawing {
 export interface DailyGallaSession {
   id: string; // UUID PK
   shop_id?: string; // Multi-tenant Shop ID (indexed)
+  business_type?: BusinessType;
   session_date: string; // Date Unique: YYYY-MM-DD
   opening_cash: number; // Numeric 10,2
   cash_sales_total: number; // Numeric 10,2
@@ -257,6 +293,7 @@ export interface AdvanceOrderItem {
 export interface AdvanceOrder {
   id: string;
   shop_id?: string;
+  business_type?: BusinessType;
   order_number: string;
   customer_id?: string | null;
   customer_name: string;

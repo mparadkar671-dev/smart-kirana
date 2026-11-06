@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { Product, InventoryLog, ExpenseAndDrawing, UnitType, InventoryReason } from '../types';
+import { Product, InventoryLog, ExpenseAndDrawing, UnitType, InventoryReason, BusinessType } from '../types';
 import { roundQty, roundCurrency, calculateProfitMarginPercent } from '../utils/math';
 import { generateUniqueStoreBarcode } from '../utils/barcodeGenerator';
 import { cloudSyncService } from './cloudSyncService';
@@ -24,6 +24,7 @@ export interface CreateProductInput {
   image_url?: string | null;
   expiry_date?: string | null;
   is_quick_tap: boolean;
+  business_type?: BusinessType;
 }
 
 export class InventoryService {
@@ -39,8 +40,14 @@ export class InventoryService {
       barcode = generateUniqueStoreBarcode(existingSet);
     }
 
+    const shopProfile = await db.getShopProfile();
+    const defaultBiz: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+    const resolvedBiz: BusinessType = input.business_type || defaultBiz;
+
     const newProduct: Product = {
       id,
+      shop_id: shopProfile?.id || 'current_shop',
+      business_type: resolvedBiz,
       name: input.name.trim(),
       marathi_name: input.marathi_name?.trim() || undefined,
       search_keywords: input.search_keywords?.trim() || undefined,
@@ -69,6 +76,8 @@ export class InventoryService {
       if (newProduct.current_stock > 0) {
         const log: InventoryLog = {
           id: `log-${Date.now()}-init`,
+          shop_id: newProduct.shop_id || 'current_shop',
+          business_type: resolvedBiz,
           product_id: newProduct.id,
           change_qty: newProduct.current_stock,
           reason_type: 'PURCHASE_IN',
@@ -253,6 +262,7 @@ export class InventoryService {
       newLog = {
         id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         shop_id: product.shop_id || 'current_shop',
+        business_type: product.business_type || 'KIRANA_RETAIL',
         product_id: params.productId,
         change_qty: roundQty(params.qty),
         reason_type: params.reasonType || 'PURCHASE_IN',
@@ -319,6 +329,7 @@ export class InventoryService {
         newExpense = {
           id: linkedExpenseId,
           shop_id: product.shop_id || 'current_shop',
+          business_type: product.business_type || 'KIRANA_RETAIL',
           category: 'HOME_SELF_USE_GOODS',
           amount: homeValuation,
           paid_via: 'INVENTORY_DEDUCTION',
@@ -335,6 +346,7 @@ export class InventoryService {
       newLog = {
         id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         shop_id: product.shop_id || 'current_shop',
+        business_type: product.business_type || 'KIRANA_RETAIL',
         product_id: params.productId,
         change_qty: roundQty(-params.qty),
         reason_type: params.reasonType,

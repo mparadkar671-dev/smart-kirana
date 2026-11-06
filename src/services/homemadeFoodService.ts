@@ -11,10 +11,10 @@ import {
   SalesInvoice,
   SaleItem,
   ExpenseAndDrawing,
-  BusinessWorkspaceRecord,
   WALK_IN_CUSTOMER_ID,
   WALK_IN_CUSTOMER_RECORD,
   InventoryLog,
+  BusinessWorkspaceRecord,
 } from '../types';
 import { DEFAULT_SHOP_PROFILE } from '../db/seed';
 import { generateUniqueStoreBarcode } from '../utils/barcodeGenerator';
@@ -273,6 +273,90 @@ export function generateHomemadeFoodThumbnail(item: {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+/**
+ * Detects whether a product belongs to Homemade Food / Gruh Udyog based on name, Marathi name, or category
+ */
+export function isHomemadeFoodCategoryOrName(item: {
+  name?: string;
+  marathi_name?: string;
+  category?: string;
+}): boolean {
+  const text = `${item.name || ''} ${item.marathi_name || ''} ${item.category || ''}`.toLowerCase();
+
+  const homemadeKeywords = [
+    'puran poli',
+    'पुरणपोळी',
+    'मोदक',
+    'modak',
+    'लाडू',
+    'laddu',
+    'ladoo',
+    'घावणे',
+    'ghavane',
+    'आंबोळी',
+    'amboli',
+    'भाकरी',
+    'bhakri',
+    'चपाती',
+    'chapati',
+    'कापा',
+    'kapa',
+    'vadi',
+    'वड्या',
+    'खोबऱ्या',
+    'festive specials',
+    'konkani',
+    'fresh tiffin',
+    'gruh udyog',
+    'homemade',
+  ];
+
+  return homemadeKeywords.some((kw) => text.includes(kw));
+}
+
+/**
+ * Deterministic cleanup pass over db.products to ensure every product is tagged with its correct business_type
+ */
+export async function repairMixedBusinessProducts(): Promise<{
+  repairedCount: number;
+  homemadeCount: number;
+  kiranaCount: number;
+}> {
+  const allProducts = await db.products.toArray();
+  let repairedCount = 0;
+  let homemadeCount = 0;
+  let kiranaCount = 0;
+
+  const updates: Product[] = [];
+
+  for (const prod of allProducts) {
+    const shouldBeHomemade = isHomemadeFoodCategoryOrName(prod);
+    const expectedType: BusinessType = shouldBeHomemade ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL';
+
+    if (prod.business_type !== expectedType) {
+      prod.business_type = expectedType;
+      updates.push(prod);
+      repairedCount++;
+    }
+
+    if (expectedType === 'HOMEMADE_FOOD') homemadeCount++;
+    else kiranaCount++;
+  }
+
+  if (updates.length > 0) {
+    await db.products.bulkPut(updates);
+    try {
+      for (const p of updates) {
+        await cloudSyncService.syncProduct(p);
+      }
+    } catch {
+      // Ignore in offline/test
+    }
+  }
+
+  return { repairedCount, homemadeCount, kiranaCount };
+}
+
 // In-memory + localStorage workspace snapshots for instantaneous 0ms multi-business switching
 const inMemoryWorkspaces: Record<string, any> = {};
 
@@ -281,6 +365,17 @@ function getWorkspaceStorageKey(businessType: BusinessType): string {
 }
 
 export class HomemadeFoodService {
+  /**
+   * Scans all products and repairs/reassigns business_type based on categories and keywords.
+   */
+  static async repairMixedBusinessProducts(): Promise<{
+    repairedCount: number;
+    homemadeCount: number;
+    kiranaCount: number;
+  }> {
+    return repairMixedBusinessProducts();
+  }
+
   /**
    * Resets in-memory workspace snapshots (used when wiping records or between isolated tests)
    */
@@ -331,6 +426,7 @@ export class HomemadeFoodService {
       const prod: Product = {
         id: existing?.id || id,
         shop_id: shopId,
+        business_type: 'HOMEMADE_FOOD',
         name: `${item.marathiName} (${item.englishName})`,
         marathi_name: item.marathiName,
         search_keywords: item.searchKeywords,
@@ -366,6 +462,7 @@ export class HomemadeFoodService {
         logsToPut.push({
           id: `hmf-init-log-${prod.id}`,
           shop_id: shopId,
+          business_type: 'HOMEMADE_FOOD',
           product_id: prod.id,
           change_qty: prod.current_stock,
           reason_type: 'BATCH_MADE_IN',
@@ -384,7 +481,7 @@ export class HomemadeFoodService {
       }
     });
 
-    cloudSyncService.syncAllToCloud().catch(() => {});
+    cloudSyncService.syncAllToCloud().catch(() => { });
 
     const totalProducts = await db.products.count();
     return {
@@ -530,8 +627,8 @@ export class HomemadeFoodService {
               targetBusinessType === 'HOMEMADE_FOOD'
                 ? 'Laxmi Vatsalya Gruh Udyog (Homemade Foods)'
                 : currentProfile?.shop_name?.includes('Gruh Udyog')
-                ? 'Laxmi Vatsalya General Store'
-                : currentProfile?.shop_name || DEFAULT_SHOP_PROFILE.shop_name,
+                  ? 'Laxmi Vatsalya General Store'
+                  : currentProfile?.shop_name || DEFAULT_SHOP_PROFILE.shop_name,
             owner_name: currentProfile?.owner_name || DEFAULT_SHOP_PROFILE.owner_name,
             phone: currentProfile?.phone || DEFAULT_SHOP_PROFILE.phone,
             upi_vpa: currentProfile?.upi_vpa || DEFAULT_SHOP_PROFILE.upi_vpa,
@@ -555,6 +652,8 @@ export class HomemadeFoodService {
         await this.seedHomemadeFoodCatalog();
       }
     }
+
+    await repairMixedBusinessProducts();
 
     const activeProfile = await db.getShopProfile();
     const productCount = await db.products.count();
@@ -884,8 +983,8 @@ export class HomemadeFoodService {
     const capitalRecoveredPct =
       totalInitialInvestmentAllTime > 0
         ? roundCurrency(
-            Math.min(100, Math.max(0, (Math.max(0, cumulativeTrueNetProfit) / totalInitialInvestmentAllTime) * 100))
-          )
+          Math.min(100, Math.max(0, (Math.max(0, cumulativeTrueNetProfit) / totalInitialInvestmentAllTime) * 100))
+        )
         : 100;
     const remainingToBreakEven = roundCurrency(
       Math.max(0, totalInitialInvestmentAllTime - Math.max(0, cumulativeTrueNetProfit))

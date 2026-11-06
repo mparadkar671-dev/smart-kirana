@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Product, UnitType, Wholesaler, LoanAccount } from '../../types';
+import { Product, UnitType, Wholesaler, LoanAccount, BusinessType, KIRANA_CATEGORIES, HOMEMADE_FOOD_CATEGORIES } from '../../types';
 import { CreateProductInput, InventoryService } from '../../services/inventoryService';
 import { WholesalerService } from '../../services/wholesalerService';
 import { LoanAccountService } from '../../services/loanAccountService';
@@ -27,42 +27,28 @@ interface ProductModalProps {
   onClose: () => void;
   productToEdit?: Product | null;
   onSaved: () => void;
+  businessType?: BusinessType;
 }
-
-const CATEGORIES = [
-  'Groceries',
-  'Loose Staples',
-  'Homemade Laddus & Sweets',
-  'Festival Specials',
-  'Konkani Breakfast',
-  'Fresh Bhakri & Chapati',
-  'Dairy',
-  'Bakery & Dairy',
-  'Oils',
-  'Spices',
-  'Snacks & Biscuits',
-  'Instant Food',
-  'Flours',
-  'Grains & Rice',
-  'Beverages',
-  'Personal Care',
-  'Cleaning & Household',
-  'General',
-];
 
 export const ProductModal: React.FC<ProductModalProps> = ({
   isOpen,
   onClose,
   productToEdit,
   onSaved,
+  businessType,
 }) => {
+  const effectiveBusinessType: BusinessType =
+    productToEdit?.business_type || businessType || 'KIRANA_RETAIL';
+  const isHomemade = effectiveBusinessType === 'HOMEMADE_FOOD';
+  const activeCategories = isHomemade ? HOMEMADE_FOOD_CATEGORIES : KIRANA_CATEGORIES;
+
   const [formData, setFormData] = useState<CreateProductInput>({
     name: '',
     marathi_name: '',
     search_keywords: '',
     short_code: '',
     barcode: '',
-    category: 'Groceries',
+    category: isHomemade ? HOMEMADE_FOOD_CATEGORIES[0] : 'Groceries',
     unit_type: 'PCS',
     purchase_price: 0,
     selling_price: 0,
@@ -76,6 +62,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     image_url: null,
     expiry_date: null,
     is_quick_tap: false,
+    business_type: effectiveBusinessType,
   });
 
   const [wholesalers, setWholesalers] = useState<Wholesaler[]>([]);
@@ -102,7 +89,9 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const loadWholesalers = async () => {
     try {
       const list = await WholesalerService.getAll();
-      setWholesalers(list);
+      setWholesalers(
+        list.filter((w) => !w.business_type || w.business_type === effectiveBusinessType)
+      );
     } catch {
       setWholesalers([]);
     }
@@ -157,6 +146,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         image_url: productToEdit.image_url || null,
         expiry_date: productToEdit.expiry_date || null,
         is_quick_tap: productToEdit.is_quick_tap,
+        business_type: productToEdit.business_type || effectiveBusinessType,
       });
     } else {
       setIsFromLoan(false);
@@ -168,7 +158,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         search_keywords: '',
         short_code: '',
         barcode: initialBarcode,
-        category: 'Groceries',
+        category: isHomemade ? HOMEMADE_FOOD_CATEGORIES[0] : 'Groceries',
         unit_type: 'PCS',
         purchase_price: 0,
         selling_price: 0,
@@ -182,6 +172,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         image_url: null,
         expiry_date: null,
         is_quick_tap: false,
+        business_type: effectiveBusinessType,
       });
       generateFreshBarcode().then((uniqueCode) => {
         setFormData((prev) => ({
@@ -355,9 +346,15 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
     try {
       if (productToEdit) {
-        await InventoryService.updateProduct(productToEdit.id, formData);
+        await InventoryService.updateProduct(productToEdit.id, {
+          ...formData,
+          business_type: productToEdit.business_type || effectiveBusinessType,
+        });
       } else {
-        await InventoryService.createProduct(formData);
+        await InventoryService.createProduct({
+          ...formData,
+          business_type: effectiveBusinessType,
+        });
       }
       onSaved();
       onClose();
@@ -376,10 +373,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60">
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-              {productToEdit ? 'Edit Product' : 'Add New Kirana Product'}
+              {productToEdit
+                ? (isHomemade ? 'Edit Homemade Food Product' : 'Edit Product')
+                : (isHomemade ? 'Add New Homemade Food Product' : 'Add New Kirana Product')}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Configure inventory item, GS1 barcode, wholesaler link, and image
+              {isHomemade
+                ? 'Configure authentic Konkani/Maharashtrian food items, batch pricing, and packaging'
+                : 'Configure inventory item, GS1 barcode, wholesaler link, and image'}
             </p>
           </div>
           <button
@@ -531,11 +532,12 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 Category
               </label>
               <select
+                data-testid="product-category-select"
                 value={formData.category}
                 onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
               >
-                {CATEGORIES.map((c) => (
+                {Array.from(new Set([formData.category, ...activeCategories])).filter(Boolean).map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>

@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { Wholesaler, Product } from '../types';
+import { Wholesaler, Product, BusinessType } from '../types';
 import { cloudSyncService } from './cloudSyncService';
 import { roundQty } from '../utils/math';
 
@@ -15,13 +15,14 @@ export interface CreateWholesalerInput {
   address_city?: string;
   gst_number?: string;
   notes?: string;
+  business_type?: BusinessType;
 }
 
 export class WholesalerService {
   /**
    * Retrieves all registered wholesalers for the active shop
    */
-  static async getAll(shopId?: string): Promise<Wholesaler[]> {
+  static async getAll(shopId?: string, businessType?: BusinessType): Promise<Wholesaler[]> {
     const targetShopId =
       shopId ||
       (typeof localStorage !== 'undefined'
@@ -31,12 +32,13 @@ export class WholesalerService {
     return all.filter(
       (w) =>
         (!w.shop_id || w.shop_id === targetShopId || w.shop_id === 'current_shop') &&
-        w.is_active !== false
+        w.is_active !== false &&
+        (!businessType || !w.business_type || w.business_type === businessType)
     );
   }
 
-  static async getAllWholesalers(shopId?: string): Promise<Wholesaler[]> {
-    return this.getAll(shopId);
+  static async getAllWholesalers(shopId?: string, businessType?: BusinessType): Promise<Wholesaler[]> {
+    return this.getAll(shopId, businessType);
   }
 
   static async createWholesaler(input: CreateWholesalerInput): Promise<Wholesaler> {
@@ -94,9 +96,13 @@ export class WholesalerService {
     const id = `ws-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
 
+    const profile = await db.getShopProfile();
+    const targetBusinessType: BusinessType = input.business_type || profile?.business_type || 'KIRANA_RETAIL';
+
     const newWholesaler: Wholesaler = {
       id,
       shop_id: shopId,
+      business_type: targetBusinessType,
       name: input.name.trim(),
       agency_or_brand: input.agency_or_brand?.trim() || input.notes?.trim() || '',
       phone: cleanPhone.slice(-10),

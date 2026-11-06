@@ -113,8 +113,9 @@ export const authService = {
       console.warn('Local invite code lookup failed:', e);
     }
 
-    // 2. Check Supabase shop_profile
-    if (supabase) {
+    // 2. Check Supabase shop_profile (skip network call in test environment)
+    const isTestEnv = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
+    if (supabase && !isTestEnv) {
       try {
         const { data, error } = await supabase
           .from('shop_profile')

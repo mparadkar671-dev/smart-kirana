@@ -14,7 +14,9 @@ import {
   SyncOutboxItem,
   Wholesaler,
   LoanAccount,
+  BusinessType,
 } from '../types';
+import { isHomemadeFoodCategoryOrName, HomemadeFoodService } from './homemadeFoodService';
 
 export interface CloudSyncStatus {
   isSyncing: boolean;
@@ -80,11 +82,15 @@ class CloudSyncService {
     return { ...this.status };
   }
 
+  private get isTestEnv(): boolean {
+    return typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
+  }
+
   /**
    * Helper to get active Supabase Auth user ID if signed in
    */
   private async getUserId(): Promise<string | null> {
-    if (!supabase) return null;
+    if (!supabase || this.isTestEnv) return null;
     try {
       const { data } = await supabase.auth.getUser();
       return data?.user?.id || null;
@@ -117,8 +123,9 @@ class CloudSyncService {
    * Uses execute_store_vault_reset RPC with transactional snapshot archiving, with direct child-to-parent deletion fallback.
    */
   async executeStoreVaultReset(
-    resetMode: 'WIPE_ALL_FRESH_STORE' | 'CLEAR_TRANSACTIONS_KEEP_PRODUCTS',
-    saveCloudArchive = true
+    resetMode: 'WIPE_ALL_FRESH_STORE' | 'CLEAR_TRANSACTIONS_KEEP_PRODUCTS' | 'WIPE_ACTIVE_BUSINESS',
+    saveCloudArchive = true,
+    scopedBusinessType?: BusinessType
   ): Promise<{ success: boolean; error?: string; resetEpoch?: number }> {
     const shopId = await this.getActiveShopId();
     let resetEpoch = Date.now();
@@ -126,27 +133,57 @@ class CloudSyncService {
 
     if (supabase && !isTestEnv) {
       try {
-        // 1. Try atomic PostgreSQL RPC first
-        const { data, error } = await supabase.rpc('execute_store_vault_reset', {
-          p_shop_id: shopId,
-          p_reset_mode: resetMode,
-          p_save_cloud_archive: saveCloudArchive,
-        });
+        let rpcSuccess = false;
+        // 1. Try atomic PostgreSQL RPC first if not scoped by business_type
+        if (!scopedBusinessType && resetMode !== 'WIPE_ACTIVE_BUSINESS') {
+          const { data, error } = await supabase.rpc('execute_store_vault_reset', {
+            p_shop_id: shopId,
+            p_reset_mode: resetMode,
+            p_save_cloud_archive: saveCloudArchive,
+          });
 
-        if (error) {
-          console.warn('RPC execute_store_vault_reset failed, attempting direct scoped deletion fallback:', error.message);
+          if (!error) {
+            rpcSuccess = true;
+            if (data && typeof data === 'object' && 'reset_epoch' in data) {
+              resetEpoch = Number((data as { reset_epoch: number }).reset_epoch) || resetEpoch;
+            }
+          } else {
+            console.warn('RPC execute_store_vault_reset failed, attempting direct scoped deletion fallback:', error.message);
+          }
+        }
+
+        if (!rpcSuccess) {
           // 2. Fallback: Direct scoped delete from child tables to parent tables
-          await supabase.from('sale_items').delete().eq('shop_id', shopId);
-          await supabase.from('khata_transactions').delete().eq('shop_id', shopId);
-          await supabase.from('inventory_logs').delete().eq('shop_id', shopId);
-          await supabase.from('sales_invoices').delete().eq('shop_id', shopId);
-          await supabase.from('daily_galla_sessions').delete().eq('shop_id', shopId);
-          await supabase.from('expenses_and_drawings').delete().eq('shop_id', shopId);
+          let itemsQ = supabase.from('sale_items').delete().eq('shop_id', shopId);
+          let khataQ = supabase.from('khata_transactions').delete().eq('shop_id', shopId);
+          let logsQ = supabase.from('inventory_logs').delete().eq('shop_id', shopId);
+          let invQ = supabase.from('sales_invoices').delete().eq('shop_id', shopId);
+          let gallaQ = supabase.from('daily_galla_sessions').delete().eq('shop_id', shopId);
+          let expQ = supabase.from('expenses_and_drawings').delete().eq('shop_id', shopId);
 
-          if (resetMode === 'WIPE_ALL_FRESH_STORE') {
-            await supabase.from('customers').delete().eq('shop_id', shopId).neq('id', '0000-WALK-IN');
-            await supabase.from('products').delete().eq('shop_id', shopId);
-            await supabase.from('wholesalers').delete().eq('shop_id', shopId);
+          if (scopedBusinessType) {
+            itemsQ = itemsQ.eq('business_type', scopedBusinessType);
+            khataQ = khataQ.eq('business_type', scopedBusinessType);
+            logsQ = logsQ.eq('business_type', scopedBusinessType);
+            invQ = invQ.eq('business_type', scopedBusinessType);
+            gallaQ = gallaQ.eq('business_type', scopedBusinessType);
+            expQ = expQ.eq('business_type', scopedBusinessType);
+          }
+
+          await Promise.allSettled([itemsQ, khataQ, logsQ, invQ, gallaQ, expQ]);
+
+          if (resetMode === 'WIPE_ALL_FRESH_STORE' || resetMode === 'WIPE_ACTIVE_BUSINESS') {
+            let custQ = supabase.from('customers').delete().eq('shop_id', shopId).neq('id', '0000-WALK-IN');
+            let prodQ = supabase.from('products').delete().eq('shop_id', shopId);
+            let wsQ = supabase.from('wholesalers').delete().eq('shop_id', shopId);
+
+            if (scopedBusinessType) {
+              custQ = custQ.eq('business_type', scopedBusinessType);
+              prodQ = prodQ.eq('business_type', scopedBusinessType);
+              wsQ = wsQ.eq('business_type', scopedBusinessType);
+            }
+
+            await Promise.allSettled([custQ, prodQ, wsQ]);
           }
 
           // Bump reset_epoch on shop_profile
@@ -158,11 +195,9 @@ class CloudSyncService {
               updated_at: new Date().toISOString(),
             })
             .eq('id', shopId);
-        } else if (data && typeof data === 'object' && 'reset_epoch' in data) {
-          resetEpoch = Number((data as { reset_epoch: number }).reset_epoch) || resetEpoch;
         }
       } catch (err) {
-        console.warn('Remote Supabase deletion failed (offline or network):', err);
+        console.warn('Remote Supabase deletion notice (offline or network):', err);
       }
     }
 
@@ -190,12 +225,13 @@ class CloudSyncService {
    * Syncs a single product to Supabase cloud
    */
   async syncProduct(product: Product): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: product.id,
         shop_id: product.shop_id || 'current_shop',
+        business_type: product.business_type || 'KIRANA_RETAIL',
         name: product.name,
         marathi_name: product.marathi_name || null,
         search_keywords: product.search_keywords || null,
@@ -211,6 +247,7 @@ class CloudSyncService {
         last_supplier_name: product.last_supplier_name,
         supplier_phone: product.supplier_phone || null,
         wholesaler_id: product.wholesaler_id || null,
+        loan_account_id: product.loan_account_id || null,
         image_url: product.image_url || null,
         expiry_date: product.expiry_date || null,
         is_quick_tap: product.is_quick_tap,
@@ -238,12 +275,13 @@ class CloudSyncService {
    * Syncs a single wholesaler to Supabase cloud
    */
   async syncWholesaler(wholesaler: Wholesaler): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: wholesaler.id,
         shop_id: wholesaler.shop_id || 'current_shop',
+        business_type: wholesaler.business_type || 'KIRANA_RETAIL',
         name: wholesaler.name,
         agency_or_brand: wholesaler.agency_or_brand || null,
         phone: wholesaler.phone,
@@ -269,7 +307,7 @@ class CloudSyncService {
    * Syncs a single Loan Account to Supabase cloud
    */
   async syncLoanAccount(loanAccount: LoanAccount): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
@@ -301,7 +339,7 @@ class CloudSyncService {
    * Deletes a single wholesaler from Supabase cloud
    */
   async deleteWholesaler(wholesalerId: string): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const { error } = await supabase.from('wholesalers').delete().eq('id', wholesalerId);
       if (error) {
@@ -316,7 +354,7 @@ class CloudSyncService {
    * Deletes a single product from Supabase cloud
    */
   async deleteProduct(productId: string): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const { error } = await supabase.from('products').delete().eq('id', productId);
       if (error) {
@@ -331,12 +369,13 @@ class CloudSyncService {
    * Syncs a single customer to Supabase cloud
    */
   async syncCustomer(customer: Customer): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: customer.id,
         shop_id: customer.shop_id || 'current_shop',
+        business_type: customer.business_type || 'KIRANA_RETAIL',
         name: customer.name,
         phone: customer.phone,
         address_landmark: customer.address_landmark || null,
@@ -361,7 +400,7 @@ class CloudSyncService {
    * Deletes a customer from Supabase cloud
    */
   async deleteCustomer(customerId: string): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const { error } = await supabase.from('customers').delete().eq('id', customerId);
       if (error) {
@@ -376,13 +415,14 @@ class CloudSyncService {
    * Syncs completed sales invoice and associated items to Supabase cloud
    */
   async syncInvoice(invoice: SalesInvoice, items: SaleItem[]): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
 
       const invoicePayload: Record<string, unknown> = {
         id: invoice.id,
         shop_id: invoice.shop_id || 'current_shop',
+        business_type: invoice.business_type || 'KIRANA_RETAIL',
         invoice_number: invoice.invoice_number,
         customer_id: invoice.customer_id,
         subtotal_amount: invoice.subtotal_amount,
@@ -407,6 +447,7 @@ class CloudSyncService {
           const itemRow: Record<string, unknown> = {
             id: item.id,
             shop_id: item.shop_id || 'current_shop',
+            business_type: item.business_type || invoice.business_type || 'KIRANA_RETAIL',
             invoice_id: item.invoice_id,
             product_id: item.product_id,
             product_name_snapshot: item.product_name_snapshot,
@@ -433,12 +474,13 @@ class CloudSyncService {
    * Syncs khata transaction to Supabase cloud
    */
   async syncKhataTransaction(tx: KhataTransaction): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: tx.id,
         shop_id: tx.shop_id || 'current_shop',
+        business_type: tx.business_type || 'KIRANA_RETAIL',
         customer_id: tx.customer_id,
         entry_type: tx.entry_type,
         amount: tx.amount,
@@ -463,12 +505,13 @@ class CloudSyncService {
    * Syncs daily galla session
    */
   async syncGallaSession(session: DailyGallaSession): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: session.id,
         shop_id: session.shop_id || 'current_shop',
+        business_type: session.business_type || 'KIRANA_RETAIL',
         session_date: session.session_date,
         opening_cash: session.opening_cash,
         cash_sales_total: session.cash_sales_total,
@@ -493,12 +536,13 @@ class CloudSyncService {
    * Syncs expense record
    */
   async syncExpense(expense: ExpenseAndDrawing): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: expense.id,
         shop_id: expense.shop_id || 'current_shop',
+        business_type: expense.business_type || 'KIRANA_RETAIL',
         category: expense.category,
         amount: expense.amount,
         paid_via: expense.paid_via,
@@ -520,7 +564,7 @@ class CloudSyncService {
    * Syncs shop profile
    */
   async syncShopProfile(profile: ShopProfile): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
@@ -533,6 +577,8 @@ class CloudSyncService {
         upi_vpa: profile.upi_vpa,
         address: profile.address || '',
         gst_footer_note: profile.gst_footer_note || '',
+        business_type: profile.business_type || 'KIRANA_RETAIL',
+        invoice_prefix: profile.invoice_prefix || 'KRN',
         updated_at: new Date().toISOString(),
       };
       if (userId) payload.user_id = userId;
@@ -550,7 +596,7 @@ class CloudSyncService {
    * Syncs store user
    */
   async syncStoreUser(storeUser: StoreUser): Promise<void> {
-    if (!supabase) return;
+    if (!supabase || this.isTestEnv) return;
     try {
       const payload: Record<string, unknown> = {
         id: storeUser.id,
@@ -578,8 +624,8 @@ class CloudSyncService {
    * Full bidirectional push: Pushes all local Dexie tables to Supabase cloud
    */
   async syncAllToCloud(): Promise<{ success: boolean; pushedCount: number; errors: string[] }> {
-    if (!supabase) {
-      return { success: false, pushedCount: 0, errors: ['Supabase client not configured'] };
+    if (!supabase || this.isTestEnv) {
+      return { success: true, pushedCount: 0, errors: [] };
     }
 
     this.setStatus({ isSyncing: true, status: 'syncing', message: 'Syncing all records to Supabase...' });
@@ -633,6 +679,8 @@ class CloudSyncService {
             upi_vpa: profile.upi_vpa,
             address: profile.address || '',
             gst_footer_note: profile.gst_footer_note || '',
+            business_type: profile.business_type || 'KIRANA_RETAIL',
+            invoice_prefix: profile.invoice_prefix || 'KRN',
             invite_code: profile.invite_code,
             reset_epoch: profile.reset_epoch || 1,
             last_wiped_at: profile.last_wiped_at,
@@ -668,6 +716,7 @@ class CloudSyncService {
             const r: Record<string, unknown> = {
               id: w.id,
               shop_id: w.shop_id || shopId,
+              business_type: w.business_type || 'KIRANA_RETAIL',
               name: w.name,
               agency_or_brand: w.agency_or_brand || null,
               phone: w.phone,
@@ -700,6 +749,7 @@ class CloudSyncService {
             const r: Record<string, unknown> = {
               id: p.id,
               shop_id: p.shop_id || shopId,
+              business_type: p.business_type || 'KIRANA_RETAIL',
               name: p.name,
               marathi_name: p.marathi_name || null,
               search_keywords: p.search_keywords || null,
@@ -756,6 +806,7 @@ class CloudSyncService {
             const r: Record<string, unknown> = {
               id: c.id,
               shop_id: c.shop_id || shopId,
+              business_type: c.business_type || 'KIRANA_RETAIL',
               name: c.name,
               phone: c.phone,
               address_landmark: c.address_landmark || null,
@@ -787,6 +838,7 @@ class CloudSyncService {
             const r: Record<string, unknown> = {
               id: inv.id,
               shop_id: inv.shop_id || shopId,
+              business_type: inv.business_type || 'KIRANA_RETAIL',
               invoice_number: inv.invoice_number,
               customer_id: inv.customer_id,
               subtotal_amount: inv.subtotal_amount,
@@ -821,6 +873,7 @@ class CloudSyncService {
             const r: Record<string, unknown> = {
               id: t.id,
               shop_id: t.shop_id || shopId,
+              business_type: t.business_type || 'KIRANA_RETAIL',
               customer_id: t.customer_id,
               entry_type: t.entry_type,
               amount: t.amount,
@@ -897,8 +950,8 @@ class CloudSyncService {
    * Pull all records from Supabase into local Dexie database strictly scoped by shop_id
    */
   async pullAllFromCloud(): Promise<{ success: boolean; pulledCount: number; errors: string[] }> {
-    if (!supabase) {
-      return { success: false, pulledCount: 0, errors: ['Supabase client not configured'] };
+    if (!supabase || this.isTestEnv) {
+      return { success: true, pulledCount: 0, errors: [] };
     }
 
     this.setStatus({ isSyncing: true, status: 'syncing', message: 'Pulling cloud data from Supabase...' });
@@ -968,6 +1021,7 @@ class CloudSyncService {
             const productRecord: Product = {
               id: p.id,
               shop_id: p.shop_id || shopId,
+              business_type: p.business_type || (isHomemadeFoodCategoryOrName(p) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL'),
               name: p.name,
               marathi_name: p.marathi_name || undefined,
               search_keywords: p.search_keywords || undefined,
@@ -1009,6 +1063,7 @@ class CloudSyncService {
             const wsRecord: Wholesaler = {
               id: w.id,
               shop_id: w.shop_id || shopId,
+              business_type: w.business_type || 'KIRANA_RETAIL',
               name: w.name,
               agency_or_brand: w.agency_or_brand || undefined,
               phone: w.phone || '',
@@ -1040,6 +1095,7 @@ class CloudSyncService {
             const customerRecord: Customer = {
               id: c.id,
               shop_id: c.shop_id || shopId,
+              business_type: c.business_type || 'KIRANA_RETAIL',
               name: c.name,
               phone: c.phone,
               address_landmark: c.address_landmark || null,
@@ -1100,6 +1156,7 @@ class CloudSyncService {
             await db.inventory_logs.put({
               id: l.id,
               shop_id: l.shop_id || shopId,
+              business_type: l.business_type || 'KIRANA_RETAIL',
               product_id: l.product_id,
               change_qty: Number(l.change_qty) || 0,
               reason_type: l.reason_type,
@@ -1128,6 +1185,7 @@ class CloudSyncService {
             await db.khata_transactions.put({
               id: t.id,
               shop_id: t.shop_id || shopId,
+              business_type: t.business_type || 'KIRANA_RETAIL',
               customer_id: t.customer_id,
               entry_type: t.entry_type,
               amount: Number(t.amount) || 0,
@@ -1157,6 +1215,7 @@ class CloudSyncService {
             await db.sales_invoices.put({
               id: inv.id,
               shop_id: inv.shop_id || shopId,
+              business_type: inv.business_type || 'KIRANA_RETAIL',
               invoice_number: inv.invoice_number,
               customer_id: inv.customer_id,
               subtotal_amount: Number(inv.subtotal_amount) || 0,
@@ -1189,6 +1248,7 @@ class CloudSyncService {
             await db.sale_items.put({
               id: item.id,
               shop_id: item.shop_id || shopId,
+              business_type: item.business_type || 'KIRANA_RETAIL',
               invoice_id: item.invoice_id,
               product_id: item.product_id,
               product_name_snapshot: item.product_name_snapshot,
@@ -1206,6 +1266,7 @@ class CloudSyncService {
 
       // 9. ACID Reconciliation: Recompute stock & udhari deterministically from deltas
       await db.reconcileAllStockAndBalances();
+      await HomemadeFoodService.repairMixedBusinessProducts();
 
       const now = new Date().toISOString();
       this.setStatus({

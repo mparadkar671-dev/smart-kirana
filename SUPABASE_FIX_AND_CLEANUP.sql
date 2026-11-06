@@ -732,3 +732,67 @@ SELECT tablename, rowsecurity AS rls_enabled FROM pg_tables
 WHERE schemaname = 'public' 
   AND tablename IN ('shop_profile', 'products', 'inventory_logs', 'customers', 'sales_invoices', 'sale_items', 'khata_transactions', 'expenses_and_drawings', 'daily_galla_sessions', 'store_users')
 ORDER BY tablename ASC;
+
+-- ============================================================================
+-- 10. ADD STRICT business_type ISOLATION COLUMN TO ALL OPERATIONAL TABLES
+-- ============================================================================
+ALTER TABLE public.products 
+  ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'KIRANA_RETAIL'
+  CHECK (business_type IN ('KIRANA_RETAIL', 'HOMEMADE_FOOD'));
+
+ALTER TABLE public.inventory_logs 
+  ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'KIRANA_RETAIL'
+  CHECK (business_type IN ('KIRANA_RETAIL', 'HOMEMADE_FOOD'));
+
+ALTER TABLE public.customers 
+  ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'KIRANA_RETAIL'
+  CHECK (business_type IN ('KIRANA_RETAIL', 'HOMEMADE_FOOD'));
+
+ALTER TABLE public.sales_invoices 
+  ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'KIRANA_RETAIL'
+  CHECK (business_type IN ('KIRANA_RETAIL', 'HOMEMADE_FOOD'));
+
+ALTER TABLE public.sale_items 
+  ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'KIRANA_RETAIL'
+  CHECK (business_type IN ('KIRANA_RETAIL', 'HOMEMADE_FOOD'));
+
+ALTER TABLE public.khata_transactions 
+  ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'KIRANA_RETAIL'
+  CHECK (business_type IN ('KIRANA_RETAIL', 'HOMEMADE_FOOD'));
+
+ALTER TABLE public.expenses_and_drawings 
+  ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'KIRANA_RETAIL'
+  CHECK (business_type IN ('KIRANA_RETAIL', 'HOMEMADE_FOOD'));
+
+ALTER TABLE public.daily_galla_sessions 
+  ADD COLUMN IF NOT EXISTS business_type TEXT NOT NULL DEFAULT 'KIRANA_RETAIL'
+  CHECK (business_type IN ('KIRANA_RETAIL', 'HOMEMADE_FOOD'));
+
+-- Composite indexes for 0ms filtered lookups by (shop_id, business_type)
+CREATE INDEX IF NOT EXISTS idx_products_shop_biz ON public.products(shop_id, business_type);
+CREATE INDEX IF NOT EXISTS idx_inv_logs_shop_biz ON public.inventory_logs(shop_id, business_type);
+CREATE INDEX IF NOT EXISTS idx_customers_shop_biz ON public.customers(shop_id, business_type);
+CREATE INDEX IF NOT EXISTS idx_invoices_shop_biz ON public.sales_invoices(shop_id, business_type);
+CREATE INDEX IF NOT EXISTS idx_expenses_shop_biz ON public.expenses_and_drawings(shop_id, business_type);
+CREATE INDEX IF NOT EXISTS idx_galla_shop_biz ON public.daily_galla_sessions(shop_id, business_type);
+
+-- ============================================================================
+-- 11. AUTO-CLEANUP & SEPARATE ALREADY-MIXED PRODUCTS IN DATABASE
+-- ============================================================================
+-- Tag all Homemade Food categories & items strictly as 'HOMEMADE_FOOD'
+UPDATE public.products
+SET business_type = 'HOMEMADE_FOOD'
+WHERE category ILIKE ANY (ARRAY[
+  '%Modak%', '%Festive%', '%Laddu%', '%Ladoo%', '%Ghavane%', 
+  '%Amboli%', '%Bhakri%', '%Chapati%', '%Poli%', '%Homemade%', '%Gruh Udyog%', '%Kapa%', '%Vadi%'
+])
+OR name ILIKE ANY (ARRAY[
+  '%पुरणपोळी%', '%Puran Poli%', '%मोदक%', '%Modak%', '%लाडू%', '%Laddu%', 
+  '%घावणे%', '%Ghavane%', '%आंबोळी%', '%Amboli%', '%भाकरी%', '%Bhakri%', 
+  '%चपाती%', '%Chapati%', '%कापा%', '%Kapa%'
+]);
+
+-- Tag all Grocery / Kirana categories strictly as 'KIRANA_RETAIL'
+UPDATE public.products
+SET business_type = 'KIRANA_RETAIL'
+WHERE business_type != 'HOMEMADE_FOOD';

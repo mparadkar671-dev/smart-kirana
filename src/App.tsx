@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from './db/db';
+import { BusinessType } from './types';
 import { Shell, ActiveTab } from './components/layout/Shell';
 import { POSView } from './components/pos/POSView';
 import { InventoryView } from './components/inventory/InventoryView';
@@ -14,7 +15,11 @@ import { AuthPage } from './components/auth/AuthPage';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Sparkles, PlusCircle, CloudDownload } from 'lucide-react';
 import { MAHARASHTRA_105_KIRANA_CATALOG, bulkImportKiranaProducts } from './services/csvCatalogImporter';
-import { HomemadeFoodService } from './services/homemadeFoodService';
+import {
+  HomemadeFoodService,
+  isHomemadeFoodCategoryOrName,
+  repairMixedBusinessProducts,
+} from './services/homemadeFoodService';
 import { cloudSyncService } from './services/cloudSyncService';
 
 const MainApp: React.FC = () => {
@@ -29,11 +34,15 @@ const MainApp: React.FC = () => {
     const isTestEnv = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
 
     db.initializeDatabase().then(async () => {
+      await repairMixedBusinessProducts();
       if (!isTestEnv) {
         const profile = await db.getShopProfile();
         const bizType = profile?.business_type || 'KIRANA_RETAIL';
-        const count = await db.products.count();
-        if (count < 10) {
+        const allProds = await db.products.toArray();
+        const bizCount = allProds.filter(
+          (p) => (p.business_type || (isHomemadeFoodCategoryOrName(p) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) === bizType
+        ).length;
+        if (bizCount < 10) {
           if (bizType === 'HOMEMADE_FOOD') {
             await HomemadeFoodService.seedHomemadeFoodCatalog();
           } else {
@@ -68,10 +77,33 @@ const MainApp: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Live queries from Dexie IndexedDB
-  const products = useLiveQuery(() => db.products.toArray(), [], []);
-  const customers = useLiveQuery(() => db.customers.toArray(), [], []);
   const shopProfile = useLiveQuery(() => db.getShopProfile(), []);
+  const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+
+  // Live queries strictly filtered by activeBusinessType
+  const products = useLiveQuery(
+    async () => {
+      const all = await db.products.toArray();
+      return all.filter((p) => {
+        const pType = p.business_type || (isHomemadeFoodCategoryOrName(p) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL');
+        return pType === activeBusinessType;
+      });
+    },
+    [activeBusinessType],
+    []
+  );
+
+  const customers = useLiveQuery(
+    async () => {
+      const all = await db.customers.toArray();
+      return all.filter((c) => {
+        if (c.id === '0000-WALK-IN') return true;
+        return (c.business_type || 'KIRANA_RETAIL') === activeBusinessType;
+      });
+    },
+    [activeBusinessType],
+    []
+  );
 
   if (!isDbReady || authLoading) {
     return (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Product, Customer, ShopProfile, SalesInvoice, SaleItem, WALK_IN_CUSTOMER_ID } from '../../types';
+import { Product, Customer, ShopProfile, SalesInvoice, SaleItem, BusinessType, WALK_IN_CUSTOMER_ID } from '../../types';
 import { LooseItemModal } from './LooseItemModal';
 import { UpiCheckoutModal } from './UpiCheckoutModal';
 import { UdhariCheckoutModal } from './UdhariCheckoutModal';
@@ -7,6 +7,7 @@ import { ReceiptModal } from './ReceiptModal';
 import { AdvanceOrdersModal } from './AdvanceOrdersModal';
 import { BillingService, CartItemInput } from '../../services/billingService';
 import { GallaService } from '../../services/gallaService';
+import { isHomemadeFoodCategoryOrName } from '../../services/homemadeFoodService';
 import { formatINR, roundCurrency, roundQty, toPaise, toRupees } from '../../utils/math';
 import { playBarcodeBeep, playPaymentSuccessChime } from '../../utils/sound';
 import {
@@ -74,12 +75,40 @@ export const POSView: React.FC<POSViewProps> = ({
   shopProfile,
   onCheckoutComplete,
 }) => {
-  // Multi-Cart State: Cart 1, Cart 2, Cart 3 (REQ-07 / AT-06 / Iteration 4)
-  const [carts, setCarts] = useState<CartTab[]>([
+  const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+
+  // Multi-Cart State strictly partitioned per Business (REQ: Step 2)
+  const [cartsByBusiness, setCartsByBusiness] = useState<Record<BusinessType, CartTab[]>>({
+    KIRANA_RETAIL: [
+      { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
+      { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
+      { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
+    ],
+    HOMEMADE_FOOD: [
+      { id: 1, name: 'HMF Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
+      { id: 2, name: 'HMF Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
+      { id: 3, name: 'HMF Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
+    ],
+  });
+
+  const carts = cartsByBusiness[activeBusinessType] || [
     { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
     { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
     { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
-  ]);
+  ];
+
+  const setCarts = (updater: CartTab[] | ((prev: CartTab[]) => CartTab[])) => {
+    setCartsByBusiness((prevMap) => {
+      const currentList = prevMap[activeBusinessType] || [
+        { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
+        { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
+        { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
+      ];
+      const nextList = typeof updater === 'function' ? updater(currentList) : updater;
+      return { ...prevMap, [activeBusinessType]: nextList };
+    });
+  };
+
   const [activeCartId, setActiveCartId] = useState<number>(1);
 
   // Search query & selection
@@ -167,12 +196,18 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const activeCart = carts.find((c) => c.id === activeCartId) || carts[0];
 
+  // Strictly filter products to the active business type (REQ: Step 2)
+  const businessProducts = products.filter((p) => {
+    const pType = p.business_type || (isHomemadeFoodCategoryOrName(p) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL');
+    return pType === activeBusinessType;
+  });
+
   // Top-24 Fast-Tap Items (REQ-07 / Section 5.1)
-  const fastTapProducts = products.filter((p) => p.is_quick_tap).slice(0, 24);
+  const fastTapProducts = businessProducts.filter((p) => p.is_quick_tap).slice(0, 24);
 
   // 3-Way Instant Search (Barcode, Short Code, Bilingual Marathi/English Name & Hidden POS Search Keywords)
   const searchResults = searchQuery.trim()
-    ? products
+    ? businessProducts
         .filter((p) => {
           const q = searchQuery.toLowerCase().trim();
           return (

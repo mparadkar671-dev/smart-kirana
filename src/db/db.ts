@@ -211,6 +211,25 @@ export class KiranaDatabase extends Dexie {
       business_workspaces: 'business_type, updated_at',
     });
 
+    this.version(11).stores({
+      products: 'id, shop_id, business_type, [shop_id+business_type], barcode, short_code, name, marathi_name, search_keywords, category, is_quick_tap, wholesaler_id, loan_account_id, updated_at',
+      inventory_logs: 'id, shop_id, business_type, [shop_id+business_type], product_id, reason_type, reference_id, loan_account_id, created_at',
+      customers: 'id, shop_id, business_type, [shop_id+business_type], phone, name, current_udhari_balance, created_at',
+      sales_invoices: 'id, shop_id, business_type, [shop_id+business_type], invoice_number, customer_id, payment_mode, status, credit_note_number, created_at',
+      sale_items: 'id, shop_id, business_type, [shop_id+business_type], invoice_id, product_id, loan_account_id',
+      khata_transactions: 'id, shop_id, business_type, [shop_id+business_type], customer_id, entry_type, invoice_id, payment_channel, created_at',
+      expenses_and_drawings: 'id, shop_id, business_type, [shop_id+business_type], entry_type, category, paid_via, created_at',
+      daily_galla_sessions: 'id, shop_id, business_type, [shop_id+business_type], &session_date, created_at',
+      shop_profile: 'id, shop_id, invite_code, business_type',
+      store_users: 'id, user_id, email, role, shop_id, created_at',
+      sync_outbox: 'id, table_name, shop_id, status, created_at, retry_count',
+      credit_notes: 'id, shop_id, credit_note_number, original_invoice_id, customer_id, created_at',
+      wholesalers: 'id, shop_id, business_type, [shop_id+business_type], name, phone, agency_or_brand, is_active, created_at',
+      loan_accounts: 'id, shop_id, name, lender_name, is_active, created_at',
+      advance_orders: 'id, shop_id, business_type, [shop_id+business_type], customer_id, delivery_date, status, created_at',
+      business_workspaces: 'business_type, updated_at',
+    });
+
     // Multi-tenant Hook: Ensure all records are always tagged with shop_id and invite code
     const tenantTables = [
       this.products,
@@ -232,6 +251,10 @@ export class KiranaDatabase extends Dexie {
       (table as any).hook('creating', (_primKey: unknown, obj: Record<string, unknown>) => {
         if (!obj.shop_id) {
           obj.shop_id = 'current_shop';
+        }
+        if (!obj.business_type) {
+          const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_business_type') : null;
+          obj.business_type = stored === 'HOMEMADE_FOOD' ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL';
         }
       });
     });
@@ -283,11 +306,17 @@ export class KiranaDatabase extends Dexie {
   async seedDemoProducts(): Promise<void> {
     const count = await this.products.count();
     if (count === 0) {
-      await this.products.bulkAdd(INITIAL_PRODUCTS);
+      const items = INITIAL_PRODUCTS.map((prod) => ({
+        ...prod,
+        business_type: 'KIRANA_RETAIL' as const,
+      }));
+      await this.products.bulkAdd(items);
 
       // Add initial stock logs for audit trail
-      const initialLogs: InventoryLog[] = INITIAL_PRODUCTS.map((prod) => ({
+      const initialLogs: InventoryLog[] = items.map((prod) => ({
         id: `init-log-${prod.id}`,
+        shop_id: 'current_shop',
+        business_type: 'KIRANA_RETAIL' as const,
         product_id: prod.id,
         change_qty: prod.current_stock,
         reason_type: 'PURCHASE_IN',
@@ -317,9 +346,42 @@ export class KiranaDatabase extends Dexie {
   }
 
   /**
-   * Completely wipes all products, customers, and transactions to start 100% clean
+   * Completely wipes all products, customers, and transactions to start 100% clean.
+   * If scopedBusinessType is provided, wipes ONLY records belonging to that business type,
+   * leaving the other business's records 100% untouched!
    */
-  async clearAllRecordsToEmpty(): Promise<void> {
+  async clearAllRecordsToEmpty(scopedBusinessType?: BusinessType): Promise<void> {
+    if (scopedBusinessType) {
+      await this.transaction(
+        'rw',
+        [
+          this.products,
+          this.customers,
+          this.sales_invoices,
+          this.sale_items,
+          this.khata_transactions,
+          this.expenses_and_drawings,
+          this.daily_galla_sessions,
+          this.inventory_logs,
+          this.wholesalers,
+          this.advance_orders,
+        ],
+        async () => {
+          await this.products.filter((p) => (p.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.inventory_logs.filter((l) => (l.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.sales_invoices.filter((i) => (i.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.sale_items.filter((s) => (s.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.khata_transactions.filter((k) => (k.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.expenses_and_drawings.filter((e) => (e.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.daily_galla_sessions.filter((g) => (g.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.advance_orders.filter((a) => (a.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.wholesalers.filter((w) => (w.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.customers.filter((c) => (c.business_type || 'KIRANA_RETAIL') === scopedBusinessType && c.id !== WALK_IN_CUSTOMER_ID).delete();
+        }
+      );
+      return;
+    }
+
     await this.transaction(
       'rw',
       [
@@ -358,9 +420,35 @@ export class KiranaDatabase extends Dexie {
 
   /**
    * Cleanly wipes transactional tables while keeping products and schema intact
-   * As specified in REQ-03 Acceptance Gate
+   * As specified in REQ-03 Acceptance Gate.
+   * If scopedBusinessType is provided, wipes ONLY transactional data for that business!
    */
-  async clearTransactionalData(): Promise<void> {
+  async clearTransactionalData(scopedBusinessType?: BusinessType): Promise<void> {
+    if (scopedBusinessType) {
+      await this.transaction(
+        'rw',
+        [
+          this.sales_invoices,
+          this.sale_items,
+          this.khata_transactions,
+          this.expenses_and_drawings,
+          this.daily_galla_sessions,
+          this.inventory_logs,
+          this.advance_orders,
+        ],
+        async () => {
+          await this.sales_invoices.filter((i) => (i.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.sale_items.filter((s) => (s.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.khata_transactions.filter((k) => (k.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.expenses_and_drawings.filter((e) => (e.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.daily_galla_sessions.filter((g) => (g.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.inventory_logs.filter((l) => (l.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          await this.advance_orders.filter((a) => (a.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+        }
+      );
+      return;
+    }
+
     await this.transaction(
       'rw',
       [

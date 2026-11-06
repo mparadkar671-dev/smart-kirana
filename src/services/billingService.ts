@@ -12,6 +12,7 @@ import {
   UserRole,
   CreditNote,
   SalesReturnReason,
+  BusinessType,
 } from '../types';
 import { roundCurrency, roundQty, toPaise, toRupees } from '../utils/math';
 
@@ -92,6 +93,9 @@ export class BillingService {
     const nowIso = new Date().toISOString();
     const todayDate = nowIso.split('T')[0];
 
+    const shopProfile = await db.getShopProfile();
+    const activeBizType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+
     let totalCogs = 0;
     const saleItems: SaleItem[] = [];
     const inventoryLogs: InventoryLog[] = [];
@@ -109,6 +113,7 @@ export class BillingService {
       const saleItem: SaleItem = {
         id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         shop_id: 'current_shop',
+        business_type: item.product.business_type || activeBizType,
         invoice_id: invoiceId,
         product_id: item.product.id,
         product_name_snapshot: item.product.name,
@@ -123,6 +128,7 @@ export class BillingService {
       const log: InventoryLog = {
         id: `log-sale-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         shop_id: 'current_shop',
+        business_type: item.product.business_type || activeBizType,
         product_id: item.product.id,
         change_qty: -itemQty,
         reason_type: 'SALE_OUT',
@@ -143,6 +149,7 @@ export class BillingService {
     const invoice: SalesInvoice = {
       id: invoiceId,
       shop_id: 'current_shop',
+      business_type: activeBizType,
       invoice_number: invoiceNumber,
       customer_id: params.customerId,
       subtotal_amount: subtotal,
@@ -229,6 +236,7 @@ export class BillingService {
           const khataTx: KhataTransaction = {
             id: `khata-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             shop_id: invoice.shop_id,
+            business_type: activeBizType,
             customer_id: params.customerId,
             entry_type: 'DEBIT_UDHARI_GIVEN',
             amount: udhari,
@@ -278,6 +286,7 @@ export class BillingService {
             const newSession: DailyGallaSession = {
               id: `galla-${Date.now()}`,
               shop_id: invoice.shop_id,
+              business_type: activeBizType,
               session_date: todayDate,
               opening_cash: 0,
               cash_sales_total: paidNow,

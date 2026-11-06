@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Product, ShopProfile } from '../../types';
+import { Product, ShopProfile, BusinessType, KIRANA_CATEGORIES, HOMEMADE_FOOD_CATEGORIES } from '../../types';
 import { ProductModal } from './ProductModal';
 import { StockAdjustmentModal } from './StockAdjustmentModal';
 import { RestockAlertsView } from './RestockAlertsView';
 import { InventoryService } from '../../services/inventoryService';
-import { HomemadeFoodService } from '../../services/homemadeFoodService';
+import { HomemadeFoodService, isHomemadeFoodCategoryOrName } from '../../services/homemadeFoodService';
 import {
   MAHARASHTRA_105_KIRANA_CATALOG,
   parseKiranaCatalogCsv,
@@ -13,6 +13,7 @@ import {
 } from '../../services/csvCatalogImporter';
 import { normalizeProductImageToSquare, generateSmartProductThumbnail } from '../../utils/productImageEngine';
 import { formatINR, calculateProfitMarginPercent } from '../../utils/math';
+import { db } from '../../db/db';
 import {
   Package,
   Plus,
@@ -46,6 +47,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   shopProfile,
   onRefresh,
 }) => {
+  const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+  const isHomemade = activeBusinessType === 'HOMEMADE_FOOD';
+
+  // Strict data isolation defense-in-depth:
+  const businessProducts = products.filter((p) => {
+    const pType = p.business_type || (isHomemadeFoodCategoryOrName(p) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL');
+    return pType === activeBusinessType;
+  });
+
   const [activeTab, setActiveTab] = useState<'all' | 'restock'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
@@ -68,12 +78,12 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [isImportingCsv, setIsImportingCsv] = useState(false);
   const [importFeedback, setImportFeedback] = useState<string | null>(null);
 
-  const lowStockCount = InventoryService.filterLowStock(products).length;
-  const expiringCount = InventoryService.filterExpiringSoon(products, 15).length;
+  const lowStockCount = InventoryService.filterLowStock(businessProducts).length;
+  const expiringCount = InventoryService.filterExpiringSoon(businessProducts, 15).length;
   const totalAlerts = lowStockCount + expiringCount;
 
   // Filter products (includes Marathi Name & Hidden POS Search Keywords)
-  const filteredProducts = products.filter((p) => {
+  const filteredProducts = businessProducts.filter((p) => {
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
       !q ||
@@ -89,7 +99,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return matchesSearch && matchesCat;
   });
 
-  const categories = Array.from(new Set(products.map((p) => p.category))).sort();
+  const standardCategories = isHomemade ? HOMEMADE_FOOD_CATEGORIES : KIRANA_CATEGORIES;
+  const categories = Array.from(
+    new Set([...standardCategories, ...businessProducts.map((p) => p.category)])
+  ).sort();
 
   const handleToggleSelectAll = () => {
     if (selectedProductIds.size === filteredProducts.length && filteredProducts.length > 0) {
@@ -224,9 +237,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
+  // Handle 1-Click Load of 25 Standard Indian Kirana Products
+  const handleLoad25SampleProducts = async () => {
+    setIsImportingCsv(true);
+    setImportFeedback(null);
+    try {
+      await db.seedDemoProducts();
+      setImportFeedback('✨ Loaded 25 standard Indian Kirana sample products successfully!');
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`Failed to load sample products: ${err.message}`);
+    } finally {
+      setIsImportingCsv(false);
+    }
+  };
+
   // Handle 1-Click Built-in 105 Maharashtra Kirana Catalog Import
   const handleImport105BuiltInCatalog = async () => {
-    if (shopProfile?.business_type === 'HOMEMADE_FOOD') {
+    if (isHomemade) {
       alert(
         '⚠️ You are currently in Homemade Food / Gruh Udyog mode! Please switch to Kirana Retail Store from the sidebar before importing the Kirana grocery catalog, to keep your food products completely separate.'
       );
@@ -284,53 +312,88 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             Inventory Master &amp; Stock Ledger
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Total {products.length} Products | Double-check append-only ledger active
+            {isHomemade ? '🍲 Homemade Food Catalog' : '🏪 Kirana Retail Catalog'} | Total {businessProducts.length} Products
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
-          {shopProfile?.business_type === 'HOMEMADE_FOOD' && (
-            <button
-              type="button"
-              data-testid="load-homemade-food-menu-btn"
-              disabled={isImportingCsv}
-              onClick={handleLoadHomemadeFoodMenu}
-              className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50"
-            >
-              <span>🍲 Load Homemade Food Menu (Laddus, Modak, Ghavane, Bhakri...)</span>
-            </button>
+          {isHomemade ? (
+            <>
+              <button
+                type="button"
+                data-testid="load-homemade-food-menu-btn"
+                disabled={isImportingCsv}
+                onClick={handleLoadHomemadeFoodMenu}
+                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50"
+              >
+                <span>🍲 Load Homemade Food Menu (12 Authentic Items)</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="open-wholesalers-reorder-btn"
+                onClick={() => setActiveTab('restock')}
+                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+              >
+                <Truck className="w-4 h-4" />
+                <span>🚛 Wholesalers &amp; Reorder</span>
+              </button>
+
+              <button
+                onClick={handleOpenAdd}
+                data-testid="add-homemade-product-btn"
+                className="flex-1 sm:flex-initial px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>➕ Add New Homemade Product</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                data-testid="import-csv-sheet-btn"
+                onClick={() => {
+                  setImportFeedback(null);
+                  setIsImportModalOpen(true);
+                }}
+                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+              >
+                <Upload className="w-4 h-4" />
+                <span>📥 Import 105 Kirana Catalog</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="load-25-kirana-demo-btn"
+                disabled={isImportingCsv}
+                onClick={handleLoad25SampleProducts}
+                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>✨ Load 25 Sample Kirana Products</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="open-wholesalers-reorder-btn"
+                onClick={() => setActiveTab('restock')}
+                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+              >
+                <Truck className="w-4 h-4" />
+                <span>🚛 Wholesalers &amp; Reorder</span>
+              </button>
+
+              <button
+                onClick={handleOpenAdd}
+                data-testid="add-kirana-product-btn"
+                className="flex-1 sm:flex-initial px-4 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>➕ Add Product</span>
+              </button>
+            </>
           )}
-
-          <button
-            type="button"
-            data-testid="import-csv-sheet-btn"
-            onClick={() => {
-              setImportFeedback(null);
-              setIsImportModalOpen(true);
-            }}
-            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-          >
-            <Upload className="w-4 h-4" />
-            <span>📥 Import CSV / Sheet (Auto-Barcode + Auto-Image)</span>
-          </button>
-
-          <button
-            type="button"
-            data-testid="open-wholesalers-reorder-btn"
-            onClick={() => setActiveTab('restock')}
-            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-          >
-            <Truck className="w-4 h-4" />
-            <span>🚛 Wholesalers &amp; Reorder</span>
-          </button>
-
-          <button
-            onClick={handleOpenAdd}
-            className="flex-1 sm:flex-initial px-4 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Product</span>
-          </button>
         </div>
       </div>
 
@@ -767,31 +830,31 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               onClick={() => handleOpenStockIn(p)}
                               data-testid={`stock-in-btn-${p.id}`}
                               title={
-                                shopProfile?.business_type === 'HOMEMADE_FOOD'
+                                isHomemade
                                   ? '🍳 + Fresh Batch Made Today'
-                                  : 'Quick Restock (Stock In ++)'
+                                  : '➕ + Restock (Purchase In)'
                               }
                               className="px-2 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 transition flex items-center gap-1 text-[11px] font-bold"
                             >
                               <PlusCircle className="w-3.5 h-3.5 shrink-0" />
-                              {shopProfile?.business_type === 'HOMEMADE_FOOD' && (
-                                <span className="hidden xl:inline">🍳 + Fresh Batch Made</span>
-                              )}
+                              <span className="hidden xl:inline">
+                                {isHomemade ? '🍳 + Fresh Batch Made' : '➕ + Restock'}
+                              </span>
                             </button>
                             <button
                               onClick={() => handleOpenStockOut(p)}
                               data-testid={`stock-out-btn-${p.id}`}
                               title={
-                                shopProfile?.business_type === 'HOMEMADE_FOOD'
+                                isHomemade
                                   ? '🏠 - Home Use / Leftover'
-                                  : 'Stock Out (-- Damage / Home Use)'
+                                  : '🏠 - Home Use / Damaged'
                               }
                               className="px-2 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 transition flex items-center gap-1 text-[11px] font-bold"
                             >
                               <MinusCircle className="w-3.5 h-3.5 shrink-0" />
-                              {shopProfile?.business_type === 'HOMEMADE_FOOD' && (
-                                <span className="hidden xl:inline">🏠 - Home Use / Leftover</span>
-                              )}
+                              <span className="hidden xl:inline">
+                                {isHomemade ? '🏠 - Home Use / Leftover' : '🏠 - Home Use / Damaged'}
+                              </span>
                             </button>
                           </div>
                         </td>
@@ -828,7 +891,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       {/* Tab 2: Wholesaler Restock List & Expiry Alerts (REQ-06) */}
       {activeTab === 'restock' && (
         <RestockAlertsView
-          products={products}
+          products={businessProducts}
           shopProfile={shopProfile}
           onRestockClick={(p) => handleOpenStockIn(p)}
           onRefresh={onRefresh}
@@ -840,6 +903,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         isOpen={isProductModalOpen}
         onClose={() => setIsProductModalOpen(false)}
         productToEdit={editingProduct}
+        businessType={activeBusinessType}
         onSaved={() => {
           if (onRefresh) onRefresh();
         }}

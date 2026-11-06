@@ -84,7 +84,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   // Security & Danger Vault State (Iteration 6)
   const [isDangerVaultOpen, setIsDangerVaultOpen] = useState(false);
   const [pendingDangerAction, setPendingDangerAction] = useState<
-    'CLEAR_TRANSACTIONS' | 'WIPE_EMPTY' | 'RESET_DEMO' | null
+    'CLEAR_TRANSACTIONS' | 'WIPE_ACTIVE_BUSINESS' | 'WIPE_EMPTY' | 'RESET_DEMO' | null
   >(null);
   const [dangerPin, setDangerPin] = useState('');
   const [dangerConfirmText, setDangerConfirmText] = useState('');
@@ -446,14 +446,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
       await BackupService.downloadJsonBackup();
 
       // 2. Perform Selected Destructive Action with atomic remote Supabase wipe & outbox cleanup
+      const activeBiz = profile?.business_type || 'KIRANA_RETAIL';
       if (pendingDangerAction === 'CLEAR_TRANSACTIONS') {
-        await cloudSyncService.executeStoreVaultReset('CLEAR_TRANSACTIONS_KEEP_PRODUCTS', true);
-        await db.clearTransactionalData();
+        await cloudSyncService.executeStoreVaultReset('CLEAR_TRANSACTIONS_KEEP_PRODUCTS', true, activeBiz);
+        await db.clearTransactionalData(activeBiz);
         await db.sync_outbox.clear();
         await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
-          text: 'Emergency JSON backup downloaded. Sales & khata transactions permanently cleared in local Dexie & Supabase. Catalog preserved.',
+          text: `Emergency JSON backup downloaded. Sales & khata transactions for ${activeBiz === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Retail'} permanently cleared in local Dexie & Supabase. Catalog preserved.`,
+        });
+      } else if (pendingDangerAction === 'WIPE_ACTIVE_BUSINESS') {
+        await cloudSyncService.executeStoreVaultReset('WIPE_ACTIVE_BUSINESS', true, activeBiz);
+        await db.clearAllRecordsToEmpty(activeBiz);
+        await db.sync_outbox.clear();
+        await refreshRealSalesCount();
+        setStatusMsg({
+          type: 'info',
+          text: `Emergency JSON backup downloaded. All ${activeBiz === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Retail'} products & operational records wiped! Other business records remain 100% intact.`,
         });
       } else if (pendingDangerAction === 'WIPE_EMPTY') {
         await cloudSyncService.executeStoreVaultReset('WIPE_ALL_FRESH_STORE', true);
@@ -493,6 +503,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   const handleClearTransactions = async () => {
     setIsDangerVaultOpen(true);
     setPendingDangerAction('CLEAR_TRANSACTIONS');
+    setDangerError(null);
+  };
+
+  const handleWipeActiveBusiness = async () => {
+    setIsDangerVaultOpen(true);
+    setPendingDangerAction('WIPE_ACTIVE_BUSINESS');
     setDangerError(null);
   };
 
@@ -1321,12 +1337,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
 
             <button
               type="button"
+              data-testid="wipe-active-business-btn"
+              onClick={handleWipeActiveBusiness}
+              disabled={!hasPermission('DATA_WIPE')}
+              className="px-4 py-2.5 border border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/40 hover:bg-orange-100 text-orange-900 dark:text-orange-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
+            >
+              <Trash2 className="w-4 h-4 text-orange-600" />
+              ⚠️ Wipe Only Active Business ({profile?.business_type === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Store'})
+            </button>
+
+            <button
+              type="button"
               onClick={handleClearAllToEmpty}
               disabled={!hasPermission('DATA_WIPE')}
               className="px-4 py-2.5 border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-900 dark:text-red-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
             >
               <Trash2 className="w-4 h-4 text-red-600" />
-              ⚠️ Wipe All Records (100% Empty Fresh Store)
+              💥 Wipe Both Businesses (100% Factory Reset)
             </button>
           </div>
 
@@ -1343,6 +1370,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
                   </span>
                   <p className="text-sm font-extrabold text-slate-900 dark:text-white">
                     {pendingDangerAction === 'CLEAR_TRANSACTIONS' && 'Clear Sales, Invoices & Khata Transactions (Preserve Products)'}
+                    {pendingDangerAction === 'WIPE_ACTIVE_BUSINESS' && `Wipe Only Active Business (${profile?.business_type === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Retail'})`}
                     {pendingDangerAction === 'WIPE_EMPTY' && 'Wipe All Records (100% Empty Fresh Store)'}
                     {pendingDangerAction === 'RESET_DEMO' && 'Reset Entire Database to 25 Sample Kirana Products'}
                   </p>

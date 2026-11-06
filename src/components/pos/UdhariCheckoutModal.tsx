@@ -99,8 +99,11 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
       return;
     }
 
+    const profile = await db.getShopProfile();
     const newCustomer: Customer = {
       id: `cust-${Date.now()}`,
+      shop_id: profile?.id || 'current_shop',
+      business_type: profile?.business_type || 'KIRANA_RETAIL',
       name: newName.trim(),
       phone: newPhone.trim(),
       credit_limit: newCreditLimit || 2000,
