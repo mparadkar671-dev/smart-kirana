@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../db/db';
-import { ShopProfile, StoreUser, UserRole, BusinessType } from '../../types';
+import { ShopProfile, StoreUser, UserRole, BusinessType, SecurityAuditLog } from '../../types';
 import { BackupService } from '../../services/backupService';
 import { cloudSyncService, CloudSyncStatus } from '../../services/cloudSyncService';
 import { authService } from '../../services/authService';
 import { notificationService } from '../../services/notificationService';
 import { HomemadeFoodService } from '../../services/homemadeFoodService';
+import { SecurityAuditService } from '../../services/securityAuditService';
+import { getActiveShopId } from '../../utils/businessFirewall';
 import { useAuth } from '../../context/AuthContext';
 import {
   supabase,
@@ -91,6 +93,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
   const [isExecutingDangerAction, setIsExecutingDangerAction] = useState(false);
   const [dangerError, setDangerError] = useState<string | null>(null);
   const [showDemoTools, setShowDemoTools] = useState(false);
+  const [showAdvancedCloud, setShowAdvancedCloud] = useState(false);
+
+  // v4.0.0 Security PIN & Audit Trail
+  const [newManagerPin, setNewManagerPin] = useState('');
+  const [pinFeedback, setPinFeedback] = useState<string | null>(null);
+  const [auditLogs, setAuditLogs] = useState<SecurityAuditLog[]>([]);
+  const [showAuditLogs, setShowAuditLogs] = useState(false);
 
   const refreshStaffList = async () => {
     try {
@@ -428,9 +437,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
       return;
     }
 
-    if (dangerPin !== '1234' && (!profile?.phone || dangerPin !== profile.phone.slice(-4))) {
-      setDangerError('Invalid Security PIN. Please enter correct Owner PIN (default: 1234).');
-      return;
+    if (!profile?.pin_hash) {
+      if (dangerPin !== '1234' && (!profile?.phone || dangerPin !== profile.phone.slice(-4))) {
+        setDangerError('Invalid Security PIN. Please enter correct Owner PIN (default: 1234).');
+        SecurityAuditService.verifyManagerPin(dangerPin).catch(() => {});
+        return;
+      }
+    } else {
+      const pinCheck = await SecurityAuditService.verifyManagerPin(dangerPin, {
+        cashierName: user?.email || 'Store Owner',
+        actionSummary: `Danger Vault Authorized Action: ${pendingDangerAction}`,
+      });
+      const isPhoneFallback = profile?.phone && dangerPin === profile.phone.slice(-4);
+      if (!pinCheck.valid && !isPhoneFallback) {
+        setDangerError(pinCheck.message || 'Invalid Security PIN. Please enter correct Owner PIN (default: 1234).');
+        return;
+      }
     }
 
     if (dangerConfirmText.trim().toUpperCase() !== 'CONFIRM') {
@@ -447,9 +469,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
 
       // 2. Perform Selected Destructive Action with atomic remote Supabase wipe & outbox cleanup
       const activeBiz = profile?.business_type || 'KIRANA_RETAIL';
+      const activeShopId = profile?.shop_id || getActiveShopId();
       if (pendingDangerAction === 'CLEAR_TRANSACTIONS') {
-        await cloudSyncService.executeStoreVaultReset('CLEAR_TRANSACTIONS_KEEP_PRODUCTS', true, activeBiz);
-        await db.clearTransactionalData(activeBiz);
+        await cloudSyncService.executeStoreVaultReset('CLEAR_TRANSACTIONS_KEEP_PRODUCTS', true, activeBiz, activeShopId);
+        await db.clearTransactionalData(activeBiz, activeShopId);
         await db.sync_outbox.clear();
         await refreshRealSalesCount();
         setStatusMsg({
@@ -457,8 +480,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
           text: `Emergency JSON backup downloaded. Sales & khata transactions for ${activeBiz === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Retail'} permanently cleared in local Dexie & Supabase. Catalog preserved.`,
         });
       } else if (pendingDangerAction === 'WIPE_ACTIVE_BUSINESS') {
-        await cloudSyncService.executeStoreVaultReset('WIPE_ACTIVE_BUSINESS', true, activeBiz);
-        await db.clearAllRecordsToEmpty(activeBiz);
+        await cloudSyncService.executeStoreVaultReset('WIPE_ACTIVE_BUSINESS', true, activeBiz, activeShopId);
+        await db.clearAllRecordsToEmpty(activeBiz, activeShopId);
         await db.sync_outbox.clear();
         await refreshRealSalesCount();
         setStatusMsg({
@@ -466,13 +489,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
           text: `Emergency JSON backup downloaded. All ${activeBiz === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Retail'} products & operational records wiped! Other business records remain 100% intact.`,
         });
       } else if (pendingDangerAction === 'WIPE_EMPTY') {
-        await cloudSyncService.executeStoreVaultReset('WIPE_ALL_FRESH_STORE', true);
-        await db.clearAllRecordsToEmpty();
+        await cloudSyncService.executeStoreVaultReset('WIPE_ACTIVE_BUSINESS', true, activeBiz, activeShopId);
+        await db.clearAllRecordsToEmpty(activeBiz, activeShopId);
         await db.sync_outbox.clear();
         await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
-          text: 'Emergency JSON backup downloaded. All products, customers & transactions wiped from local Dexie & Supabase! Store is 100% clean and empty.',
+          text: `Emergency JSON backup downloaded. All ${activeBiz === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Retail'} products & operational records wiped! Other business records remain 100% intact.`,
         });
       } else if (pendingDangerAction === 'RESET_DEMO') {
         await cloudSyncService.executeStoreVaultReset('WIPE_ALL_FRESH_STORE', true);
@@ -562,6 +585,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
       }
     }
     e.target.value = '';
+  };
+
+  const handleUpdateManagerPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinFeedback(null);
+    if (!newManagerPin || newManagerPin.length < 4) {
+      setPinFeedback('Manager PIN must be at least 4 digits');
+      return;
+    }
+
+    try {
+      await SecurityAuditService.setManagerPin(newManagerPin, user?.email || 'Store Owner');
+      const updatedProfile = await db.getShopProfile();
+      setProfile(updatedProfile);
+      setPinFeedback('Manager PIN successfully updated!');
+      setNewManagerPin('');
+      setTimeout(() => setPinFeedback(null), 3000);
+    } catch (err: any) {
+      setPinFeedback(err?.message || 'Failed to update PIN');
+    }
+  };
+
+  const handleLoadAuditLogs = async () => {
+    try {
+      const logs = await SecurityAuditService.getAuditLogs(50);
+      setAuditLogs(logs);
+      setShowAuditLogs(true);
+    } catch (e) {
+      console.warn('Failed to load audit logs', e);
+    }
   };
 
   if (!profile) {
@@ -1115,22 +1168,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         </div>
       </form>
 
-      {/* Supabase Cloud Live Bi-Directional Sync Operations */}
+      {/* 🛠️ Advanced Cloud & Diagnostics (Collapsed by default for clean operator UI) */}
       <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
-            <RefreshCw className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-            Supabase Live Database Synchronization
-          </h2>
-          <span className="text-xs bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold px-2 py-0.5 rounded-full">
-            Realtime Mirroring
-          </span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-xl">
+              <Cloud className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                🛠️ Advanced Cloud &amp; Diagnostics
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Supabase realtime synchronization, API keys, and device cloud diagnostic tools
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid="toggle-advanced-cloud-btn"
+            onClick={() => setShowAdvancedCloud(!showAdvancedCloud)}
+            className="px-3.5 py-1.5 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+          >
+            <span>{showAdvancedCloud ? 'Hide Diagnostics' : 'Show Diagnostics'}</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAdvancedCloud ? 'rotate-180' : ''}`} />
+          </button>
         </div>
 
-        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-          Ensure all changes (products, customers, invoices, khata ledger, galla cash drawers, store users) reflect directly in your Supabase PostgreSQL cloud tables.
-        </p>
-
+        {/* Sync Summary Status Pill */}
         <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl flex items-center justify-between">
           <div className="space-y-0.5">
             <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
@@ -1143,86 +1208,79 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3 pt-1">
-          <button
-            type="button"
-            onClick={handlePushAllToCloud}
-            disabled={isSyncingCloud}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition disabled:opacity-50"
-          >
-            <Upload className="w-4 h-4" />
-            {isSyncingCloud ? 'Syncing...' : 'Push All Tables to Supabase Cloud'}
-          </button>
+        {showAdvancedCloud && (
+          <div className="space-y-4 pt-2 border-t border-slate-100 dark:border-slate-800 animate-in fade-in">
+            {/* Sync push/pull buttons */}
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={handlePushAllToCloud}
+                disabled={isSyncingCloud}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+              >
+                <Upload className="w-4 h-4" />
+                {isSyncingCloud ? 'Syncing...' : 'Push All Tables to Supabase Cloud'}
+              </button>
 
-          <button
-            type="button"
-            onClick={handlePullAllFromCloud}
-            disabled={isSyncingCloud}
-            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition disabled:opacity-50"
-          >
-            <Download className="w-4 h-4" />
-            {isSyncingCloud ? 'Pulling...' : 'Pull Cloud Records into Device'}
-          </button>
-        </div>
-      </div>
+              <button
+                type="button"
+                onClick={handlePullAllFromCloud}
+                disabled={isSyncingCloud}
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition disabled:opacity-50"
+              >
+                <Download className="w-4 h-4" />
+                {isSyncingCloud ? 'Pulling...' : 'Pull Cloud Records into Device'}
+              </button>
+            </div>
 
-      {/* Supabase Connection Credentials */}
-      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
-            <Cloud className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            Supabase Connection Credentials
-          </h2>
-          <span className="text-xs bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold px-2 py-0.5 rounded-full">
-            Free PostgreSQL Tier
-          </span>
-        </div>
+            {/* Credentials Inputs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
+                  Supabase Project URL
+                </label>
+                <input
+                  type="text"
+                  value={supabaseUrl}
+                  onChange={(e) => setSupabaseUrl(e.target.value)}
+                  placeholder="https://xyz.supabase.co"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
-              Supabase Project URL
-            </label>
-            <input
-              type="text"
-              value={supabaseUrl}
-              onChange={(e) => setSupabaseUrl(e.target.value)}
-              placeholder="https://xyz.supabase.co"
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            />
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
+                  Supabase Anon / Public API Key
+                </label>
+                <input
+                  type="password"
+                  value={supabaseKey}
+                  onChange={(e) => setSupabaseKey(e.target.value)}
+                  placeholder="eyJhbGciOiJIUzI1NiIsIn..."
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handleTestSupabaseConnection}
+                disabled={syncStatus === 'TESTING'}
+                className="px-4 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition disabled:opacity-50"
+              >
+                {syncStatus === 'TESTING' ? 'Testing...' : 'Test Connection'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveSupabaseConfig}
+                className="px-4 py-2 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
+              >
+                Save Cloud Sync Credentials
+              </button>
+            </div>
           </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
-              Supabase Anon / Public API Key
-            </label>
-            <input
-              type="password"
-              value={supabaseKey}
-              onChange={(e) => setSupabaseKey(e.target.value)}
-              placeholder="eyJhbGciOiJIUzI1NiIsIn..."
-              className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-2 pt-2">
-          <button
-            type="button"
-            onClick={handleTestSupabaseConnection}
-            disabled={syncStatus === 'TESTING'}
-            className="px-4 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition disabled:opacity-50"
-          >
-            {syncStatus === 'TESTING' ? 'Testing...' : 'Test Connection'}
-          </button>
-          <button
-            type="button"
-            onClick={handleSaveSupabaseConfig}
-            className="px-4 py-2 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
-          >
-            Save Cloud Sync Credentials
-          </button>
-        </div>
+        )}
       </div>
 
       {/* Local JSON Backup & Restore */}
@@ -1287,6 +1345,128 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         </div>
       </div>
 
+      {/* v4.0.0 Manager Security PIN & Cashier Override Controls */}
+      <div
+        data-testid="manager-pin-card"
+        className="bg-white dark:bg-slate-900 rounded-xl shadow-xs border border-slate-200 dark:border-slate-800 p-5 space-y-4 transition-colors"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-lg">
+              <KeyRound className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-800 dark:text-white">
+                Manager Security PIN &amp; Cashier Override Controls
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Salted SHA-256 PIN used to authorize credit limit overrides, negative stock sales, and danger operations
+              </p>
+            </div>
+          </div>
+
+          <div className="text-right">
+            {profile?.pin_locked_until ? (
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300">
+                🔒 Temporarily Locked
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                🛡️ Rate Limiter Active (5 Max)
+              </span>
+            )}
+          </div>
+        </div>
+
+        {pinFeedback && (
+          <div
+            data-testid="pin-feedback-banner"
+            className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-xs font-bold text-blue-700 dark:text-blue-300"
+          >
+            {pinFeedback}
+          </div>
+        )}
+
+        <form onSubmit={handleUpdateManagerPin} className="flex flex-wrap items-center gap-3">
+          <div className="w-48">
+            <input
+              type="password"
+              maxLength={8}
+              data-testid="manager-pin-input"
+              value={newManagerPin}
+              onChange={(e) => setNewManagerPin(e.target.value)}
+              placeholder="Enter new 4-digit PIN"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-bold tracking-widest text-slate-900 dark:text-white"
+            />
+          </div>
+          <button
+            type="submit"
+            data-testid="save-manager-pin-btn"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition shadow-xs"
+          >
+            Update Manager PIN
+          </button>
+
+          <button
+            type="button"
+            data-testid="view-audit-trail-btn"
+            onClick={() => {
+              if (showAuditLogs) {
+                setShowAuditLogs(false);
+              } else {
+                handleLoadAuditLogs();
+              }
+            }}
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition ml-auto"
+          >
+            {showAuditLogs ? 'Hide Audit Log' : '🔍 View Security Audit Trail'}
+          </button>
+        </form>
+
+        {/* Audit Log Table */}
+        {showAuditLogs && (
+          <div data-testid="audit-trail-table" className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2 animate-in fade-in">
+            <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+              Recent Security &amp; Cashier Override Logs
+            </h3>
+            {auditLogs.length === 0 ? (
+              <div className="text-xs text-slate-400 py-3">No security events recorded yet.</div>
+            ) : (
+              <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-50 dark:bg-slate-850 text-slate-600 dark:text-slate-400 sticky top-0">
+                    <tr>
+                      <th className="p-2 font-bold">Event Type</th>
+                      <th className="p-2 font-bold">Operator</th>
+                      <th className="p-2 font-bold">Action Summary</th>
+                      <th className="p-2 font-bold text-right">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {auditLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                        <td className="p-2 font-mono font-bold text-[11px] text-indigo-600 dark:text-indigo-400">
+                          {log.event_type}
+                        </td>
+                        <td className="p-2 text-slate-700 dark:text-slate-300">
+                          {log.cashier_name || 'System'}
+                        </td>
+                        <td className="p-2 text-slate-600 dark:text-slate-400">
+                          {log.action_summary}
+                        </td>
+                        <td className="p-2 text-right font-mono text-[10px] text-slate-400">
+                          {new Date(log.timestamp).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Security & Danger Vault (Owner Protected) (Iteration 6) */}
       <div
         className="rounded-2xl border-2 border-red-500/80 bg-red-50/20 dark:bg-red-950/20 p-5 space-y-4 shadow-sm transition-all"
@@ -1322,39 +1502,74 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
           </button>
         </div>
 
-        {/* Action Buttons - Always in DOM for accessibility, expanded view gives full details */}
+        {/* Action Buttons - Tailored per active business category */}
         <div className="space-y-4">
           <div className="flex flex-wrap gap-3 pt-1">
-            <button
-              type="button"
-              onClick={handleClearTransactions}
-              disabled={!hasPermission('DATA_WIPE')}
-              className="px-4 py-2.5 border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-900 dark:text-amber-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
-            >
-              <Trash2 className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-              Clear Sales &amp; Transactions (Keep Products)
-            </button>
+            {profile?.business_type === 'HOMEMADE_FOOD' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleClearTransactions}
+                  disabled={!hasPermission('DATA_WIPE')}
+                  className="px-4 py-2.5 border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-900 dark:text-amber-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
+                >
+                  <Trash2 className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+                  Clear Sales &amp; Transactions (Keep Food Menu)
+                </button>
 
-            <button
-              type="button"
-              data-testid="wipe-active-business-btn"
-              onClick={handleWipeActiveBusiness}
-              disabled={!hasPermission('DATA_WIPE')}
-              className="px-4 py-2.5 border border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/40 hover:bg-orange-100 text-orange-900 dark:text-orange-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
-            >
-              <Trash2 className="w-4 h-4 text-orange-600" />
-              ⚠️ Wipe Only Active Business ({profile?.business_type === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Store'})
-            </button>
+                <button
+                  type="button"
+                  data-testid="wipe-active-business-btn"
+                  onClick={handleWipeActiveBusiness}
+                  disabled={!hasPermission('DATA_WIPE')}
+                  className="px-4 py-2.5 border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-900 dark:text-red-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
+                >
+                  <Trash2 className="w-4 h-4 text-red-600" />
+                  ⚠️ Wipe Homemade Business Data
+                </button>
 
-            <button
-              type="button"
-              onClick={handleClearAllToEmpty}
-              disabled={!hasPermission('DATA_WIPE')}
-              className="px-4 py-2.5 border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-900 dark:text-red-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
-            >
-              <Trash2 className="w-4 h-4 text-red-600" />
-              💥 Wipe Both Businesses (100% Factory Reset)
-            </button>
+                <button
+                  type="button"
+                  data-testid="danger-load-homemade-menu-btn"
+                  onClick={handleSeedHomemadeFoodCatalog}
+                  className="px-4 py-2.5 border border-amber-400 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition shadow-xs"
+                >
+                  <span>🍲 Load 8-Item Homemade Food Menu</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleClearTransactions}
+                  disabled={!hasPermission('DATA_WIPE')}
+                  className="px-4 py-2.5 border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-900 dark:text-amber-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
+                >
+                  <Trash2 className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+                  Clear Sales &amp; Transactions (Keep Products)
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="wipe-active-business-btn"
+                  onClick={handleWipeActiveBusiness}
+                  disabled={!hasPermission('DATA_WIPE')}
+                  className="px-4 py-2.5 border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-900 dark:text-red-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
+                >
+                  <Trash2 className="w-4 h-4 text-red-600" />
+                  ⚠️ Wipe Kirana Store Data
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="danger-import-kirana-catalog-btn"
+                  onClick={handleSeedDemoProducts}
+                  className="px-4 py-2.5 border border-emerald-400 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition shadow-xs"
+                >
+                  <span>🛒 Import Kirana Catalog</span>
+                </button>
+              </>
+            )}
           </div>
 
           {/* Expanded PIN & "CONFIRM" Guardrail (Iteration 6) */}

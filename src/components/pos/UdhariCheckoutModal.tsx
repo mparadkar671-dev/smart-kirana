@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Customer } from '../../types';
 import { db } from '../../db/db';
 import { formatINR, roundCurrency, toPaise, toRupees } from '../../utils/math';
@@ -29,6 +29,8 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
 }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [isQuickCreate, setIsQuickCreate] = useState(false);
 
   // Quick Create Form
@@ -50,12 +52,17 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
     if (isOpen) {
       setSelectedCustomerId(initialCustomerId || '');
       setSearchQuery('');
+      setHighlightedIndex(0);
       setIsQuickCreate(false);
       setIsSplit(false);
       setCashPaidNow(0);
       setManagerOverridePin('');
       setOwnerOverrideApproved(false);
       setErrorMsg(null);
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }, 50);
     }
   }, [isOpen, initialCustomerId]);
 
@@ -149,6 +156,61 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
     onClose();
   };
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+
+      if (isQuickCreate) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setHighlightedIndex((prev) => Math.min(filteredCustomers.length - 1, prev + 1));
+        return;
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setHighlightedIndex((prev) => Math.max(0, prev - 1));
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (!selectedCustomerId && filteredCustomers.length > 0) {
+          const chosen = filteredCustomers[highlightedIndex] || filteredCustomers[0];
+          if (chosen) setSelectedCustomerId(chosen.id);
+          return;
+        }
+
+        if (selectedCustomer) {
+          handleFinalSubmit();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    isOpen,
+    isQuickCreate,
+    filteredCustomers,
+    highlightedIndex,
+    selectedCustomerId,
+    selectedCustomer,
+    isCreditExceeded,
+    isCashier,
+    isManagerPinValid,
+    ownerOverrideApproved,
+    onClose,
+  ]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150 my-8 transition-colors">
@@ -200,29 +262,37 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
               <div className="relative">
                 <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                 <input
+                  ref={searchInputRef}
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search customer by Name or 10-digit Phone..."
-                  className="w-full pl-9 pr-3.5 py-2.5 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setHighlightedIndex(0);
+                  }}
+                  placeholder="Search customer by Name or 10-digit Phone... [Arrow keys + Enter]"
+                  className="w-full pl-9 pr-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
                 />
               </div>
 
               {/* Customer List */}
-              <div className="max-h-44 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+              <div className="max-h-44 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredCustomers.length === 0 ? (
                   <div className="p-4 text-center text-xs text-slate-500">
                     No customers found matching search.
                   </div>
                 ) : (
-                  filteredCustomers.map((cust) => (
+                  filteredCustomers.map((cust, idx) => (
                     <button
                       key={cust.id}
                       type="button"
                       data-testid={`customer-option-${cust.id}`}
                       onClick={() => setSelectedCustomerId(cust.id)}
                       className={`w-full p-2.5 text-left text-xs flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800 transition ${
-                        selectedCustomerId === cust.id ? 'bg-amber-50/80 dark:bg-amber-950/40 font-bold' : ''
+                        selectedCustomerId === cust.id
+                          ? 'bg-amber-50/80 dark:bg-amber-950/40 font-bold ring-1 ring-amber-500/40'
+                          : idx === highlightedIndex
+                          ? 'bg-slate-100 dark:bg-slate-800/80'
+                          : ''
                       }`}
                     >
                       <div>

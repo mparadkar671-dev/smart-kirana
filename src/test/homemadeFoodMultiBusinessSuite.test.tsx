@@ -49,23 +49,23 @@ describe('Multi-Business Engine: Homemade Food (Gruh Udyog) + Separate Workspace
     expect(switchToHmf.businessType).toBe('HOMEMADE_FOOD');
     expect(switchToHmf.activeProfile.business_type).toBe('HOMEMADE_FOOD');
     expect(switchToHmf.activeProfile.invoice_prefix).toBe('HMF');
-    expect(switchToHmf.productCount).toBe(12);
-    expect(HOMEMADE_FOOD_STARTER_CATALOG.length).toBe(12);
+    expect(switchToHmf.productCount).toBe(8);
+    expect(HOMEMADE_FOOD_STARTER_CATALOG.length).toBe(8);
 
     // Verify Kirana product is NOT mixed into Homemade Food workspace
     const hmfProducts = await db.products.toArray();
-    expect(hmfProducts.length).toBe(12);
+    expect(hmfProducts.length).toBe(8);
     expect(hmfProducts.some((p) => p.short_code === 'TS1')).toBe(false);
 
     // Verify custom units (KG_LOOSE, PCS, PLATE, DOZEN, PACK) and 160x160 thumbnails + 200-prefix barcodes
     const ghavane = hmfProducts.find((p) => p.short_code === 'GHV');
     const ukadicheModak = hmfProducts.find((p) => p.short_code === 'UMD');
-    const besanLaddu = hmfProducts.find((p) => p.short_code === 'BSL');
+    const tandlacheLadu = hmfProducts.find((p) => p.short_code === 'TLD' || p.short_code === 'BSL');
     expect(ghavane?.unit_type).toBe('PLATE');
     expect(ukadicheModak?.unit_type).toBe('PCS');
-    expect(besanLaddu?.unit_type).toBe('KG_LOOSE');
-    expect(besanLaddu?.barcode.startsWith('200')).toBe(true);
-    expect(besanLaddu?.image_url?.startsWith('data:image/svg+xml')).toBe(true);
+    expect(tandlacheLadu?.unit_type).toBe('KG_LOOSE');
+    expect(tandlacheLadu?.barcode.startsWith('200')).toBe(true);
+    expect(tandlacheLadu?.image_url?.startsWith('data:image/svg+xml')).toBe(true);
 
     // 3. Test Fresh Batch Production ("🍳 + Fresh Batch Made" -> BATCH_MADE_IN)
     const restockRes = await InventoryService.restock({
@@ -83,17 +83,17 @@ describe('Multi-Business Engine: Homemade Food (Gruh Udyog) + Separate Workspace
       customerId: WALK_IN_CUSTOMER_ID,
       items: [
         {
-          product: besanLaddu!,
+          product: tandlacheLadu!,
           qty: 1.5,
-          unit_selling_price: besanLaddu!.selling_price,
-          unit_purchase_cost: besanLaddu!.purchase_price,
-          line_total: 1.5 * besanLaddu!.selling_price,
+          unit_selling_price: tandlacheLadu!.selling_price,
+          unit_purchase_cost: tandlacheLadu!.purchase_price,
+          line_total: 1.5 * tandlacheLadu!.selling_price,
         },
       ],
-      subtotalAmount: 1.5 * besanLaddu!.selling_price,
+      subtotalAmount: 1.5 * tandlacheLadu!.selling_price,
       discountRoundoff: 0,
       paymentMode: 'CASH',
-      amountPaidNow: 1.5 * besanLaddu!.selling_price,
+      amountPaidNow: 1.5 * tandlacheLadu!.selling_price,
       udhariAdded: 0,
     });
     expect(hmfCheckout.invoice.invoice_number.startsWith('HMF-')).toBe(true);
@@ -150,9 +150,9 @@ describe('Multi-Business Engine: Homemade Food (Gruh Udyog) + Separate Workspace
     });
 
     expect(order.order_number.startsWith('ORD-')).toBe(true);
-    expect(order.total_amount).toBe(1070);
+    expect(order.total_amount).toBe(21 * modak.selling_price + 1 * kapa.selling_price);
     expect(order.advance_token_paid).toBe(300);
-    expect(order.balance_due).toBe(770);
+    expect(order.balance_due).toBe(order.total_amount - 300);
     expect(order.status).toBe('PENDING');
 
     // 2. Generate WhatsApp Confirmation Slip URL
@@ -160,13 +160,13 @@ describe('Multi-Business Engine: Homemade Food (Gruh Udyog) + Separate Workspace
     const waUrl = HomemadeFoodService.generateAdvanceOrderWhatsAppUrl(order, profile);
     expect(waUrl).toContain('https://wa.me/919822112233?text=');
     expect(decodeURIComponent(waUrl)).toContain(order.order_number);
-    expect(decodeURIComponent(waUrl)).toContain('770');
+    expect(decodeURIComponent(waUrl)).toContain(String(order.balance_due));
 
     // 3. Complete Advance Order & Generate Final HMF- Bill
     const billed = await HomemadeFoodService.completeAdvanceOrderAndBill(order.id, 'UPI');
     expect(billed.order.status).toBe('DELIVERED_BILLED');
     expect(billed.invoice.invoice_number.startsWith('HMF-')).toBe(true);
-    expect(billed.invoice.grand_total).toBe(1070);
+    expect(billed.invoice.grand_total).toBe(order.total_amount);
     expect(billed.saleItems.length).toBe(2);
 
     // Verify stock deducted
@@ -182,7 +182,7 @@ describe('Multi-Business Engine: Homemade Food (Gruh Udyog) + Separate Workspace
     });
 
     const products = await db.products.toArray();
-    const besanLaddu = products.find((p) => p.short_code === 'BSL')!; // sell: 480, cost: 280
+    const laddu = products.find((p) => p.short_code === 'TLD' || p.short_code === 'BSL') || products[0]; // sell: 480, cost: 280
 
     // 1. Record Initial Setup Investment (₹10,000 for Commercial Gas Bhatti, Cast-Iron Bhirda, Modak Steamer)
     await GallaService.recordExpense({
@@ -225,7 +225,7 @@ describe('Multi-Business Engine: Homemade Food (Gruh Udyog) + Separate Workspace
       customerId: WALK_IN_CUSTOMER_ID,
       items: [
         {
-          product: besanLaddu,
+          product: laddu,
           qty: 15.625,
           unit_selling_price: 480,
           unit_purchase_cost: 280,

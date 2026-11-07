@@ -12,6 +12,7 @@ import {
 import { formatINR, roundCurrency, toPaise, toRupees } from '../utils/math';
 import { LoanAccountService } from './loanAccountService';
 import { HomemadeFoodService, CapitalAndExpenseSummary } from './homemadeFoodService';
+import { getActiveShopId, getActiveBusinessType } from '../utils/businessFirewall';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -112,26 +113,44 @@ export class ReportsService {
   // =========================================================================
   // 1. ITEM-WISE & BILL-WISE TRUE PROFIT & COGS MARGIN REPORT
   // =========================================================================
-  static async getProfitAndLossData(range?: DateFilterRange) {
+  static async getProfitAndLossData(range?: DateFilterRange, customShopId?: string) {
+    const activeShopId = customShopId || getActiveShopId();
+    const activeBiz = getActiveBusinessType();
+    const matchesScope = (item: { shop_id?: string | null; business_type?: string | null }) => {
+      if (item.shop_id && activeShopId) {
+        return item.shop_id === activeShopId;
+      }
+      return (item.business_type || 'KIRANA_RETAIL') === activeBiz;
+    };
+
     const allInvoices = await db.sales_invoices.toArray();
     const activeInvoices = allInvoices.filter(
-      (inv) => inv.status === 'COMPLETED' && this.isDateInRange(inv.created_at, range)
+      (inv) => inv.status === 'COMPLETED' && this.isDateInRange(inv.created_at, range) && matchesScope(inv)
     );
     const activeInvoiceIds = new Set(activeInvoices.map((i) => i.id));
 
     const allExpenses = await db.expenses_and_drawings.toArray();
     const filteredExpenses = allExpenses.filter((e) =>
-      this.isDateInRange(e.created_at, range)
+      this.isDateInRange(e.created_at, range) && matchesScope(e)
     );
 
     const allLogs = await db.inventory_logs.toArray();
     const damageLogs = allLogs.filter(
-      (l) => l.reason_type === 'DAMAGE_EXPIRED_OUT' && this.isDateInRange(l.created_at, range)
+      (l) => l.reason_type === 'DAMAGE_EXPIRED_OUT' && this.isDateInRange(l.created_at, range) && matchesScope(l)
     );
 
     // Sales Revenue & COGS from Invoices
     const salesRevenue = activeInvoices.reduce((sum, inv) => sum + inv.grand_total, 0);
-    const cogs = activeInvoices.reduce((sum, inv) => sum + inv.total_cogs, 0);
+
+    // Item-Wise Breakdown & Strict Scoped Sale Items
+    const allSaleItems = await db.sale_items.toArray();
+    const activeSaleItems = allSaleItems.filter(
+      (it) => (it.shop_id === activeShopId || (!it.shop_id && it.business_type === activeBiz) || activeInvoiceIds.has(it.invoice_id)) && activeInvoiceIds.has(it.invoice_id)
+    );
+
+    const invoiceCogs = activeInvoices.reduce((sum, inv) => sum + (inv.total_cogs || 0), 0);
+    const itemsCogs = activeSaleItems.reduce((sum, it) => sum + (it.qty * it.unit_purchase_cost), 0);
+    const cogs = roundCurrency(invoiceCogs > 0 ? invoiceCogs : itemsCogs);
     const grossProfit = roundCurrency(salesRevenue - cogs);
 
     // Operating Expenses (Excludes personal drawings & home use goods)
@@ -139,7 +158,36 @@ export class ReportsService {
       .filter(
         (e) =>
           e.category === 'SHOP_EXPENSE_RENT_ELEC' ||
-          e.category === 'SHOP_EXPENSE_TRANSPORT_BAGS'
+          e.category === 'SHOP_EXPENSE_TRANSPORT_BAGS' ||
+          (e.entry_type === 'BUSINESS_EXPENSE' && e.category !== 'HOME_SELF_USE_GOODS' && e.category !== 'OWNER_CASH_DRAWING' && e.category !== 'RAW_MATERIAL_INGREDIENTS')
+      )
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    // Dedicated breakdown subtotals:
+    const rawMaterialExpenses = filteredExpenses
+      .filter(
+        (e) =>
+          e.category === 'RAW_MATERIAL_INGREDIENTS' ||
+          e.entry_type === 'RAW_MATERIAL_EXPENSE'
+      )
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const initialInvestment = filteredExpenses
+      .filter(
+        (e) =>
+          e.category === 'INITIAL_INVESTMENT_SETUP' ||
+          e.entry_type === 'INITIAL_INVESTMENT' ||
+          (e.description && e.description.toLowerCase().includes('investment'))
+      )
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const homeFamilyExpenses = filteredExpenses
+      .filter(
+        (e) =>
+          e.category === 'HOME_SELF_USE_GOODS' ||
+          e.category === 'OWNER_CASH_DRAWING' ||
+          e.category === 'HOME_FAMILY_EXPENSE' ||
+          e.entry_type === 'HOME_FAMILY_EXPENSE'
       )
       .reduce((sum, e) => sum + e.amount, 0);
 
@@ -163,10 +211,7 @@ export class ReportsService {
       .filter((e) => e.category === 'OWNER_CASH_DRAWING')
       .reduce((sum, e) => sum + e.amount, 0);
 
-    // Item-Wise Breakdown
-    const allSaleItems = await db.sale_items.toArray();
-    const activeSaleItems = allSaleItems.filter((it) => activeInvoiceIds.has(it.invoice_id));
-
+    // Item-Wise Breakdown (using previously scoped activeSaleItems)
     const allProducts = await db.products.toArray();
     const productMap = new Map(allProducts.map((p) => [p.id, p]));
 
@@ -236,6 +281,9 @@ export class ReportsService {
       cogs: roundCurrency(cogs),
       grossProfit,
       shopOperatingExpenses: roundCurrency(shopOperatingExpenses),
+      rawMaterialExpenses: roundCurrency(rawMaterialExpenses),
+      initialInvestment: roundCurrency(initialInvestment),
+      homeFamilyExpenses: roundCurrency(homeFamilyExpenses),
       damageLoss: roundCurrency(damageLoss),
       trueNetProfit,
       homeSelfUseValuation: roundCurrency(homeSelfUseValuation),
@@ -252,11 +300,15 @@ export class ReportsService {
   ): Promise<{ pdfBuffer: ArrayBuffer; xlsxBuffer: Uint8Array }> {
     const data = await this.getProfitAndLossData(range);
     const dateRangeStr = this.getRangeLabel(range);
+    const activeBiz = getActiveBusinessType();
+    const effectiveShopName = shopProfile.business_type === activeBiz
+      ? shopProfile.shop_name
+      : (activeBiz === 'HOMEMADE_FOOD' ? (shopProfile.shop_name.includes('Homemade') || shopProfile.shop_name.includes('Gruh Udyog') ? shopProfile.shop_name : `${shopProfile.shop_name} - Gruh Udyog`) : shopProfile.shop_name);
 
     // 1. PDF
     const doc = new jsPDF();
     doc.setFontSize(16);
-    doc.text(shopProfile.shop_name, 14, 15);
+    doc.text(effectiveShopName, 14, 15);
     doc.setFontSize(11);
     doc.text('Profit & Loss & COGS Margin Report (REQ-14.1 & REQ-21)', 14, 22);
     doc.setFontSize(9);
@@ -306,7 +358,7 @@ export class ReportsService {
     // 2. Excel
     const sheetConfig: SheetConfig = {
       sheetName: 'Profit_and_Loss',
-      shopName: shopProfile.shop_name,
+      shopName: effectiveShopName,
       reportTitle: 'Item-Wise & Bill-Wise True Profit & COGS Margin Report',
       dateRangeStr,
       generatedBy: shopProfile.owner_name,

@@ -27,7 +27,8 @@ import { AuthModal } from '../auth/AuthModal';
 import { NotificationDrawer } from '../notifications/NotificationDrawer';
 import { notificationService } from '../../services/notificationService';
 import { cloudSyncService, CloudSyncStatus } from '../../services/cloudSyncService';
-import { HomemadeFoodService } from '../../services/homemadeFoodService';
+import { HomemadeFoodService, repairMixedBusinessProducts } from '../../services/homemadeFoodService';
+import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal';
 
 export type ActiveTab = 'pos' | 'inventory' | 'khata' | 'galla' | 'reports' | 'settings';
 
@@ -48,11 +49,25 @@ export const Shell: React.FC<ShellProps> = ({
   const { user, userRole, isAuthenticated, isOfflineGuest, signOut } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(() => notificationService.getUnreadCount());
   const [isOnline, setIsOnline] = useState(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
   const [syncStatus, setSyncStatus] = useState<CloudSyncStatus>(() => cloudSyncService.getStatus());
   const [syncToast, setSyncToast] = useState<string | null>(null);
   const [isSwitchingBusiness, setIsSwitchingBusiness] = useState(false);
+
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || (activeEl as HTMLElement).isContentEditable);
+      if ((e.key === '?' || (e.shiftKey && e.key === '/')) && !isInput) {
+        e.preventDefault();
+        setIsShortcutsModalOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
+  }, []);
 
   const currentBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
   const isHomemadeFood = currentBusinessType === 'HOMEMADE_FOOD';
@@ -64,6 +79,7 @@ export const Shell: React.FC<ShellProps> = ({
       await HomemadeFoodService.switchBusinessWorkspace(targetType, {
         seedCatalogIfEmpty: targetType === 'HOMEMADE_FOOD',
       });
+      await repairMixedBusinessProducts();
       setSyncToast(
         targetType === 'HOMEMADE_FOOD'
           ? '🍲 Switched to Homemade Food / Gruh Udyog!'
@@ -152,15 +168,28 @@ export const Shell: React.FC<ShellProps> = ({
                   {shopName}
                 </h1>
                 <div className="flex items-center gap-1.5 text-xs font-medium">
-                  {isOnline ? (
-                    <span className="flex items-center gap-1 text-emerald-400">
+                  {syncStatus.isSyncing ? (
+                    <button
+                      onClick={handleManualSync}
+                      title="Syncing across devices..."
+                      className="flex items-center gap-1 text-blue-400 hover:underline"
+                    >
+                      <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                      <span>Syncing...</span>
+                    </button>
+                  ) : isOnline ? (
+                    <button
+                      onClick={handleManualSync}
+                      title="Click to sync bidirectional now"
+                      className="flex items-center gap-1 text-emerald-400 hover:underline cursor-pointer"
+                    >
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                      <span>Online Sync</span>
-                    </span>
+                      <span>Live Multi-Device Sync</span>
+                    </button>
                   ) : (
                     <span className="flex items-center gap-1 text-amber-400">
                       <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                      <span>Offline Ready</span>
+                      <span>Offline Mode</span>
                     </span>
                   )}
                   <span
@@ -356,6 +385,14 @@ export const Shell: React.FC<ShellProps> = ({
             <div className="flex justify-between"><span>Cash Checkout:</span> <kbd className="text-emerald-400 font-mono">F8</kbd></div>
             <div className="flex justify-between"><span>Udhari Modal:</span> <kbd className="text-amber-400 font-mono">F9</kbd></div>
             <div className="flex justify-between"><span>Switch Cart:</span> <kbd className="text-blue-300 font-mono">F4</kbd></div>
+            <button
+              type="button"
+              onClick={() => setIsShortcutsModalOpen(true)}
+              data-testid="view-all-shortcuts-btn"
+              className="w-full mt-2 py-1 px-2 rounded-md bg-slate-700/60 hover:bg-slate-700 text-orange-300 hover:text-white text-[10px] font-bold flex items-center justify-center gap-1 transition"
+            >
+              <span>View All Shortcuts [?]</span>
+            </button>
           </div>
 
           <button
@@ -490,6 +527,12 @@ export const Shell: React.FC<ShellProps> = ({
         isOpen={isNotificationOpen}
         onClose={() => setIsNotificationOpen(false)}
         onNavigateTab={(tab) => onTabChange(tab)}
+      />
+
+      {/* Keyboard Shortcuts Cheat Sheet */}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
       />
     </div>
   );

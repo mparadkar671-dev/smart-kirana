@@ -5,10 +5,12 @@ import {
   ExpenseCategory,
   ExpenseEntryType,
   ExpensePaidVia,
+  ShopProfile,
 } from '../../types';
 import { db } from '../../db/db';
 import { GallaService } from '../../services/gallaService';
 import { HomemadeFoodService, CapitalAndExpenseSummary } from '../../services/homemadeFoodService';
+import { getActiveShopId, getActiveBusinessType } from '../../services/tenantManager';
 import { formatINR, roundCurrency } from '../../utils/math';
 import {
   Wallet,
@@ -23,7 +25,14 @@ import {
   Plus,
 } from 'lucide-react';
 
-export const GallaView: React.FC = () => {
+interface GallaViewProps {
+  shopProfile?: ShopProfile | null;
+}
+
+export const GallaView: React.FC<GallaViewProps> = ({ shopProfile }) => {
+  const activeBizType = shopProfile?.business_type || getActiveBusinessType();
+  const activeShopId = shopProfile?.id || getActiveShopId(activeBizType);
+
   const [session, setSession] = useState<DailyGallaSession | null>(null);
   const [expenses, setExpenses] = useState<ExpenseAndDrawing[]>([]);
 
@@ -40,12 +49,37 @@ export const GallaView: React.FC = () => {
   const [expDesc, setExpDesc] = useState('');
   const [capitalSummary, setCapitalSummary] = useState<CapitalAndExpenseSummary | null>(null);
 
+  // Hotkey: N to Record Expense (when not focused on input) & Esc to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isExpenseModalOpen) {
+        e.preventDefault();
+        setIsExpenseModalOpen(false);
+        return;
+      }
+
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        activeEl instanceof HTMLSelectElement;
+      if (isInput) return;
+
+      if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setIsExpenseModalOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isExpenseModalOpen]);
+
   useEffect(() => {
     loadGallaData();
-  }, []);
+  }, [activeShopId, activeBizType]);
 
   const loadGallaData = async () => {
-    const todaySession = await GallaService.getOrCreateTodaySession();
+    const todaySession = await GallaService.getOrCreateTodaySession(activeShopId);
     setSession(todaySession);
     setOpeningCashInput(todaySession.opening_cash.toString());
     if (todaySession.actual_counted_cash !== null && todaySession.actual_counted_cash !== undefined) {
@@ -54,7 +88,7 @@ export const GallaView: React.FC = () => {
 
     const todayDate = new Date().toISOString().split('T')[0];
     const expList = await db.expenses_and_drawings
-      .filter((e) => e.created_at.startsWith(todayDate))
+      .filter((e) => e.created_at.startsWith(todayDate) && (e.shop_id === activeShopId || (!e.shop_id && e.business_type === activeBizType)))
       .reverse()
       .sortBy('created_at');
     setExpenses(expList);
@@ -66,7 +100,7 @@ export const GallaView: React.FC = () => {
   const handleUpdateOpeningCash = async () => {
     if (!session) return;
     const val = parseFloat(openingCashInput) || 0;
-    const updated = await GallaService.setOpeningCash(session.session_date, val);
+    const updated = await GallaService.setOpeningCash(session.session_date, val, activeShopId);
     setSession(updated);
   };
 
@@ -75,7 +109,7 @@ export const GallaView: React.FC = () => {
     const val = parseFloat(countedCashInput);
     if (isNaN(val)) return;
 
-    const updated = await GallaService.recordEveningCashCount(session.session_date, val);
+    const updated = await GallaService.recordEveningCashCount(session.session_date, val, activeShopId);
     setSession(updated);
   };
 
@@ -89,6 +123,8 @@ export const GallaView: React.FC = () => {
       amount: expAmount,
       paidVia: expPaidVia,
       description: expDesc,
+      shop_id: activeShopId,
+      business_type: activeBizType,
     });
 
     setIsExpenseModalOpen(false);
@@ -124,7 +160,7 @@ export const GallaView: React.FC = () => {
           className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition"
         >
           <Plus className="w-4 h-4" />
-          <span>Record Shop Expense / Drawing</span>
+          <span>Record Shop Expense / Drawing [N]</span>
         </button>
       </div>
 

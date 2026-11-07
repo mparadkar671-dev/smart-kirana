@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { SalesInvoice, SaleItem, ShopProfile, Customer } from '../../types';
 import { formatRupees } from '../../utils/math';
 import {
@@ -11,9 +11,11 @@ import {
   Sparkles,
   MessageSquare,
   Image as ImageIcon,
+  RotateCcw,
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { generateReceiptCanvas } from '../../utils/receiptCanvas';
+import { PartialReturnModal } from './PartialReturnModal';
 
 interface ReceiptModalProps {
   isOpen: boolean;
@@ -35,6 +37,32 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const receiptRef = useRef<HTMLDivElement>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || !invoice) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+
+      if ((e.key === 'Enter' || e.key === 'p' || e.key === 'P') && !isInput) {
+        e.preventDefault();
+        window.print();
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, invoice, onClose]);
 
   if (!isOpen || !invoice) return null;
 
@@ -300,7 +328,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     : '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+    <div
+      role="dialog"
+      aria-modal="true"
+      data-testid="receipt-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto"
+    >
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-sm w-full overflow-hidden my-6 animate-in fade-in zoom-in-95 duration-150">
         {/* Modal Controls (Hidden during print) */}
         <div className="no-print bg-slate-100 dark:bg-slate-800 p-3.5 flex flex-col gap-2.5 border-b border-slate-200 dark:border-slate-700">
@@ -374,6 +407,15 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
             </h1>
             <p className="text-[11px] text-slate-600">{profile?.address}</p>
             <p className="text-[11px] text-slate-600">Ph: {profile?.phone}</p>
+            <div className={`text-center font-bold text-[11px] uppercase tracking-wider py-1 mt-2 rounded border ${
+              safeItems.some((i) => i.sale_rate_type === 'WHOLESALE_RETAILER')
+                ? 'bg-blue-50 text-blue-900 border-blue-300'
+                : 'bg-slate-50 text-slate-800 border-slate-300'
+            }`}>
+              {safeItems.some((i) => i.sale_rate_type === 'WHOLESALE_RETAILER')
+                ? '🏪 B2B WHOLESALE INVOICE'
+                : '🧾 RETAIL BILL'}
+            </div>
           </div>
 
           {/* Invoice Meta */}
@@ -487,7 +529,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         </div>
 
         {/* Modal Bottom Close */}
-        <div className="no-print p-3 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center">
+        <div className="no-print p-3 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-700 flex justify-between items-center gap-2">
           <button
             onClick={handleCopyImage}
             disabled={isExporting}
@@ -495,13 +537,41 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           >
             <Copy className="w-3.5 h-3.5" /> Copy Image for WhatsApp Web
           </button>
-          <button
-            onClick={onClose}
-            className="px-4 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-xl text-xs font-semibold transition"
-          >
-            Done (ESC)
-          </button>
+          <div className="flex items-center gap-2">
+            {invoice.status !== 'RETURNED' && invoice.status !== 'VOIDED' && (
+              <button
+                type="button"
+                data-testid="open-partial-return-btn"
+                onClick={() => setIsReturnModalOpen(true)}
+                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950 dark:hover:bg-rose-900 border border-rose-300 dark:border-rose-800 rounded-xl text-xs font-bold transition flex items-center gap-1"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Return / Credit Note</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-white rounded-xl text-xs font-semibold transition"
+            >
+              Done (ESC)
+            </button>
+          </div>
         </div>
+
+        {/* Partial Return Modal */}
+        {isReturnModalOpen && (
+          <PartialReturnModal
+            isOpen={isReturnModalOpen}
+            onClose={() => setIsReturnModalOpen(false)}
+            invoice={invoice}
+            items={safeItems}
+            customer={customer}
+            onSuccess={() => {
+              setIsReturnModalOpen(false);
+              onClose();
+            }}
+          />
+        )}
       </div>
     </div>
   );

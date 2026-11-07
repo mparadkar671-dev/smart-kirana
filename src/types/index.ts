@@ -5,6 +5,7 @@ export type BusinessType = 'KIRANA_RETAIL' | 'HOMEMADE_FOOD';
 
 export const KIRANA_CATEGORIES = [
   'All Categories',
+  'Groceries',
   'Dals & Pulses',
   'Grains & Flours',
   'Spices & Masala',
@@ -22,11 +23,13 @@ export const KIRANA_CATEGORIES = [
 export const HOMEMADE_FOOD_CATEGORIES = [
   'All Homemade Items',
   'Traditional Laddus (लाडू)',
+  'Homemade Laddus & Vadi (लाडू, खोबऱ्याची वडी / कापा)',
   'Modak & Festive Specials (मोदक / पुरणपोळी)',
+  'Modak & Festive Specials (उकडीचे मोदक, तळणीचे मोदक)',
   'Konkani Breakfast (घावणे / आंबोळी)',
-  'Fresh Bhakri & Chapati (भाकरी / चपाती)',
-  'Homemade Vadi & Kapa (खोबऱ्याच्या कापा)',
-  'Homemade Pickles & Chutney (लोणचे / चटणी)',
+  'Konkani Breakfast & Tiffin (घावणे, आंबोळी, पोहे, उपमा)',
+  'Fresh Bhakri & Chapati (भाकरी, चपाती, पुरणपोळी)',
+  'Homemade Pickles, Chutney & Papad (लोणचे, चटणी, पापड)',
 ];
 
 export type UnitType = 'PCS' | 'KG_LOOSE' | 'LTR' | 'PACK' | 'PLATE' | 'DOZEN';
@@ -42,18 +45,29 @@ export interface Product {
   barcode: string; // Text
   category: string; // Text
   unit_type: UnitType;
-  purchase_price: number; // Numeric 10,2
-  selling_price: number; // Numeric 10,2
-  mrp: number; // Numeric 10,2
+  purchase_price: number; // Numeric 10,2 (Making cost in Homemade Food; Wholesale cost in Kirana)
+  selling_price: number; // Numeric 10,2 (Direct customer retail price)
+  mrp: number; // Numeric 10,2 (Printed MRP / Box price)
   current_stock: number; // Numeric 10,3 (supports e.g. 5.250 kg, 3.500 kg, 0.500 kg)
   low_stock_threshold: number; // Numeric 10,3 (supports e.g. 0.500 kg, 0.250 kg)
   last_supplier_name: string;
   supplier_phone?: string; // Contact phone for direct WhatsApp / SMS purchase orders
-  wholesaler_id?: string | null; // FK to Wholesaler entity
+  wholesaler_id?: string | null; // FK to Wholesaler entity (Kirana only)
   loan_account_id?: string | null; // FK to LoanAccount if stock was purchased using loan capital
+  is_loan_funded?: boolean; // Boolean (True if purchased/funded from loan)
   image_url?: string | null; // Compressed 160x160px WebP DataURL (<15KB) or remote URL
   expiry_date?: string | null; // Date (YYYY-MM-DD, nullable)
   is_quick_tap: boolean; // Boolean (Top-24 Fast-Tap Pareto items)
+
+  // Dedicated Homemade Food (Gruh Udyog) costing & dual pricing fields
+  raw_material_cost?: number; // Numeric 12,2 (Flour, Coconut, Jaggery, Sugar, Oil/Ghee)
+  equipment_fuel_cost?: number; // Numeric 12,2 (LPG Gas, Electricity, Packaging boxes)
+  labour_cost?: number; // Numeric 12,2 (Cooking/Making labour effort)
+  wholesale_price?: number; // Numeric 12,2 (Rate for Retailers / Bulk B2B sales)
+  shelf_life_days?: number; // Shelf life / freshness duration in days
+  batch_notes?: string; // Optional batch notes
+  recipe_bom?: RecipeIngredient[]; // v4.0.0 Recipe Bill of Materials
+
   updated_at: string; // ISO Timestamp
 }
 
@@ -178,6 +192,8 @@ export interface SaleItem {
   unit_selling_price: number; // Numeric 10,2
   line_total: number; // Numeric 10,2
   loan_account_id?: string | null; // Snapshot of product's loan_account_id at time of sale
+  is_loan_funded?: boolean; // Snapshot of whether item was loan-funded
+  sale_rate_type?: 'RETAIL_CUSTOMER' | 'WHOLESALE_RETAILER'; // Direct Customer MRP vs Retailer Bulk
 }
 
 export type KhataEntryType = 'DEBIT_UDHARI_GIVEN' | 'CREDIT_JAMA_RECEIVED';
@@ -271,6 +287,11 @@ export interface ShopProfile {
   upi_vpa: string; // e.g., 'kirana@upi' or phone@oksbi
   address: string;
   gst_footer_note: string;
+  // v4.0.0 Manager PIN Security & Rate Limiting
+  pin_hash?: string;
+  pin_salt?: string;
+  pin_failed_attempts?: number;
+  pin_locked_until?: string;
   updated_at: string;
 }
 
@@ -394,6 +415,104 @@ export interface BusinessWorkspaceRecord {
   wholesalers: Wholesaler[];
   updated_at: string;
 }
+
+// ==========================================
+// v4.0.0 Enterprise Module Types & Interfaces
+// ==========================================
+
+export interface RecipeIngredient {
+  raw_material_product_id?: string;
+  name: string; // e.g. "Gram Flour (Besan)" or "Pure Cow Ghee"
+  qty_required: number; // e.g. 0.500
+  unit: UnitType; // e.g. "KG_LOOSE"
+  cost_estimate?: number;
+}
+
+export interface ProductionBatch {
+  id: string; // UUID PK
+  shop_id?: string;
+  business_type?: BusinessType;
+  product_id: string; // FK to Product
+  batch_code: string; // e.g. "BATCH-20261107-001"
+  initial_qty: number;
+  remaining_qty: number;
+  unit_type: UnitType;
+  unit_production_cost: number;
+  produced_at: string; // ISO string
+  shelf_life_days: number;
+  expires_at: string; // ISO string (produced_at + shelf_life_days)
+  status: 'ACTIVE' | 'EXHAUSTED' | 'EXPIRED' | 'SPOILED';
+  notes?: string;
+  created_at: string;
+}
+
+export interface PurchaseInvoiceItem {
+  product_id: string;
+  product_name: string;
+  qty: number;
+  unit_type: UnitType;
+  purchase_price: number;
+  selling_price?: number;
+  mrp?: number;
+  line_total: number;
+  batch_code?: string;
+  expiry_date?: string;
+}
+
+export interface PurchaseInvoice {
+  id: string;
+  shop_id?: string;
+  business_type?: BusinessType;
+  invoice_number: string; // e.g. "PUR-20261107-001"
+  wholesaler_id: string;
+  wholesaler_name: string;
+  invoice_date: string;
+  items: PurchaseInvoiceItem[];
+  subtotal: number;
+  tax_amount?: number;
+  grand_total: number;
+  payment_mode: 'CASH' | 'BANK_UPI' | 'CREDIT_UDHARI' | 'SPLIT';
+  amount_paid: number;
+  balance_due: number;
+  status: 'RECEIVED' | 'CANCELLED';
+  notes?: string;
+  created_at: string;
+}
+
+export interface WholesalerKhataTransaction {
+  id: string;
+  shop_id?: string;
+  business_type?: BusinessType;
+  wholesaler_id: string;
+  entry_type: 'PURCHASE_CREDIT_DUE' | 'PAYMENT_MADE_SETTLED';
+  amount: number;
+  payment_channel?: 'CASH' | 'UPI_BANK' | 'CHEQUE';
+  purchase_invoice_id?: string | null;
+  running_balance_after: number;
+  notes?: string;
+  created_at: string;
+}
+
+export interface SecurityAuditLog {
+  id: string;
+  shop_id?: string;
+  business_type?: BusinessType;
+  event_type:
+    | 'PIN_FAILED_ATTEMPT'
+    | 'LOCKOUT_TRIGGERED'
+    | 'CREDIT_LIMIT_OVERRIDE'
+    | 'NEGATIVE_STOCK_OVERRIDE'
+    | 'BILL_DISCOUNT_OVERRIDE'
+    | 'PIN_CHANGED'
+    | 'SPOILED_BATCH_LOGGED'
+    | 'STOCK_TRANSFER_AUDIT';
+  cashier_id?: string;
+  cashier_name?: string;
+  action_summary: string;
+  metadata?: Record<string, unknown>;
+  timestamp: string;
+}
+
 
 
 

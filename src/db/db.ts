@@ -21,8 +21,19 @@ import {
   BusinessWorkspaceRecord,
   WALK_IN_CUSTOMER_RECORD,
   WALK_IN_CUSTOMER_ID,
+  ProductionBatch,
+  PurchaseInvoice,
+  WholesalerKhataTransaction,
+  SecurityAuditLog,
 } from '../types';
 import { INITIAL_PRODUCTS, DEFAULT_SHOP_PROFILE, INITIAL_CUSTOMERS, INITIAL_WHOLESALERS } from './seed';
+import {
+  resolveProductBusinessType,
+  getHomemadeShopIdForOwner,
+  getActiveShopId,
+  getActiveBusinessType,
+  isHomemadeShopId,
+} from '../utils/businessFirewall';
 
 export function generateInviteCode(): string {
   const num = Math.floor(1000 + Math.random() * 9000);
@@ -63,9 +74,13 @@ export class KiranaDatabase extends Dexie {
   loan_accounts!: EntityTable<LoanAccount, 'id'>;
   advance_orders!: EntityTable<AdvanceOrder, 'id'>;
   business_workspaces!: EntityTable<BusinessWorkspaceRecord, 'business_type'>;
+  production_batches!: EntityTable<ProductionBatch, 'id'>;
+  purchase_invoices!: EntityTable<PurchaseInvoice, 'id'>;
+  wholesaler_khata_transactions!: EntityTable<WholesalerKhataTransaction, 'id'>;
+  security_audit_logs!: EntityTable<SecurityAuditLog, 'id'>;
 
-  constructor() {
-    super('SmartKiranaDB');
+  constructor(dbName = 'SmartKiranaDB') {
+    super(dbName);
 
     this.version(1).stores({
       products: 'id, barcode, short_code, name, category, is_quick_tap, updated_at',
@@ -230,6 +245,48 @@ export class KiranaDatabase extends Dexie {
       business_workspaces: 'business_type, updated_at',
     });
 
+    this.version(12).stores({
+      products: 'id, shop_id, business_type, [shop_id+business_type], barcode, short_code, name, marathi_name, search_keywords, category, is_quick_tap, wholesaler_id, loan_account_id, updated_at',
+      inventory_logs: 'id, shop_id, business_type, [shop_id+business_type], product_id, reason_type, reference_id, loan_account_id, created_at',
+      customers: 'id, shop_id, business_type, [shop_id+business_type], phone, name, current_udhari_balance, created_at',
+      sales_invoices: 'id, shop_id, business_type, [shop_id+business_type], invoice_number, customer_id, payment_mode, status, credit_note_number, created_at',
+      sale_items: 'id, shop_id, business_type, [shop_id+business_type], invoice_id, product_id, loan_account_id',
+      khata_transactions: 'id, shop_id, business_type, [shop_id+business_type], customer_id, entry_type, invoice_id, payment_channel, created_at',
+      expenses_and_drawings: 'id, shop_id, business_type, [shop_id+business_type], entry_type, category, paid_via, created_at',
+      daily_galla_sessions: 'id, shop_id, business_type, [shop_id+business_type], [shop_id+session_date], session_date, created_at',
+      shop_profile: 'id, shop_id, invite_code, business_type',
+      store_users: 'id, user_id, email, role, shop_id, created_at',
+      sync_outbox: 'id, table_name, shop_id, status, created_at, retry_count',
+      credit_notes: 'id, shop_id, credit_note_number, original_invoice_id, customer_id, created_at',
+      wholesalers: 'id, shop_id, business_type, [shop_id+business_type], name, phone, agency_or_brand, is_active, created_at',
+      loan_accounts: 'id, shop_id, name, lender_name, is_active, created_at',
+      advance_orders: 'id, shop_id, business_type, [shop_id+business_type], customer_id, delivery_date, status, created_at',
+      business_workspaces: 'business_type, updated_at',
+    });
+
+    this.version(13).stores({
+      products: 'id, shop_id, business_type, [shop_id+business_type], barcode, short_code, name, marathi_name, search_keywords, category, is_quick_tap, wholesaler_id, loan_account_id, updated_at',
+      inventory_logs: 'id, shop_id, business_type, [shop_id+business_type], product_id, reason_type, reference_id, loan_account_id, created_at',
+      customers: 'id, shop_id, business_type, [shop_id+business_type], phone, name, current_udhari_balance, created_at',
+      sales_invoices: 'id, shop_id, business_type, [shop_id+business_type], invoice_number, customer_id, payment_mode, status, credit_note_number, created_at',
+      sale_items: 'id, shop_id, business_type, [shop_id+business_type], invoice_id, product_id, loan_account_id',
+      khata_transactions: 'id, shop_id, business_type, [shop_id+business_type], customer_id, entry_type, invoice_id, payment_channel, created_at',
+      expenses_and_drawings: 'id, shop_id, business_type, [shop_id+business_type], entry_type, category, paid_via, created_at',
+      daily_galla_sessions: 'id, shop_id, business_type, [shop_id+business_type], [shop_id+session_date], session_date, created_at',
+      shop_profile: 'id, shop_id, invite_code, business_type',
+      store_users: 'id, user_id, email, role, shop_id, created_at',
+      sync_outbox: 'id, table_name, shop_id, status, created_at, retry_count',
+      credit_notes: 'id, shop_id, credit_note_number, original_invoice_id, customer_id, created_at',
+      wholesalers: 'id, shop_id, business_type, [shop_id+business_type], name, phone, agency_or_brand, is_active, created_at',
+      loan_accounts: 'id, shop_id, name, lender_name, is_active, created_at',
+      advance_orders: 'id, shop_id, business_type, [shop_id+business_type], customer_id, delivery_date, status, created_at',
+      business_workspaces: 'business_type, updated_at',
+      production_batches: 'id, shop_id, business_type, [shop_id+business_type], product_id, batch_code, status, expires_at, produced_at',
+      purchase_invoices: 'id, shop_id, business_type, [shop_id+business_type], invoice_number, wholesaler_id, invoice_date, created_at',
+      wholesaler_khata_transactions: 'id, shop_id, business_type, [shop_id+business_type], wholesaler_id, entry_type, created_at',
+      security_audit_logs: 'id, shop_id, business_type, [shop_id+business_type], event_type, timestamp',
+    });
+
     // Multi-tenant Hook: Ensure all records are always tagged with shop_id and invite code
     const tenantTables = [
       this.products,
@@ -245,14 +302,21 @@ export class KiranaDatabase extends Dexie {
       this.wholesalers,
       this.loan_accounts,
       this.advance_orders,
+      this.production_batches,
+      this.purchase_invoices,
+      this.wholesaler_khata_transactions,
+      this.security_audit_logs,
     ];
 
     tenantTables.forEach((table) => {
       (table as any).hook('creating', (_primKey: unknown, obj: Record<string, unknown>) => {
         if (!obj.shop_id) {
-          obj.shop_id = 'current_shop';
+          const activeShopId = typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null;
+          obj.shop_id = activeShopId || 'current_shop';
         }
-        if (!obj.business_type) {
+        if (table === this.products || obj.category) {
+          obj.business_type = resolveProductBusinessType(obj as any);
+        } else if (!obj.business_type) {
           const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_business_type') : null;
           obj.business_type = stored === 'HOMEMADE_FOOD' ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL';
         }
@@ -261,7 +325,8 @@ export class KiranaDatabase extends Dexie {
 
     (this.shop_profile as any).hook('creating', (_primKey: unknown, obj: Record<string, unknown>) => {
       if (!obj.shop_id) {
-        obj.shop_id = 'current_shop';
+        const activeShopId = typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null;
+        obj.shop_id = activeShopId || 'current_shop';
       }
       if (!obj.invite_code) {
         obj.invite_code = generateInviteCode();
@@ -350,8 +415,16 @@ export class KiranaDatabase extends Dexie {
    * If scopedBusinessType is provided, wipes ONLY records belonging to that business type,
    * leaving the other business's records 100% untouched!
    */
-  async clearAllRecordsToEmpty(scopedBusinessType?: BusinessType): Promise<void> {
-    if (scopedBusinessType) {
+  async clearAllRecordsToEmpty(scopedBusinessType?: BusinessType, scopedShopId?: string): Promise<void> {
+    const targetShopId =
+      scopedShopId ||
+      (scopedBusinessType
+        ? scopedBusinessType === 'HOMEMADE_FOOD'
+          ? getHomemadeShopIdForOwner(getActiveShopId())
+          : getActiveShopId()
+        : (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null));
+
+    if (scopedBusinessType || targetShopId) {
       await this.transaction(
         'rw',
         [
@@ -365,18 +438,32 @@ export class KiranaDatabase extends Dexie {
           this.inventory_logs,
           this.wholesalers,
           this.advance_orders,
+          this.production_batches,
+          this.purchase_invoices,
+          this.wholesaler_khata_transactions,
+          this.security_audit_logs,
         ],
         async () => {
-          await this.products.filter((p) => (p.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.inventory_logs.filter((l) => (l.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.sales_invoices.filter((i) => (i.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.sale_items.filter((s) => (s.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.khata_transactions.filter((k) => (k.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.expenses_and_drawings.filter((e) => (e.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.daily_galla_sessions.filter((g) => (g.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.advance_orders.filter((a) => (a.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.wholesalers.filter((w) => (w.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.customers.filter((c) => (c.business_type || 'KIRANA_RETAIL') === scopedBusinessType && c.id !== WALK_IN_CUSTOMER_ID).delete();
+          const matchesScope = (item: any) => {
+            if (targetShopId && item.shop_id && item.shop_id === targetShopId) return true;
+            if (scopedBusinessType && (item.business_type || 'KIRANA_RETAIL') === scopedBusinessType) return true;
+            return false;
+          };
+
+          await this.products.filter(matchesScope).delete();
+          await this.inventory_logs.filter(matchesScope).delete();
+          await this.sales_invoices.filter(matchesScope).delete();
+          await this.sale_items.filter(matchesScope).delete();
+          await this.khata_transactions.filter(matchesScope).delete();
+          await this.expenses_and_drawings.filter(matchesScope).delete();
+          await this.daily_galla_sessions.filter(matchesScope).delete();
+          await this.advance_orders.filter(matchesScope).delete();
+          await this.wholesalers.filter(matchesScope).delete();
+          await this.production_batches.filter(matchesScope).delete();
+          await this.purchase_invoices.filter(matchesScope).delete();
+          await this.wholesaler_khata_transactions.filter(matchesScope).delete();
+          await this.security_audit_logs.filter(matchesScope).delete();
+          await this.customers.filter((c) => matchesScope(c) && c.id !== WALK_IN_CUSTOMER_ID).delete();
         }
       );
       return;
@@ -397,6 +484,10 @@ export class KiranaDatabase extends Dexie {
         this.loan_accounts,
         this.advance_orders,
         this.business_workspaces,
+        this.production_batches,
+        this.purchase_invoices,
+        this.wholesaler_khata_transactions,
+        this.security_audit_logs,
       ],
       async () => {
         await this.products.clear();
@@ -411,6 +502,10 @@ export class KiranaDatabase extends Dexie {
         await this.loan_accounts.clear();
         await this.advance_orders.clear();
         await this.business_workspaces.clear();
+        await this.production_batches.clear();
+        await this.purchase_invoices.clear();
+        await this.wholesaler_khata_transactions.clear();
+        await this.security_audit_logs.clear();
 
         // Re-insert mandatory WALK_IN_CUSTOMER
         await this.customers.add(WALK_IN_CUSTOMER_RECORD);
@@ -423,8 +518,16 @@ export class KiranaDatabase extends Dexie {
    * As specified in REQ-03 Acceptance Gate.
    * If scopedBusinessType is provided, wipes ONLY transactional data for that business!
    */
-  async clearTransactionalData(scopedBusinessType?: BusinessType): Promise<void> {
-    if (scopedBusinessType) {
+  async clearTransactionalData(scopedBusinessType?: BusinessType, scopedShopId?: string): Promise<void> {
+    const targetShopId =
+      scopedShopId ||
+      (scopedBusinessType
+        ? scopedBusinessType === 'HOMEMADE_FOOD'
+          ? getHomemadeShopIdForOwner(getActiveShopId())
+          : getActiveShopId()
+        : (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null));
+
+    if (scopedBusinessType || targetShopId) {
       await this.transaction(
         'rw',
         [
@@ -435,15 +538,29 @@ export class KiranaDatabase extends Dexie {
           this.daily_galla_sessions,
           this.inventory_logs,
           this.advance_orders,
+          this.production_batches,
+          this.purchase_invoices,
+          this.wholesaler_khata_transactions,
+          this.security_audit_logs,
         ],
         async () => {
-          await this.sales_invoices.filter((i) => (i.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.sale_items.filter((s) => (s.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.khata_transactions.filter((k) => (k.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.expenses_and_drawings.filter((e) => (e.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.daily_galla_sessions.filter((g) => (g.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.inventory_logs.filter((l) => (l.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
-          await this.advance_orders.filter((a) => (a.business_type || 'KIRANA_RETAIL') === scopedBusinessType).delete();
+          const matchesScope = (item: any) => {
+            if (targetShopId && item.shop_id && item.shop_id === targetShopId) return true;
+            if (scopedBusinessType && (item.business_type || 'KIRANA_RETAIL') === scopedBusinessType) return true;
+            return false;
+          };
+
+          await this.sales_invoices.filter(matchesScope).delete();
+          await this.sale_items.filter(matchesScope).delete();
+          await this.khata_transactions.filter(matchesScope).delete();
+          await this.expenses_and_drawings.filter(matchesScope).delete();
+          await this.daily_galla_sessions.filter(matchesScope).delete();
+          await this.inventory_logs.filter(matchesScope).delete();
+          await this.advance_orders.filter(matchesScope).delete();
+          await this.production_batches.filter(matchesScope).delete();
+          await this.purchase_invoices.filter(matchesScope).delete();
+          await this.wholesaler_khata_transactions.filter(matchesScope).delete();
+          await this.security_audit_logs.filter(matchesScope).delete();
         }
       );
       return;
@@ -460,6 +577,10 @@ export class KiranaDatabase extends Dexie {
         this.inventory_logs,
         this.customers,
         this.advance_orders,
+        this.production_batches,
+        this.purchase_invoices,
+        this.wholesaler_khata_transactions,
+        this.security_audit_logs,
       ],
       async () => {
         await this.sales_invoices.clear();
@@ -469,6 +590,10 @@ export class KiranaDatabase extends Dexie {
         await this.daily_galla_sessions.clear();
         await this.inventory_logs.clear();
         await this.advance_orders.clear();
+        await this.production_batches.clear();
+        await this.purchase_invoices.clear();
+        await this.wholesaler_khata_transactions.clear();
+        await this.security_audit_logs.clear();
 
         // Reset non-walkin customer balances to 0
         const allCustomers = await this.customers.toArray();
@@ -544,20 +669,56 @@ export class KiranaDatabase extends Dexie {
   /**
    * Fetch current shop profile (pure read-only for liveQuery)
    */
-  async getShopProfile(): Promise<ShopProfile> {
-    const profile = await this.shop_profile.get(DEFAULT_SHOP_PROFILE.id);
-    return profile || DEFAULT_SHOP_PROFILE;
+  async getShopProfile(targetShopId?: string): Promise<ShopProfile> {
+    const activeShopId =
+      targetShopId ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) ||
+      DEFAULT_SHOP_PROFILE.id;
+
+    let profile = await this.shop_profile.get(activeShopId);
+    if (!profile) {
+      profile = await this.shop_profile.where('shop_id').equals(activeShopId).first();
+    }
+    if (!profile) {
+      const activeBizType =
+        typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_business_type') : null;
+      if (activeBizType) {
+        profile = await this.shop_profile.where('business_type').equals(activeBizType).first();
+      }
+    }
+    if (!profile) {
+      const first = await this.shop_profile.toCollection().first();
+      profile = first || DEFAULT_SHOP_PROFILE;
+    }
+    return profile;
   }
 
   /**
    * Update shop profile
    */
   async updateShopProfile(profile: Partial<ShopProfile>): Promise<void> {
-    const current = (await this.shop_profile.get(DEFAULT_SHOP_PROFILE.id)) || DEFAULT_SHOP_PROFILE;
+    const targetId =
+      profile.id ||
+      profile.shop_id ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) ||
+      DEFAULT_SHOP_PROFILE.id;
+
+    let current = await this.shop_profile.get(targetId);
+    if (!current) {
+      current = await this.shop_profile.where('shop_id').equals(targetId).first();
+    }
+    if (!current) {
+      current = {
+        ...DEFAULT_SHOP_PROFILE,
+        id: targetId,
+        shop_id: targetId,
+      };
+    }
     await this.shop_profile.put({
       ...current,
       ...profile,
-      id: DEFAULT_SHOP_PROFILE.id,
+      id: targetId,
+      shop_id: targetId,
       updated_at: new Date().toISOString(),
     });
   }
@@ -832,5 +993,68 @@ export class KiranaDatabase extends Dexie {
   }
 }
 
-export const db = new KiranaDatabase();
+export const SmartKiranaDB = KiranaDatabase;
+export type SmartKiranaDB = KiranaDatabase;
+
+// Physical Two-Database Partitioning (REQ: Step 1)
+export const kiranaDb = new KiranaDatabase('SmartKiranaDB_Retail_v3');
+export const homemadeDb = new KiranaDatabase('SmartKiranaDB_Homemade_v3');
+
+/**
+ * Returns the physically isolated database according to the active business type
+ */
+export function getActiveDb(activeBusinessType?: BusinessType): KiranaDatabase {
+  const biz = activeBusinessType || getActiveBusinessType();
+  return biz === 'HOMEMADE_FOOD' ? homemadeDb : kiranaDb;
+}
+
+/**
+ * Transparent Proxy delegating all operations to the currently active database
+ */
+export const db = new Proxy(kiranaDb, {
+  get(_target, prop, receiver) {
+    const active = getActiveDb();
+    const val = Reflect.get(active, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(active);
+    }
+    return val;
+  },
+  set(_target, prop, value, receiver) {
+    const active = getActiveDb();
+    return Reflect.set(active, prop, value, receiver);
+  },
+}) as KiranaDatabase;
+
+/**
+ * One-time clean slate purge to eliminate legacy mixed tables and start pristine
+ */
+export async function performCleanSlateV3IfNeeded(): Promise<void> {
+  if (typeof localStorage === 'undefined') return;
+  if (localStorage.getItem('clean_slate_v3_done') === 'true') return;
+
+  try {
+    if (await Dexie.exists('SmartKiranaDB')) {
+      const legacy = new Dexie('SmartKiranaDB');
+      await legacy.delete().catch(() => {});
+    }
+
+    await kiranaDb.clearAllRecordsToEmpty().catch(() => {});
+    await homemadeDb.clearAllRecordsToEmpty().catch(() => {});
+
+    await kiranaDb.initializeDatabase({ seedDemo: true }).catch(() => {});
+    await homemadeDb.initializeDatabase({ seedDemo: false }).catch(() => {});
+    await homemadeDb.updateShopProfile({
+      business_type: 'HOMEMADE_FOOD',
+      invoice_prefix: 'HMF',
+      shop_name: 'Shree Ganesh Gruh Udyog',
+    }).catch(() => {});
+
+    localStorage.setItem('clean_slate_v3_done', 'true');
+    console.log('Clean Slate v3: Two physically isolated databases initialized.');
+  } catch (err) {
+    console.warn('Clean slate v3 initialization error:', err);
+    localStorage.setItem('clean_slate_v3_done', 'true');
+  }
+}
 

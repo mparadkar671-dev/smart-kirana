@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
-import { Product, ShopProfile, BusinessType, KIRANA_CATEGORIES, HOMEMADE_FOOD_CATEGORIES } from '../../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Product, ShopProfile, BusinessType, Wholesaler, KIRANA_CATEGORIES, HOMEMADE_FOOD_CATEGORIES } from '../../types';
 import { ProductModal } from './ProductModal';
 import { StockAdjustmentModal } from './StockAdjustmentModal';
 import { RestockAlertsView } from './RestockAlertsView';
+import { InterBusinessTransferModal } from './InterBusinessTransferModal';
+import { BatchSpoilageModal } from './BatchSpoilageModal';
+import { WholesalerPurchaseModal } from './WholesalerPurchaseModal';
 import { InventoryService } from '../../services/inventoryService';
 import { HomemadeFoodService, isHomemadeFoodCategoryOrName } from '../../services/homemadeFoodService';
+import { filterProductsForBusiness } from '../../utils/businessFirewall';
 import {
   MAHARASHTRA_105_KIRANA_CATALOG,
   parseKiranaCatalogCsv,
@@ -50,11 +54,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
   const isHomemade = activeBusinessType === 'HOMEMADE_FOOD';
 
-  // Strict data isolation defense-in-depth:
-  const businessProducts = products.filter((p) => {
-    const pType = p.business_type || (isHomemadeFoodCategoryOrName(p) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL');
-    return pType === activeBusinessType;
-  });
+  // Strict business isolation defense-in-depth:
+  const businessProducts = useMemo(
+    () => filterProductsForBusiness(products, activeBusinessType),
+    [products, activeBusinessType]
+  );
 
   const [activeTab, setActiveTab] = useState<'all' | 'restock'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -67,6 +71,36 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [adjustmentMode, setAdjustmentMode] = useState<'STOCK_IN' | 'STOCK_OUT'>('STOCK_IN');
+
+  // v4.0.0 Enterprise Modals
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [selectedBatchProduct, setSelectedBatchProduct] = useState<Product | null>(null);
+  const [wholesalers, setWholesalers] = useState<Wholesaler[]>([]);
+
+  useEffect(() => {
+    db.wholesalers.toArray().then(setWholesalers).catch(() => {});
+  }, []);
+
+  // Hotkey: N to Add New Product (when not focused on input)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        activeEl instanceof HTMLSelectElement;
+      if (isInput) return;
+
+      if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        handleOpenAdd();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Multi-select state
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
@@ -331,6 +365,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
               <button
                 type="button"
+                data-testid="open-batches-btn"
+                onClick={() => {
+                  setSelectedBatchProduct(businessProducts[0] || null);
+                  setIsBatchModalOpen(true);
+                }}
+                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+              >
+                <span>📦 Batches &amp; Spoilage</span>
+              </button>
+
+              <button
+                type="button"
                 data-testid="open-wholesalers-reorder-btn"
                 onClick={() => setActiveTab('restock')}
                 className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
@@ -345,7 +391,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 className="flex-1 sm:flex-initial px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
               >
                 <Plus className="w-4 h-4" />
-                <span>➕ Add New Homemade Product</span>
+                <span>➕ Add New Product [N]</span>
               </button>
             </>
           ) : (
@@ -376,6 +422,27 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
               <button
                 type="button"
+                data-testid="open-wholesaler-purchase-btn"
+                onClick={() => setIsPurchaseModalOpen(true)}
+                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+              >
+                <span>📥 Wholesaler Inward (GRN)</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="open-stock-transfer-btn"
+                onClick={() => {
+                  setSelectedProduct(businessProducts[0] || null);
+                  setIsTransferModalOpen(true);
+                }}
+                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+              >
+                <span>🚚 Transfer to Gruh Udyog</span>
+              </button>
+
+              <button
+                type="button"
                 data-testid="open-wholesalers-reorder-btn"
                 onClick={() => setActiveTab('restock')}
                 className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
@@ -390,7 +457,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 className="flex-1 sm:flex-initial px-4 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
               >
                 <Plus className="w-4 h-4" />
-                <span>➕ Add Product</span>
+                <span>➕ Add Product [N]</span>
               </button>
             </>
           )}
@@ -667,11 +734,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <th className="p-3">Product Name &amp; Code</th>
                     <th className="p-3">Category</th>
                     <th className="p-3">Unit</th>
-                    <th className="p-3 text-right">Cost Price</th>
-                    <th className="p-3 text-right">Selling Price</th>
+                    <th className="p-3 text-right">{isHomemade ? 'Making Cost' : 'Cost Price'}</th>
+                    {isHomemade && (
+                      <th className="p-3 text-right">Wholesale Rate</th>
+                    )}
+                    <th className="p-3 text-right">{isHomemade ? 'Retail MRP / Sell' : 'Selling Price'}</th>
                     <th className="p-3 text-center">Margin %</th>
                     <th className="p-3 text-right">Stock</th>
-                    <th className="p-3 text-center">Quick Stock</th>
+                    <th className="p-3 text-center">{isHomemade ? 'Daily Batch Made' : 'Quick Stock'}</th>
                     <th className="p-3 text-center">Actions</th>
                   </tr>
                 </thead>
@@ -779,14 +849,24 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         {/* Unit */}
                         <td className="p-3 text-xs font-medium text-slate-500 dark:text-slate-400">{p.unit_type}</td>
 
-                        {/* Cost Price */}
+                        {/* Cost Price / Making Cost */}
                         <td className="p-3 text-right text-xs text-slate-600 dark:text-slate-400">
                           {formatINR(p.purchase_price)}
                         </td>
 
+                        {/* Wholesale Rate (Homemade Food B2B) */}
+                        {isHomemade && (
+                          <td className="p-3 text-right text-xs font-semibold text-blue-700 dark:text-blue-300">
+                            {p.wholesale_price && p.wholesale_price > 0 ? formatINR(p.wholesale_price) : '—'}
+                          </td>
+                        )}
+
                         {/* Selling Price */}
                         <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
-                          {formatINR(p.selling_price)}
+                          <div>{formatINR(p.selling_price)}</div>
+                          {isHomemade && p.mrp > p.selling_price && (
+                            <div className="text-[10px] text-slate-400">MRP: ₹{p.mrp}</div>
+                          )}
                         </td>
 
                         {/* Margin % (REQ-04) */}
@@ -863,6 +943,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1">
                             <button
+                              onClick={() => {
+                                setSelectedBatchProduct(p);
+                                setIsBatchModalOpen(true);
+                              }}
+                              data-testid={`batch-btn-${p.id}`}
+                              title="Batches & Shelf-Life"
+                              className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-xs font-bold"
+                            >
+                              📦
+                            </button>
+                            <button
                               onClick={() => handleOpenEdit(p)}
                               title="Edit Product"
                               className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-blue-700 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
@@ -916,6 +1007,43 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         product={selectedProduct}
         mode={adjustmentMode}
         onAdjusted={() => {
+          if (onRefresh) onRefresh();
+        }}
+      />
+
+      {/* v4.0.0 Inter-Business Transfer Modal (Kirana -> Gruh Udyog) */}
+      <InterBusinessTransferModal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        products={businessProducts}
+        preSelectedProduct={selectedProduct}
+        onSuccess={() => {
+          if (onRefresh) onRefresh();
+        }}
+      />
+
+      {/* v4.0.0 Batch Shelf-Life & Spoilage Modal */}
+      {selectedBatchProduct && (
+        <BatchSpoilageModal
+          isOpen={isBatchModalOpen}
+          onClose={() => {
+            setIsBatchModalOpen(false);
+            setSelectedBatchProduct(null);
+          }}
+          product={selectedBatchProduct}
+          onSuccess={() => {
+            if (onRefresh) onRefresh();
+          }}
+        />
+      )}
+
+      {/* v4.0.0 Wholesaler GRN Purchase Inward Modal */}
+      <WholesalerPurchaseModal
+        isOpen={isPurchaseModalOpen}
+        onClose={() => setIsPurchaseModalOpen(false)}
+        products={businessProducts}
+        wholesalers={wholesalers}
+        onSuccess={() => {
           if (onRefresh) onRefresh();
         }}
       />

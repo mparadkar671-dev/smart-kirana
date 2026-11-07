@@ -5,6 +5,7 @@ import { UserRole, StoreUser, RegisteredShop, BusinessType } from '../types';
 import { cloudSyncService } from './cloudSyncService';
 import { notificationService } from './notificationService';
 import { HomemadeFoodService } from './homemadeFoodService';
+import { getHomemadeShopIdForOwner, getBaseKiranaShopId, getHomemadeShopId } from '../utils/businessFirewall';
 
 export interface PasswordValidationResult {
   isValid: boolean;
@@ -385,100 +386,16 @@ export const authService = {
     // Restore shop profile & store user role from Supabase to IndexedDB
     if (data.user) {
       try {
-        // 1. Fetch or initialize store_user role and resolve store shop_id
-        const { data: storeUserData } = await supabase
-          .from('store_users')
-          .select('*')
-          .or(`user_id.eq.${data.user.id},email.eq.${email}`)
-          .maybeSingle();
+        const { isOwner, role } = await this.syncCanonicalSession(data.user);
 
-        const role: UserRole =
-          storeUserData?.role ||
-          (data.user.user_metadata?.role as UserRole) ||
-          'OWNER';
-
-        const isActive = storeUserData?.is_active ?? true;
-        const resolvedShopId = storeUserData?.shop_id || (data.user.user_metadata?.shop_id as string) || 'current_shop';
-
-        // Multi-tenant store account switch check: If logging into a different store,
-        // purge local Dexie cache so store A data does not leak into store B
-        if (typeof localStorage !== 'undefined') {
-          const previousShopId = localStorage.getItem('kirana_active_shop_id');
-          if (previousShopId && previousShopId !== resolvedShopId) {
-            console.log(`Store account switch detected (${previousShopId} -> ${resolvedShopId}). Clearing local Dexie data to maintain tenant isolation.`);
-            await db.clearAllRecordsToEmpty();
-            await db.sync_outbox.clear();
-          }
-          localStorage.setItem('kirana_active_shop_id', resolvedShopId);
-        }
-
-        const storeUserRecord: StoreUser = {
-          id: storeUserData?.id || `usr-${data.user.id.slice(0, 8)}`,
-          user_id: data.user.id,
-          email,
-          full_name:
-            storeUserData?.full_name ||
-            data.user.user_metadata?.owner_name ||
-            'Store User',
-          phone: storeUserData?.phone || data.user.user_metadata?.phone,
-          role,
-          shop_id: resolvedShopId,
-          is_active: isActive,
-          approval_status: isActive ? 'APPROVED' : 'PENDING',
-          created_at: storeUserData?.created_at || new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-
-        await db.saveStoreUser(storeUserRecord);
-
-        // 2. Fetch shop profile strictly for resolvedShopId
-        const { data: profile } = await supabase
-          .from('shop_profile')
-          .select('*')
-          .or(`id.eq.${resolvedShopId},user_id.eq.${data.user.id}`)
-          .maybeSingle();
-
-        if (profile) {
-          if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('kirana_active_shop_id', profile.id);
-          }
-          await db.updateShopProfile({
-            id: profile.id,
-            shop_id: profile.id,
-            shop_name: profile.shop_name,
-            owner_name: profile.owner_name,
-            phone: profile.phone,
-            upi_vpa: profile.upi_vpa || 'kirana@upi',
-            address: profile.address || '',
-            gst_footer_note: profile.gst_footer_note || '',
-            invite_code: profile.invite_code,
-            reset_epoch: profile.reset_epoch || 1,
-            last_wiped_at: profile.last_wiped_at,
-          });
-        } else if (data.user.user_metadata) {
-          const meta = data.user.user_metadata;
-          if (meta.shop_name || meta.owner_name) {
-            await db.updateShopProfile({
-              id: resolvedShopId,
-              shop_id: resolvedShopId,
-              shop_name: meta.shop_name || 'My Kirana Store',
-              owner_name: meta.owner_name || 'Store Owner',
-              phone: meta.phone || '',
-              upi_vpa: `${meta.phone || 'kirana'}@upi`,
-            });
+        if (!isOwner && role !== 'OWNER') {
+          const storeUser = await db.getStoreUserByUserId(data.user.id);
+          if (storeUser && storeUser.is_active === false && storeUser.approval_status === 'PENDING') {
+            throw new Error(
+              `ACCESS_PENDING_APPROVAL: Your request to join this store as ${role} is awaiting approval from the store owner.`
+            );
           }
         }
-
-        if (!isActive && role !== 'OWNER') {
-          throw new Error(
-            `ACCESS_PENDING_APPROVAL: Your request to join this store as ${role} is awaiting approval from the store owner.`
-          );
-        }
-
-        // Auto pull cloud database into Dexie in background
-        cloudSyncService.pullAllFromCloud().catch((err) => {
-          console.warn('Initial pull from cloud after sign in skipped/failed:', err);
-        });
       } catch (err) {
         if (err instanceof Error && err.message.startsWith('ACCESS_PENDING_APPROVAL')) {
           throw err;
@@ -488,6 +405,175 @@ export const authService = {
     }
 
     return data;
+  },
+
+  /**
+   * Same-Login Canonical Account Resolution:
+   * Resolves canonical shop_id and binds multi-device sessions to the same shop_id without data splitting
+   */
+  async syncCanonicalSession(user: User): Promise<{ canonicalShopId: string; role: UserRole; isOwner: boolean }> {
+    const isTestEnv = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
+    let canonicalShopId = 'current_shop';
+    let role: UserRole = (user.user_metadata?.role as UserRole) || 'OWNER';
+    let isOwner = role === 'OWNER';
+
+    if (supabase && !isTestEnv) {
+      try {
+        // 1. Fetch existing shop_profile created by this account
+        const { data: profile } = await supabase
+          .from('shop_profile')
+          .select('*')
+          .or(`user_id.eq.${user.id},id.eq.${user.user_metadata?.shop_id || ''}`)
+          .maybeSingle();
+
+        // 2. Fetch existing store_user entry
+        const { data: storeUserData } = await supabase
+          .from('store_users')
+          .select('*')
+          .or(`user_id.eq.${user.id},email.eq.${user.email}`)
+          .maybeSingle();
+
+        if (profile) {
+          canonicalShopId = profile.id;
+          isOwner = profile.user_id === user.id || role === 'OWNER' || storeUserData?.role === 'OWNER';
+        } else if (storeUserData?.shop_id) {
+          canonicalShopId = storeUserData.shop_id;
+        } else if (user.user_metadata?.shop_id) {
+          canonicalShopId = user.user_metadata.shop_id as string;
+        }
+
+        if (storeUserData?.role) {
+          role = storeUserData.role;
+        }
+        if (isOwner) {
+          role = 'OWNER';
+        }
+
+        // Owner role is automatically active & approved across every device signed into the Owner's email
+        const isActive = isOwner ? true : (storeUserData?.is_active ?? true);
+        const approvalStatus = (isOwner || isActive) ? 'APPROVED' : 'PENDING';
+
+        const kiranaShopId = getBaseKiranaShopId(canonicalShopId);
+        const homemadeShopId = getHomemadeShopId(kiranaShopId);
+        const activeBiz = (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_business_type') : null) || 'KIRANA_RETAIL';
+        const activeShopId = activeBiz === 'HOMEMADE_FOOD' ? homemadeShopId : kiranaShopId;
+
+        // Check if device previously had a different shop_id (e.g. from guest mode or demo)
+        if (typeof localStorage !== 'undefined') {
+          const previousShopId = localStorage.getItem('kirana_active_shop_id');
+          if (previousShopId && previousShopId !== kiranaShopId && previousShopId !== homemadeShopId && previousShopId !== 'current_shop') {
+            console.log(`Canonical shop sync: store switch detected (${previousShopId} -> ${kiranaShopId}). Clearing local Dexie data.`);
+            await db.clearAllRecordsToEmpty();
+            await db.sync_outbox.clear();
+          }
+          localStorage.setItem('kirana_base_shop_id', kiranaShopId);
+          localStorage.setItem('kirana_primary_shop_id', kiranaShopId);
+          localStorage.setItem('kirana_homemade_shop_id', homemadeShopId);
+          localStorage.setItem('kirana_active_shop_id', activeShopId);
+        }
+
+        const storeUserRecord: StoreUser = {
+          id: storeUserData?.id || `usr-${user.id.slice(0, 8)}`,
+          user_id: user.id,
+          email: user.email || '',
+          full_name:
+            storeUserData?.full_name ||
+            user.user_metadata?.owner_name ||
+            (isOwner ? 'Store Owner' : 'Store User'),
+          phone: storeUserData?.phone || user.user_metadata?.phone,
+          role,
+          shop_id: canonicalShopId,
+          is_active: isActive,
+          approval_status: approvalStatus,
+          created_at: storeUserData?.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        await db.saveStoreUser(storeUserRecord);
+
+        // Ensure both Kirana and Homemade Food shop_profile records exist in Dexie
+        await db.updateShopProfile({
+          id: kiranaShopId,
+          shop_id: kiranaShopId,
+          shop_name: profile?.shop_name || user.user_metadata?.shop_name || 'My Kirana Store',
+          owner_name: profile?.owner_name || user.user_metadata?.owner_name || 'Store Owner',
+          phone: profile?.phone || user.user_metadata?.phone || '',
+          upi_vpa: profile?.upi_vpa || `${user.user_metadata?.phone || 'kirana'}@upi`,
+          address: profile?.address || '',
+          gst_footer_note: profile?.gst_footer_note || '',
+          invite_code: profile?.invite_code,
+          business_type: 'KIRANA_RETAIL',
+          invoice_prefix: 'KRN',
+          reset_epoch: profile?.reset_epoch || 1,
+          last_wiped_at: profile?.last_wiped_at,
+        });
+
+        const existingHmf = await db.shop_profile.get(homemadeShopId);
+        if (!existingHmf) {
+          await db.shop_profile.put({
+            id: homemadeShopId,
+            shop_id: homemadeShopId,
+            shop_name: 'Laxmi Vatsalya Gruh Udyog (Homemade Foods)',
+            owner_name: profile?.owner_name || user.user_metadata?.owner_name || 'Store Owner',
+            phone: profile?.phone || user.user_metadata?.phone || '',
+            upi_vpa: profile?.upi_vpa || `${user.user_metadata?.phone || 'kirana'}@upi`,
+            address: profile?.address || '',
+            gst_footer_note: '100% Pure & Hygienic Homemade Konkani Delicacies! Order in advance for festivals.',
+            invite_code: `HMF-${Math.floor(1000 + Math.random() * 9000)}`,
+            business_type: 'HOMEMADE_FOOD',
+            invoice_prefix: 'HMF',
+            reset_epoch: 1,
+            updated_at: new Date().toISOString(),
+          });
+        }
+
+        // Bind real-time WebSocket broadcasting to canonicalShopId
+        cloudSyncService.subscribeToRealtimeStoreSync(canonicalShopId);
+
+        // Instant bidirectional synchronization on login
+        cloudSyncService.syncBidirectionalNow().catch((err) => {
+          console.warn('Initial syncBidirectionalNow on login skipped/failed:', err);
+        });
+      } catch (err) {
+        console.warn('syncCanonicalSession failed to reach cloud:', err);
+      }
+    } else {
+      if (user.user_metadata?.shop_id) {
+        canonicalShopId = user.user_metadata.shop_id as string;
+      } else if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem('kirana_active_shop_id');
+        if (stored) canonicalShopId = stored;
+      }
+
+      const kiranaShopId = getBaseKiranaShopId(canonicalShopId);
+      const homemadeShopId = getHomemadeShopId(kiranaShopId);
+      const activeBiz = (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_business_type') : null) || 'KIRANA_RETAIL';
+      const activeShopId = activeBiz === 'HOMEMADE_FOOD' ? homemadeShopId : kiranaShopId;
+
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('kirana_base_shop_id', kiranaShopId);
+        localStorage.setItem('kirana_primary_shop_id', kiranaShopId);
+        localStorage.setItem('kirana_homemade_shop_id', homemadeShopId);
+        localStorage.setItem('kirana_active_shop_id', activeShopId);
+      }
+
+      const storeUserRecord: StoreUser = {
+        id: `usr-${user.id.slice(0, 8)}`,
+        user_id: user.id,
+        email: user.email || '',
+        full_name: user.user_metadata?.owner_name || (isOwner ? 'Store Owner' : 'Store User'),
+        phone: user.user_metadata?.phone,
+        role,
+        shop_id: canonicalShopId,
+        is_active: true,
+        approval_status: 'APPROVED',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      await db.saveStoreUser(storeUserRecord);
+    }
+
+    return { canonicalShopId, role, isOwner };
   },
 
   /**

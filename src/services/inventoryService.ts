@@ -24,7 +24,15 @@ export interface CreateProductInput {
   image_url?: string | null;
   expiry_date?: string | null;
   is_quick_tap: boolean;
+  shop_id?: string;
   business_type?: BusinessType;
+  raw_material_cost?: number;
+  equipment_fuel_cost?: number;
+  labour_cost?: number;
+  wholesale_price?: number;
+  is_loan_funded?: boolean;
+  shelf_life_days?: number;
+  batch_notes?: string;
 }
 
 export class InventoryService {
@@ -43,10 +51,16 @@ export class InventoryService {
     const shopProfile = await db.getShopProfile();
     const defaultBiz: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
     const resolvedBiz: BusinessType = input.business_type || defaultBiz;
+    const activeShopId =
+      input.shop_id ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) ||
+      shopProfile?.shop_id ||
+      shopProfile?.id ||
+      'current_shop';
 
     const newProduct: Product = {
       id,
-      shop_id: shopProfile?.id || 'current_shop',
+      shop_id: activeShopId,
       business_type: resolvedBiz,
       name: input.name.trim(),
       marathi_name: input.marathi_name?.trim() || undefined,
@@ -64,9 +78,16 @@ export class InventoryService {
       supplier_phone: input.supplier_phone?.trim() || undefined,
       wholesaler_id: input.wholesaler_id || null,
       loan_account_id: input.loan_account_id || null,
+      is_loan_funded: Boolean(input.is_loan_funded || input.loan_account_id),
       image_url: input.image_url || null,
       expiry_date: input.expiry_date || null,
       is_quick_tap: !!input.is_quick_tap,
+      raw_material_cost: input.raw_material_cost !== undefined ? roundCurrency(input.raw_material_cost) : 0,
+      equipment_fuel_cost: input.equipment_fuel_cost !== undefined ? roundCurrency(input.equipment_fuel_cost) : 0,
+      labour_cost: input.labour_cost !== undefined ? roundCurrency(input.labour_cost) : 0,
+      wholesale_price: input.wholesale_price !== undefined ? roundCurrency(input.wholesale_price) : 0,
+      shelf_life_days: input.shelf_life_days,
+      batch_notes: input.batch_notes?.trim() || undefined,
       updated_at: new Date().toISOString(),
     };
 
@@ -121,6 +142,21 @@ export class InventoryService {
       }
       if (updates.low_stock_threshold !== undefined) {
         patched.low_stock_threshold = roundQty(updates.low_stock_threshold);
+      }
+      if (updates.raw_material_cost !== undefined) {
+        patched.raw_material_cost = roundCurrency(updates.raw_material_cost);
+      }
+      if (updates.equipment_fuel_cost !== undefined) {
+        patched.equipment_fuel_cost = roundCurrency(updates.equipment_fuel_cost);
+      }
+      if (updates.labour_cost !== undefined) {
+        patched.labour_cost = roundCurrency(updates.labour_cost);
+      }
+      if (updates.wholesale_price !== undefined) {
+        patched.wholesale_price = roundCurrency(updates.wholesale_price);
+      }
+      if (updates.is_loan_funded !== undefined || updates.loan_account_id !== undefined) {
+        patched.is_loan_funded = Boolean(updates.is_loan_funded || updates.loan_account_id || existing.loan_account_id);
       }
 
       // Check if stock is directly changed in edit modal

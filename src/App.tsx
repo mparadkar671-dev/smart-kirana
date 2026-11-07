@@ -21,6 +21,8 @@ import {
   repairMixedBusinessProducts,
 } from './services/homemadeFoodService';
 import { cloudSyncService } from './services/cloudSyncService';
+import { filterProductsForBusiness } from './utils/businessFirewall';
+import { getActiveShopId, getActiveBusinessType } from './services/tenantManager';
 
 const MainApp: React.FC = () => {
   const { user, isOfflineGuest, isLoading: authLoading } = useAuth();
@@ -39,10 +41,9 @@ const MainApp: React.FC = () => {
         const profile = await db.getShopProfile();
         const bizType = profile?.business_type || 'KIRANA_RETAIL';
         const allProds = await db.products.toArray();
-        const bizCount = allProds.filter(
-          (p) => (p.business_type || (isHomemadeFoodCategoryOrName(p) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) === bizType
-        ).length;
-        if (bizCount < 10) {
+        const bizCount = filterProductsForBusiness(allProds, bizType).length;
+        const threshold = bizType === 'HOMEMADE_FOOD' ? 8 : 10;
+        if (bizCount < threshold) {
           if (bizType === 'HOMEMADE_FOOD') {
             await HomemadeFoodService.seedHomemadeFoodCatalog();
           } else {
@@ -67,29 +68,41 @@ const MainApp: React.FC = () => {
       if (e.key === 'F1') {
         e.preventDefault();
         setActiveTab('pos');
-      } else if (e.key === 'F9' && !isInput) {
+        return;
+      }
+
+      if (e.key === 'F9' && !isInput && activeTab !== 'pos') {
         e.preventDefault();
         setActiveTab('khata');
+        return;
+      }
+
+      // Universal Esc Hierarchy navigation:
+      // If on another screen with no modal open, Esc returns to POS Billing
+      if (e.key === 'Escape' && activeTab !== 'pos') {
+        const hasOpenModal = document.querySelector('[role="dialog"], [aria-modal="true"]');
+        if (!hasOpenModal) {
+          e.preventDefault();
+          setActiveTab('pos');
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [activeTab]);
 
   const shopProfile = useLiveQuery(() => db.getShopProfile(), []);
-  const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+  const activeBusinessType: BusinessType = shopProfile?.business_type || getActiveBusinessType();
+  const activeShopId: string = shopProfile?.id || getActiveShopId(activeBusinessType);
 
-  // Live queries strictly filtered by activeBusinessType
+  // Live queries strictly filtered by activeShopId and activeBusinessType
   const products = useLiveQuery(
     async () => {
       const all = await db.products.toArray();
-      return all.filter((p) => {
-        const pType = p.business_type || (isHomemadeFoodCategoryOrName(p) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL');
-        return pType === activeBusinessType;
-      });
+      return filterProductsForBusiness(all, activeBusinessType, activeShopId);
     },
-    [activeBusinessType],
+    [activeBusinessType, activeShopId],
     []
   );
 
@@ -98,10 +111,13 @@ const MainApp: React.FC = () => {
       const all = await db.customers.toArray();
       return all.filter((c) => {
         if (c.id === '0000-WALK-IN') return true;
+        if (c.shop_id && activeShopId) {
+          return c.shop_id === activeShopId;
+        }
         return (c.business_type || 'KIRANA_RETAIL') === activeBusinessType;
       });
     },
-    [activeBusinessType],
+    [activeBusinessType, activeShopId],
     []
   );
 
@@ -227,7 +243,7 @@ const MainApp: React.FC = () => {
       {activeTab === 'khata' && (
         <KhataView customers={customers || []} shopProfile={shopProfile} />
       )}
-      {activeTab === 'galla' && <GallaView />}
+      {activeTab === 'galla' && <GallaView shopProfile={shopProfile} />}
       {activeTab === 'reports' && <ReportsView shopProfile={shopProfile} />}
       {activeTab === 'settings' && <SettingsView />}
     </Shell>

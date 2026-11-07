@@ -1,13 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, Customer, ShopProfile, SalesInvoice, SaleItem, BusinessType, WALK_IN_CUSTOMER_ID } from '../../types';
 import { LooseItemModal } from './LooseItemModal';
 import { UpiCheckoutModal } from './UpiCheckoutModal';
 import { UdhariCheckoutModal } from './UdhariCheckoutModal';
 import { ReceiptModal } from './ReceiptModal';
 import { AdvanceOrdersModal } from './AdvanceOrdersModal';
+import { usePosKeyboardShortcuts } from '../../hooks/usePosKeyboardShortcuts';
+import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal';
 import { BillingService, CartItemInput } from '../../services/billingService';
 import { GallaService } from '../../services/gallaService';
+import { BatchFifoService, ExpiryAlertItem } from '../../services/batchFifoService';
 import { isHomemadeFoodCategoryOrName } from '../../services/homemadeFoodService';
+import { getActiveShopId } from '../../services/tenantManager';
+import { filterProductsForBusiness } from '../../utils/businessFirewall';
 import { formatINR, roundCurrency, roundQty, toPaise, toRupees } from '../../utils/math';
 import { playBarcodeBeep, playPaymentSuccessChime } from '../../utils/sound';
 import {
@@ -59,6 +64,7 @@ interface CartItem {
   unit_selling_price: number;
   unit_purchase_cost: number;
   line_total: number;
+  sale_rate_type?: 'RETAIL_CUSTOMER' | 'WHOLESALE_RETAILER';
 }
 
 interface CartTab {
@@ -76,9 +82,10 @@ export const POSView: React.FC<POSViewProps> = ({
   onCheckoutComplete,
 }) => {
   const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+  const activeShopId = shopProfile?.id || getActiveShopId(activeBusinessType);
 
-  // Multi-Cart State strictly partitioned per Business (REQ: Step 2)
-  const [cartsByBusiness, setCartsByBusiness] = useState<Record<BusinessType, CartTab[]>>({
+  // Multi-Cart State strictly partitioned per Shop / Business
+  const [cartsByShop, setCartsByShop] = useState<Record<string, CartTab[]>>({
     KIRANA_RETAIL: [
       { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
       { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
@@ -91,21 +98,22 @@ export const POSView: React.FC<POSViewProps> = ({
     ],
   });
 
-  const carts = cartsByBusiness[activeBusinessType] || [
-    { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
-    { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
-    { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
+  const cartKey = activeShopId || activeBusinessType;
+  const carts = cartsByShop[cartKey] || cartsByShop[activeBusinessType] || [
+    { id: 1, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 1' : 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
+    { id: 2, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 2' : 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
+    { id: 3, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 3' : 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
   ];
 
   const setCarts = (updater: CartTab[] | ((prev: CartTab[]) => CartTab[])) => {
-    setCartsByBusiness((prevMap) => {
-      const currentList = prevMap[activeBusinessType] || [
-        { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
-        { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
-        { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
+    setCartsByShop((prevMap) => {
+      const currentList = prevMap[cartKey] || prevMap[activeBusinessType] || [
+        { id: 1, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 1' : 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
+        { id: 2, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 2' : 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
+        { id: 3, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 3' : 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
       ];
       const nextList = typeof updater === 'function' ? updater(currentList) : updater;
-      return { ...prevMap, [activeBusinessType]: nextList };
+      return { ...prevMap, [cartKey]: nextList, [activeBusinessType]: nextList };
     });
   };
 
@@ -124,12 +132,47 @@ export const POSView: React.FC<POSViewProps> = ({
   const [isAdvanceOrdersModalOpen, setIsAdvanceOrdersModalOpen] = useState(false);
   const [stockWarningProduct, setStockWarningProduct] = useState<StockWarningInfo | null>(null);
   const [isStockWarningOpen, setIsStockWarningOpen] = useState(false);
+  const [searchHighlightIndex, setSearchHighlightIndex] = useState<number>(0);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
+
+  // Homemade Food Dual-Rate Billing Mode (Direct Retail Customer vs Retailer B2B Wholesale)
+  const [saleRateType, setSaleRateType] = useState<'RETAIL_CUSTOMER' | 'WHOLESALE_RETAILER'>('RETAIL_CUSTOMER');
+
+  const handleRateTypeChange = (newRate: 'RETAIL_CUSTOMER' | 'WHOLESALE_RETAILER') => {
+    setSaleRateType(newRate);
+    setCarts((prevCarts) =>
+      prevCarts.map((cart) => {
+        if (cart.id !== activeCartId) return cart;
+        const updatedItems = cart.items.map((item) => {
+          const effectivePrice =
+            newRate === 'WHOLESALE_RETAILER' && item.product.wholesale_price && item.product.wholesale_price > 0
+              ? item.product.wholesale_price
+              : item.product.selling_price;
+          const newLineTotal = toRupees(Math.round(item.qty * toPaise(effectivePrice)));
+          return {
+            ...item,
+            unit_selling_price: effectivePrice,
+            line_total: newLineTotal,
+            sale_rate_type: newRate,
+          };
+        });
+        return { ...cart, items: updatedItems };
+      })
+    );
+  };
 
   // Receipt Modal state
   const [completedInvoice, setCompletedInvoice] = useState<SalesInvoice | null>(null);
   const [completedInvoiceItems, setCompletedInvoiceItems] = useState<SaleItem[]>([]);
   const [receiptCustomer, setReceiptCustomer] = useState<Customer | null>(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+
+  // v4.0.0 Batch Shelf-life alerts
+  const [expiryAlerts, setExpiryAlerts] = useState<ExpiryAlertItem[]>([]);
+
+  useEffect(() => {
+    BatchFifoService.getExpiryAlerts().then(setExpiryAlerts).catch(() => {});
+  }, [products]);
 
   // Customer Selection on Bill (Walk-In or Registered Khata Customer)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(WALK_IN_CUSTOMER_ID);
@@ -196,13 +239,13 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const activeCart = carts.find((c) => c.id === activeCartId) || carts[0];
 
-  // Strictly filter products to the active business type (REQ: Step 2)
-  const businessProducts = products.filter((p) => {
-    const pType = p.business_type || (isHomemadeFoodCategoryOrName(p) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL');
-    return pType === activeBusinessType;
-  });
+  // Strictly filter products to the active business type via bulletproof business firewall
+  const businessProducts = useMemo(
+    () => filterProductsForBusiness(products, activeBusinessType),
+    [products, activeBusinessType]
+  );
 
-  // Top-24 Fast-Tap Items (REQ-07 / Section 5.1)
+  // Top-24 Fast-Tap Items (REQ-07 / Section 5.1): strictly from businessProducts
   const fastTapProducts = businessProducts.filter((p) => p.is_quick_tap).slice(0, 24);
 
   // 3-Way Instant Search (Barcode, Short Code, Bilingual Marathi/English Name & Hidden POS Search Keywords)
@@ -277,69 +320,27 @@ export const POSView: React.FC<POSViewProps> = ({
     };
   }, [products, activeCartId]);
 
-  // Desktop Keyboard Matrix Handler (REQ-25 / Iteration 4 Guardrails)
+  // Stock Warning Dialog Keyboard Listener (Enter to add, Escape to cancel)
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
-      const isModalOpen =
-        isUpiModalOpen ||
-        isUdhariModalOpen ||
-        isLooseModalOpen ||
-        isReceiptModalOpen ||
-        isCustomerSelectorOpen ||
-        isAdvanceOrdersModalOpen ||
-        isStockWarningOpen;
-
-      if (isStockWarningOpen && stockWarningProduct) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const { product, qtyToAdd, explicitLineTotal } = stockWarningProduct;
-          setIsStockWarningOpen(false);
-          setStockWarningProduct(null);
-          addItemToCart(product, qtyToAdd, explicitLineTotal, true);
-          return;
-        } else if (e.key === 'Escape') {
-          e.preventDefault();
-          setIsStockWarningOpen(false);
-          setStockWarningProduct(null);
-          return;
-        }
-      }
-
-      if (e.key === 'F2' || (e.key === '/' && !isInput && !isModalOpen)) {
+    if (!isStockWarningOpen || !stockWarningProduct) return;
+    const handleStockWarningKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
         e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      } else if (e.key === 'F4' && !isModalOpen) {
+        e.stopPropagation();
+        const { product, qtyToAdd, explicitLineTotal } = stockWarningProduct;
+        setIsStockWarningOpen(false);
+        setStockWarningProduct(null);
+        addItemToCart(product, qtyToAdd, explicitLineTotal, true);
+      } else if (e.key === 'Escape') {
         e.preventDefault();
-        // Switch to next cart
-        setActiveCartId((prev) => (prev >= 3 ? 1 : prev + 1));
-      } else if (e.key === 'F8') {
-        e.preventDefault();
-        // Mistake-proofing guardrail: ignore if input focused, modal open, or cart empty
-        if (!isInput && !isModalOpen && activeCart.items.length > 0) {
-          handleWalkInCashCheckout();
-        }
-      } else if (e.key === 'F9') {
-        e.preventDefault();
-        // Mistake-proofing guardrail: ignore if input focused, modal open, or cart empty
-        if (!isInput && !isModalOpen && activeCart.items.length > 0) {
-          setIsUdhariModalOpen(true);
-        }
+        e.stopPropagation();
+        setIsStockWarningOpen(false);
+        setStockWarningProduct(null);
       }
     };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    activeCart,
-    isUpiModalOpen,
-    isUdhariModalOpen,
-    isLooseModalOpen,
-    isReceiptModalOpen,
-    isCustomerSelectorOpen,
-  ]);
+    window.addEventListener('keydown', handleStockWarningKey);
+    return () => window.removeEventListener('keydown', handleStockWarningKey);
+  }, [isStockWarningOpen, stockWarningProduct]);
 
   // Cart Calculations
   const subtotal = activeCart.items.reduce(
@@ -407,6 +408,11 @@ export const POSView: React.FC<POSViewProps> = ({
       return;
     }
 
+    const effectivePrice =
+      activeBusinessType === 'HOMEMADE_FOOD' && saleRateType === 'WHOLESALE_RETAILER' && product.wholesale_price && product.wholesale_price > 0
+        ? product.wholesale_price
+        : product.selling_price;
+
     setCarts((prevCarts) =>
       prevCarts.map((cart) => {
         if (cart.id !== activeCartId) return cart;
@@ -420,28 +426,31 @@ export const POSView: React.FC<POSViewProps> = ({
           const newQty = roundQty(existing.qty + qtyToAdd);
           const newLineTotal = explicitLineTotal
             ? roundCurrency(existing.line_total + explicitLineTotal)
-            : toRupees(Math.round(newQty * toPaise(product.selling_price)));
+            : toRupees(Math.round(newQty * toPaise(effectivePrice)));
 
           const updatedItems = [...cart.items];
           updatedItems[existingIndex] = {
             ...existing,
             qty: newQty,
+            unit_selling_price: effectivePrice,
             line_total: newLineTotal,
+            sale_rate_type: activeBusinessType === 'HOMEMADE_FOOD' ? saleRateType : 'RETAIL_CUSTOMER',
           };
           return { ...cart, items: updatedItems };
         } else {
           const itemQty = roundQty(qtyToAdd);
           const lineTotal = explicitLineTotal
             ? explicitLineTotal
-            : toRupees(Math.round(itemQty * toPaise(product.selling_price)));
+            : toRupees(Math.round(itemQty * toPaise(effectivePrice)));
 
           const newItem: CartItem = {
             id: `ci-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             product,
             qty: itemQty,
-            unit_selling_price: product.selling_price,
+            unit_selling_price: effectivePrice,
             unit_purchase_cost: product.purchase_price,
             line_total: lineTotal,
+            sale_rate_type: activeBusinessType === 'HOMEMADE_FOOD' ? saleRateType : 'RETAIL_CUSTOMER',
           };
           return { ...cart, items: [...cart.items, newItem] };
         }
@@ -469,8 +478,9 @@ export const POSView: React.FC<POSViewProps> = ({
             const newQty = roundQty(item.qty + delta * step);
             if (newQty <= 0) return null;
 
+            const unitPrice = item.unit_selling_price || item.product.selling_price;
             const newLineTotal = toRupees(
-              Math.round(newQty * toPaise(item.product.selling_price))
+              Math.round(newQty * toPaise(unitPrice))
             );
             return { ...item, qty: newQty, line_total: newLineTotal };
           })
@@ -527,6 +537,8 @@ export const POSView: React.FC<POSViewProps> = ({
         unit_selling_price: i.unit_selling_price,
         unit_purchase_cost: i.unit_purchase_cost,
         line_total: i.line_total,
+        sale_rate_type: i.sale_rate_type || (activeBusinessType === 'HOMEMADE_FOOD' ? saleRateType : 'RETAIL_CUSTOMER'),
+        is_loan_funded: i.product.is_loan_funded,
       }));
 
       const res = await BillingService.executeCheckout({
@@ -537,6 +549,8 @@ export const POSView: React.FC<POSViewProps> = ({
         paymentMode: 'CASH',
         amountPaidNow: grandTotalRupees,
         udhariAdded: 0,
+        shopId: activeShopId,
+        businessType: activeBusinessType,
       });
 
       const cartItemsToPreserve = [...activeCart.items];
@@ -577,6 +591,8 @@ export const POSView: React.FC<POSViewProps> = ({
         unit_selling_price: i.unit_selling_price,
         unit_purchase_cost: i.unit_purchase_cost,
         line_total: i.line_total,
+        sale_rate_type: i.sale_rate_type || (activeBusinessType === 'HOMEMADE_FOOD' ? saleRateType : 'RETAIL_CUSTOMER'),
+        is_loan_funded: i.product.is_loan_funded,
       }));
 
       const res = await BillingService.executeCheckout({
@@ -587,6 +603,8 @@ export const POSView: React.FC<POSViewProps> = ({
         paymentMode: 'UPI',
         amountPaidNow: grandTotalRupees,
         udhariAdded: 0,
+        shopId: activeShopId,
+        businessType: activeBusinessType,
       });
 
       clearCurrentCart();
@@ -623,6 +641,8 @@ export const POSView: React.FC<POSViewProps> = ({
         unit_selling_price: i.unit_selling_price,
         unit_purchase_cost: i.unit_purchase_cost,
         line_total: i.line_total,
+        sale_rate_type: i.sale_rate_type || (activeBusinessType === 'HOMEMADE_FOOD' ? saleRateType : 'RETAIL_CUSTOMER'),
+        is_loan_funded: i.product.is_loan_funded,
       }));
 
       const res = await BillingService.executeCheckout({
@@ -634,6 +654,8 @@ export const POSView: React.FC<POSViewProps> = ({
         amountPaidNow: params.amountPaidNow,
         udhariAdded: params.udhariAdded,
         notes: params.amountPaidNow > 0 ? 'CASH' : undefined,
+        shopId: activeShopId,
+        businessType: activeBusinessType,
       });
 
       clearCurrentCart();
@@ -658,6 +680,120 @@ export const POSView: React.FC<POSViewProps> = ({
     }
   };
 
+  // Zero-Mouse Keyboard Shortcuts Engine
+  usePosKeyboardShortcuts({
+    onFocusSearch: () => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    },
+    onClearSearch: () => {
+      setSearchQuery('');
+      setSearchHighlightIndex(0);
+    },
+    onSelectNextProduct: () => {
+      if (searchResults.length > 0) {
+        setSearchHighlightIndex((prev) => (prev + 1) % searchResults.length);
+      }
+    },
+    onSelectPrevProduct: () => {
+      if (searchResults.length > 0) {
+        setSearchHighlightIndex((prev) => (prev - 1 + searchResults.length) % searchResults.length);
+      }
+    },
+    onConfirmProductSearch: () => {
+      if (searchResults.length > 0) {
+        const target = searchResults[searchHighlightIndex] || searchResults[0];
+        if (target) addItemToCart(target);
+      }
+    },
+    onIncrementQty: () => {
+      if (activeCart.items.length > 0) {
+        const last = activeCart.items[activeCart.items.length - 1];
+        adjustItemQty(last.id, 1);
+      }
+    },
+    onDecrementQty: () => {
+      if (activeCart.items.length > 0) {
+        const last = activeCart.items[activeCart.items.length - 1];
+        adjustItemQty(last.id, -1);
+      }
+    },
+    onRemoveCartItem: () => {
+      if (activeCart.items.length > 0) {
+        const last = activeCart.items[activeCart.items.length - 1];
+        removeItemFromCart(last.id);
+      }
+    },
+    onToggleDiscount: () => {
+      if (activeCart.discountRoundoff > 0) {
+        applyRoundoff(0);
+      } else {
+        applyRoundoff(suggestedRoundoff || (subtotalRupees % 10) || 5);
+      }
+    },
+    onSwitchCart: () => {
+      setActiveCartId((prev) => (prev % 3) + 1);
+    },
+    onCashCheckout: () => {
+      if (activeCart.items.length > 0) {
+        handleWalkInCashCheckout();
+      }
+    },
+    onUpiCheckout: () => {
+      if (activeCart.items.length > 0) {
+        setIsUpiModalOpen(true);
+      }
+    },
+    onUdhariCheckout: () => {
+      if (activeCart.items.length > 0) {
+        setIsUdhariModalOpen(true);
+      }
+    },
+    onToggleShortcutsModal: () => {
+      setIsShortcutsModalOpen((prev) => !prev);
+    },
+    onCloseActiveModal: () => {
+      if (isReceiptModalOpen) {
+        setIsReceiptModalOpen(false);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+        return true;
+      }
+      if (isLooseModalOpen) {
+        setIsLooseModalOpen(false);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+        return true;
+      }
+      if (isUpiModalOpen) {
+        setIsUpiModalOpen(false);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+        return true;
+      }
+      if (isUdhariModalOpen) {
+        setIsUdhariModalOpen(false);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+        return true;
+      }
+      if (isStockWarningOpen) {
+        setIsStockWarningOpen(false);
+        setStockWarningProduct(null);
+        return true;
+      }
+      if (isCustomerSelectorOpen) {
+        setIsCustomerSelectorOpen(false);
+        return true;
+      }
+      if (isAdvanceOrdersModalOpen) {
+        setIsAdvanceOrdersModalOpen(false);
+        return true;
+      }
+      if (isShortcutsModalOpen) {
+        setIsShortcutsModalOpen(false);
+        return true;
+      }
+      return false;
+    },
+  });
+
   return (
     <div className="flex-1 flex flex-col lg:flex-row h-full overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
       {/* LEFT PANE: Search Bar & Fast-Tap 24 Grid */}
@@ -670,6 +806,33 @@ export const POSView: React.FC<POSViewProps> = ({
           </div>
         )}
 
+        {/* v4.0.0 Shelf-Life & Expiry Alert Banner */}
+        {expiryAlerts.length > 0 && (
+          <div
+            data-testid="pos-expiry-alert-banner"
+            className="p-3 bg-amber-50 dark:bg-amber-950/40 border-2 border-amber-400 dark:border-amber-700 rounded-xl text-amber-900 dark:text-amber-200 text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in"
+          >
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 animate-bounce" />
+              <span>
+                ⚠️ Shelf-Life Notice: {expiryAlerts[0].product.name} ({expiryAlerts[0].batch.batch_code}) has{' '}
+                {expiryAlerts[0].batch.remaining_qty} {expiryAlerts[0].batch.unit_type}{' '}
+                {expiryAlerts[0].isExpired
+                  ? 'EXPIRED! Write off via Spoilage.'
+                  : `expiring in ${expiryAlerts[0].hoursRemaining}h! Prioritize sales.`}
+                {expiryAlerts.length > 1 && ` (+${expiryAlerts.length - 1} more batch alerts)`}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => addItemToCart(expiryAlerts[0].product)}
+              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-extrabold shrink-0"
+            >
+              + Sell Batch Item
+            </button>
+          </div>
+        )}
+
         {/* 3-Way Instant Search Bar (REQ-07 / REQ-24) */}
         <div className="relative">
           <div className="relative flex items-center">
@@ -679,10 +842,33 @@ export const POSView: React.FC<POSViewProps> = ({
               type="text"
               data-testid="pos-search-input"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSearchHighlightIndex(0);
+              }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && searchResults.length > 0) {
-                  addItemToCart(searchResults[0]);
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (searchResults.length > 0) {
+                    setSearchHighlightIndex((prev) => (prev + 1) % searchResults.length);
+                  }
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (searchResults.length > 0) {
+                    setSearchHighlightIndex((prev) => (prev - 1 + searchResults.length) % searchResults.length);
+                  }
+                } else if (e.key === 'Enter' && searchResults.length > 0) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const target = searchResults[searchHighlightIndex] || searchResults[0];
+                  if (target) addItemToCart(target);
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setSearchQuery('');
+                  setSearchHighlightIndex(0);
                 }
               }}
               placeholder="Search by Barcode, Short Code (e.g. PG5, TS1), or Name... [F2 / /]"
@@ -702,49 +888,61 @@ export const POSView: React.FC<POSViewProps> = ({
               data-testid="search-results-dropdown"
               className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 z-30 overflow-hidden"
             >
-              {searchResults.map((prod) => (
-                <button
-                  key={prod.id}
-                  type="button"
-                  onClick={() => addItemToCart(prod)}
-                  className="w-full p-3 text-left hover:bg-blue-50/60 dark:hover:bg-slate-800/80 flex items-center justify-between transition"
-                >
-                  <div>
-                    <span className="font-semibold text-slate-900 dark:text-white text-sm">
-                      {prod.name}
-                    </span>
-                    <span className="ml-2 font-mono text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">
-                      {prod.short_code}
-                    </span>
-                    {prod.mrp > prod.selling_price && (
-                      <span className="ml-2 text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded">
-                        Save ₹{(prod.mrp - prod.selling_price).toFixed(0)}
+              {searchResults.map((prod, idx) => {
+                const isSelected = idx === searchHighlightIndex;
+                return (
+                  <button
+                    key={prod.id}
+                    type="button"
+                    onClick={() => addItemToCart(prod)}
+                    className={`w-full p-3 text-left flex items-center justify-between transition ${
+                      isSelected
+                        ? 'bg-blue-100/90 dark:bg-slate-800 ring-2 ring-blue-500 font-bold'
+                        : 'hover:bg-blue-50/60 dark:hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <div>
+                      <span className="font-semibold text-slate-900 dark:text-white text-sm">
+                        {prod.name}
                       </span>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <div className="flex items-baseline gap-1 justify-end">
-                      <span className="font-bold text-slate-900 dark:text-white text-sm">
-                        {formatINR(prod.selling_price)}
+                      <span className="ml-2 font-mono text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">
+                        {prod.short_code}
                       </span>
+                      {isSelected && (
+                        <kbd className="ml-2 text-[10px] bg-blue-200 dark:bg-slate-700 text-blue-900 dark:text-slate-200 px-1.5 py-0.5 rounded font-mono">
+                          Enter ↵
+                        </kbd>
+                      )}
                       {prod.mrp > prod.selling_price && (
-                        <span className="text-[11px] text-slate-400 line-through">
-                          ₹{prod.mrp}
+                        <span className="ml-2 text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded">
+                          Save ₹{(prod.mrp - prod.selling_price).toFixed(0)}
                         </span>
                       )}
                     </div>
-                    <span className="text-[10px] text-slate-400 block">
-                      {prod.current_stock <= 0 ? (
-                        <span className="text-rose-500 font-bold">Out of stock</span>
-                      ) : prod.current_stock <= prod.low_stock_threshold ? (
-                        <span className="text-amber-500 font-bold">Low: {prod.current_stock}</span>
-                      ) : (
-                        `Stk: ${prod.current_stock}`
-                      )}
-                    </span>
-                  </div>
-                </button>
-              ))}
+                    <div className="text-right">
+                      <div className="flex items-baseline gap-1 justify-end">
+                        <span className="font-bold text-slate-900 dark:text-white text-sm">
+                          {formatINR(prod.selling_price)}
+                        </span>
+                        {prod.mrp > prod.selling_price && (
+                          <span className="text-[11px] text-slate-400 line-through">
+                            ₹{prod.mrp}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-slate-400 block">
+                        {prod.current_stock <= 0 ? (
+                          <span className="text-rose-500 font-bold">Out of stock</span>
+                        ) : prod.current_stock <= prod.low_stock_threshold ? (
+                          <span className="text-amber-500 font-bold">Low: {prod.current_stock}</span>
+                        ) : (
+                          `Stk: ${prod.current_stock}`
+                        )}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -761,15 +959,18 @@ export const POSView: React.FC<POSViewProps> = ({
               </span>
             </h2>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                data-testid="open-advance-orders-btn"
-                onClick={() => setIsAdvanceOrdersModalOpen(true)}
-                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95"
-              >
-                <span>📅 Advance Orders &amp; Festival Pre-Booking</span>
-              </button>
-              <span className="text-[11px] text-slate-400 hidden sm:inline">80/20 Daily Velocity</span>
+              {activeBusinessType === 'HOMEMADE_FOOD' ? (
+                <button
+                  type="button"
+                  data-testid="open-advance-orders-btn"
+                  onClick={() => setIsAdvanceOrdersModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95"
+                >
+                  <span>📅 Advance Orders &amp; Festival Pre-Booking</span>
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-400 hidden sm:inline">80/20 Daily Velocity • Fast Retail</span>
+              )}
             </div>
           </div>
 
@@ -1063,6 +1264,41 @@ export const POSView: React.FC<POSViewProps> = ({
           )}
         </div>
 
+        {/* HOMEMADE FOOD DUAL-RATE TOGGLE (Retail / MRP vs Retailer B2B Wholesale) */}
+        {activeBusinessType === 'HOMEMADE_FOOD' && (
+          <div className="px-3 py-2 bg-amber-50/70 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-900/60 flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
+              Billing Rate:
+            </span>
+            <div className="flex items-center gap-1 bg-amber-100/80 dark:bg-amber-900/50 p-0.5 rounded-xl border border-amber-300 dark:border-amber-700">
+              <button
+                type="button"
+                data-testid="rate-mode-retail"
+                onClick={() => handleRateTypeChange('RETAIL_CUSTOMER')}
+                className={`px-2 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
+                  saleRateType === 'RETAIL_CUSTOMER'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'text-amber-800 dark:text-amber-300 hover:bg-amber-200/50 dark:hover:bg-amber-800/40'
+                }`}
+              >
+                <span>👤 Direct Customer (Retail)</span>
+              </button>
+              <button
+                type="button"
+                data-testid="rate-mode-wholesale"
+                onClick={() => handleRateTypeChange('WHOLESALE_RETAILER')}
+                className={`px-2 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
+                  saleRateType === 'WHOLESALE_RETAILER'
+                    ? 'bg-blue-700 text-white shadow-xs'
+                    : 'text-amber-800 dark:text-amber-300 hover:bg-amber-200/50 dark:hover:bg-amber-800/40'
+                }`}
+              >
+                <span>🏪 Shop / Retailer (B2B)</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Cart Items List */}
         <div
           data-testid="cart-items-container"
@@ -1089,6 +1325,11 @@ export const POSView: React.FC<POSViewProps> = ({
                   </h4>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2">
                     <span>{formatINR(item.unit_selling_price)}</span>
+                    {item.sale_rate_type === 'WHOLESALE_RETAILER' && (
+                      <span className="text-[9px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-950/60 px-1 py-0.2 rounded">
+                        Wholesale Rate
+                      </span>
+                    )}
                     <span>&times;</span>
                     <span className="font-semibold text-slate-700 dark:text-slate-300">
                       {item.qty}{' '}
@@ -1226,7 +1467,7 @@ export const POSView: React.FC<POSViewProps> = ({
               <span className="text-[10px] opacity-80">Khata / Split</span>
             </button>
 
-            {/* Dynamic UPI QR Modal Button */}
+            {/* Dynamic UPI QR Modal Button (F7) */}
             <button
               type="button"
               disabled={activeCart.items.length === 0}
@@ -1235,7 +1476,7 @@ export const POSView: React.FC<POSViewProps> = ({
               className="col-span-2 py-2.5 bg-blue-800 hover:bg-blue-900 disabled:opacity-40 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center justify-center gap-2"
             >
               <QrCode className="w-4 h-4 text-orange-400" />
-              <span>UPI Dynamic QR Code Checkout</span>
+              <span>UPI Dynamic QR Code Checkout (F7)</span>
             </button>
           </div>
         </div>
@@ -1436,6 +1677,12 @@ export const POSView: React.FC<POSViewProps> = ({
           </button>
         </div>
       )}
+
+      {/* POS Keyboard Shortcuts Cheat Sheet Modal (?) */}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
+      />
     </div>
   );
 };

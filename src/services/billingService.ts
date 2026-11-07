@@ -15,6 +15,7 @@ import {
   BusinessType,
 } from '../types';
 import { roundCurrency, roundQty, toPaise, toRupees } from '../utils/math';
+import { getActiveShopId, getActiveBusinessType } from './tenantManager';
 
 export interface CartItemInput {
   product: Product;
@@ -22,6 +23,8 @@ export interface CartItemInput {
   unit_selling_price: number;
   unit_purchase_cost: number;
   line_total: number;
+  sale_rate_type?: 'RETAIL_CUSTOMER' | 'WHOLESALE_RETAILER';
+  is_loan_funded?: boolean;
 }
 
 export interface CheckoutParams {
@@ -33,24 +36,29 @@ export interface CheckoutParams {
   amountPaidNow: number;
   udhariAdded: number;
   notes?: string;
+  shopId?: string;
+  businessType?: BusinessType;
 }
 
 export class BillingService {
   /**
    * Generates next invoice number for today: INV-YYYYMMDD-001 (or HMF-YYYYMMDD-001 for Homemade Food)
    */
-  static async generateInvoiceNumber(): Promise<string> {
+  static async generateInvoiceNumber(bizType?: BusinessType): Promise<string> {
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
     const profile = await db.getShopProfile();
+    const effectiveBizType = bizType || profile?.business_type || getActiveBusinessType();
     const customPrefix = profile?.invoice_prefix
       ? profile.invoice_prefix.replace(/-+$/, '')
-      : profile?.business_type === 'HOMEMADE_FOOD'
+      : effectiveBizType === 'HOMEMADE_FOOD'
       ? 'HMF'
       : 'INV';
-    const prefix = `${customPrefix}-${yyyy}${mm}${dd}-`;
+    const deviceId = typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_device_id') : null;
+    const devicePart = deviceId ? `${deviceId}-` : '';
+    const prefix = `${customPrefix}-${yyyy}${mm}${dd}-${devicePart}`;
 
     const count = await db.sales_invoices.count();
     const nextSeq = String(count + 1).padStart(3, '0');
@@ -88,13 +96,14 @@ export class BillingService {
       );
     }
 
+    const shopProfile = await db.getShopProfile();
+    const activeBizType: BusinessType = params.businessType || shopProfile?.business_type || getActiveBusinessType();
+    const activeShopId: string = params.shopId || shopProfile?.id || getActiveShopId(activeBizType);
+
     const invoiceId = `inv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    const invoiceNumber = await this.generateInvoiceNumber();
+    const invoiceNumber = await this.generateInvoiceNumber(activeBizType);
     const nowIso = new Date().toISOString();
     const todayDate = nowIso.split('T')[0];
-
-    const shopProfile = await db.getShopProfile();
-    const activeBizType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
 
     let totalCogs = 0;
     const saleItems: SaleItem[] = [];
@@ -112,7 +121,7 @@ export class BillingService {
 
       const saleItem: SaleItem = {
         id: `item-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        shop_id: 'current_shop',
+        shop_id: activeShopId,
         business_type: item.product.business_type || activeBizType,
         invoice_id: invoiceId,
         product_id: item.product.id,
@@ -122,12 +131,14 @@ export class BillingService {
         unit_selling_price: itemPrice,
         line_total: lineTotal,
         loan_account_id: item.product.loan_account_id || null,
+        is_loan_funded: item.is_loan_funded ?? item.product.is_loan_funded ?? false,
+        sale_rate_type: item.sale_rate_type || 'RETAIL_CUSTOMER',
       };
       saleItems.push(saleItem);
 
       const log: InventoryLog = {
         id: `log-sale-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        shop_id: 'current_shop',
+        shop_id: activeShopId,
         business_type: item.product.business_type || activeBizType,
         product_id: item.product.id,
         change_qty: -itemQty,
@@ -148,7 +159,7 @@ export class BillingService {
 
     const invoice: SalesInvoice = {
       id: invoiceId,
-      shop_id: 'current_shop',
+      shop_id: activeShopId,
       business_type: activeBizType,
       invoice_number: invoiceNumber,
       customer_id: params.customerId,
@@ -177,6 +188,7 @@ export class BillingService {
         db.khata_transactions,
         db.daily_galla_sessions,
         db.sync_outbox,
+        db.production_batches,
       ],
       async () => {
         // 1. Insert Sales Invoice
@@ -195,7 +207,7 @@ export class BillingService {
           );
         }
 
-        // 3. Update Product Stocks
+        // 3. Update Product Stocks & FIFO Production Batches
         for (const update of stockUpdates) {
           await db.products.update(update.id, {
             current_stock: update.newStock,
@@ -205,6 +217,28 @@ export class BillingService {
             { table_name: 'products', operation: 'UPDATE', payload: { id: update.id, current_stock: update.newStock, updated_at: nowIso }, shop_id: invoice.shop_id },
             db.sync_outbox
           );
+
+          // Deduct FIFO batches if active batches exist
+          const activeBatches = await db.production_batches
+            .where('product_id')
+            .equals(update.id)
+            .filter((b) => b.status === 'ACTIVE' && b.remaining_qty > 0)
+            .sortBy('produced_at');
+
+          if (activeBatches.length > 0) {
+            const soldItem = params.items.find(it => it.product.id === update.id);
+            let needed = soldItem ? roundQty(soldItem.qty) : 0;
+            for (const b of activeBatches) {
+              if (needed <= 0) break;
+              const dec = Math.min(b.remaining_qty, needed);
+              const newRem = roundQty(b.remaining_qty - dec);
+              needed = roundQty(needed - dec);
+              await db.production_batches.update(b.id, {
+                remaining_qty: newRem,
+                status: newRem <= 0 ? 'EXHAUSTED' : 'ACTIVE',
+              });
+            }
+          }
         }
 
         // 4. Append to Inventory Logs
@@ -267,7 +301,7 @@ export class BillingService {
 
         if (isCashPaid) {
           const gallaSession = await db.daily_galla_sessions
-            .where({ session_date: todayDate })
+            .filter(s => s.session_date === todayDate && (s.shop_id === activeShopId || (!s.shop_id && s.business_type === activeBizType)))
             .first();
 
           if (gallaSession) {
@@ -285,7 +319,7 @@ export class BillingService {
             // Auto-create initial session if not opened yet
             const newSession: DailyGallaSession = {
               id: `galla-${Date.now()}`,
-              shop_id: invoice.shop_id,
+              shop_id: activeShopId,
               business_type: activeBizType,
               session_date: todayDate,
               opening_cash: 0,
@@ -436,7 +470,7 @@ export class BillingService {
         // 3. Adjust Daily Galla if cash was received
         if (inv.amount_paid_now > 0 && inv.payment_mode === 'CASH') {
           const session = await db.daily_galla_sessions
-            .where({ session_date: todayDate })
+            .filter(s => s.session_date === todayDate && (s.shop_id === shopId || (!s.shop_id && s.business_type === inv.business_type)))
             .first();
 
           if (session) {

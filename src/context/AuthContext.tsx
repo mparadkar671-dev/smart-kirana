@@ -57,6 +57,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(currSession);
       const currentUser = currSession?.user ?? null;
       setUser(currentUser);
+      if (currentUser) {
+        authService.syncCanonicalSession(currentUser).catch(() => {});
+      }
       refreshUserRole(currentUser);
       setIsLoading(false);
     });
@@ -65,12 +68,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribe = authService.onAuthStateChange((_event, newSession, newUser) => {
       setSession(newSession);
       setUser(newUser);
-      refreshUserRole(newUser);
-      setIsLoading(false);
       if (newUser) {
+        authService.syncCanonicalSession(newUser).catch(() => {});
         localStorage.removeItem('kirana_guest_mode');
         setIsOfflineGuest(false);
       }
+      refreshUserRole(newUser);
+      setIsLoading(false);
     });
 
     return () => {

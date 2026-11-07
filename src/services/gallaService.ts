@@ -11,18 +11,27 @@ import {
   KhataTransaction,
 } from '../types';
 import { roundCurrency, toPaise, toRupees } from '../utils/math';
+import { getActiveShopId, getActiveBusinessType } from '../utils/businessFirewall';
+import { isHomemadeShopId } from './tenantManager';
 
 export class GallaService {
   /**
-   * Fetch or auto-create today's Daily Galla session
+   * Fetch or auto-create today's Daily Galla session strictly scoped by shop_id
    */
-  static async getOrCreateTodaySession(): Promise<DailyGallaSession> {
+  static async getOrCreateTodaySession(customShopId?: string): Promise<DailyGallaSession> {
     const todayDate = new Date().toISOString().split('T')[0];
-    let session = await db.daily_galla_sessions.where({ session_date: todayDate }).first();
+    const activeShopId = customShopId || getActiveShopId();
+    const activeBiz = isHomemadeShopId(activeShopId) ? 'HOMEMADE_FOOD' : getActiveBusinessType();
+
+    let session = await db.daily_galla_sessions
+      .filter((s) => s.session_date === todayDate && (s.shop_id === activeShopId || (!s.shop_id && s.business_type === activeBiz)))
+      .first();
 
     if (!session) {
       session = {
-        id: `galla-${Date.now()}`,
+        id: `galla-${activeShopId.slice(0, 8)}-${todayDate}-${Math.random().toString(36).slice(2, 6)}`,
+        shop_id: activeShopId,
+        business_type: activeBiz,
         session_date: todayDate,
         opening_cash: 0,
         cash_sales_total: 0,
@@ -39,15 +48,23 @@ export class GallaService {
   }
 
   /**
-   * Sets morning opening cash in drawer and recalculates expected closing cash
+   * Sets morning opening cash in drawer and recalculates expected closing cash strictly for active shop_id
    */
-  static async setOpeningCash(sessionDate: string, openingCash: number): Promise<DailyGallaSession> {
+  static async setOpeningCash(sessionDate: string, openingCash: number, customShopId?: string): Promise<DailyGallaSession> {
+    const activeShopId = customShopId || getActiveShopId();
+    const activeBiz = isHomemadeShopId(activeShopId) ? 'HOMEMADE_FOOD' : getActiveBusinessType();
     let updated!: DailyGallaSession;
+
     await db.transaction('rw', db.daily_galla_sessions, async () => {
-      let session = await db.daily_galla_sessions.where({ session_date: sessionDate }).first();
+      let session = await db.daily_galla_sessions
+        .filter((s) => s.session_date === sessionDate && (s.shop_id === activeShopId || (!s.shop_id && s.business_type === activeBiz)))
+        .first();
+
       if (!session) {
         session = {
-          id: `galla-${Date.now()}`,
+          id: `galla-${activeShopId.slice(0, 8)}-${sessionDate}-${Math.random().toString(36).slice(2, 6)}`,
+          shop_id: activeShopId,
+          business_type: activeBiz,
           session_date: sessionDate,
           opening_cash: roundCurrency(openingCash),
           cash_sales_total: 0,
@@ -91,11 +108,15 @@ export class GallaService {
     amount: number;
     paidVia: ExpensePaidVia;
     description: string;
+    shop_id?: string;
+    business_type?: string;
   }): Promise<{ expense: ExpenseAndDrawing; session?: DailyGallaSession }> {
     if (params.amount <= 0) throw new Error('Expense amount must be greater than zero');
 
     const expAmount = roundCurrency(params.amount);
     const todayDate = new Date().toISOString().split('T')[0];
+    const activeShopId = params.shop_id || getActiveShopId();
+    const activeBiz = (params.business_type as any) || getActiveBusinessType();
 
     const resolvedEntryType: ExpenseEntryType =
       params.entryType ||
@@ -111,7 +132,8 @@ export class GallaService {
 
     const expense: ExpenseAndDrawing = {
       id: `exp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      shop_id: 'current_shop',
+      shop_id: activeShopId,
+      business_type: activeBiz,
       category: params.category,
       entry_type: resolvedEntryType,
       amount: expAmount,
@@ -131,7 +153,7 @@ export class GallaService {
 
       if (params.paidVia === 'CASH_GALLA') {
         const currentSession = await db.daily_galla_sessions
-          .where({ session_date: todayDate })
+          .filter((s) => s.session_date === todayDate && (s.shop_id === activeShopId || (!s.shop_id && s.business_type === activeBiz)))
           .first();
 
         if (currentSession) {
@@ -176,12 +198,17 @@ export class GallaService {
    */
   static async recordEveningCashCount(
     sessionDate: string,
-    actualCountedCash: number
+    actualCountedCash: number,
+    customShopId?: string
   ): Promise<DailyGallaSession> {
+    const activeShopId = customShopId || getActiveShopId();
+    const activeBiz = isHomemadeShopId(activeShopId) ? 'HOMEMADE_FOOD' : getActiveBusinessType();
     let updated!: DailyGallaSession;
 
     await db.transaction('rw', [db.daily_galla_sessions, db.sync_outbox], async () => {
-      const session = await db.daily_galla_sessions.where({ session_date: sessionDate }).first();
+      const session = await db.daily_galla_sessions
+        .filter((s) => s.session_date === sessionDate && (s.shop_id === activeShopId || (!s.shop_id && s.business_type === activeBiz)))
+        .first();
       if (!session) throw new Error(`No galla session found for date: ${sessionDate}`);
 
       const actual = roundCurrency(actualCountedCash);

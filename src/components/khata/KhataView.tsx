@@ -4,6 +4,7 @@ import { db } from '../../db/db';
 import { KhataService } from '../../services/khataService';
 import { CustomerPassbookDrawer } from './CustomerPassbookDrawer';
 import { ReceiveJamaModal } from './ReceiveJamaModal';
+import { getActiveShopId, getActiveBusinessType } from '../../services/tenantManager';
 import { formatINR } from '../../utils/math';
 import {
   BookOpen,
@@ -46,6 +47,39 @@ export const KhataView: React.FC<KhataViewProps> = ({
   const [jamaCustomer, setJamaCustomer] = useState<Customer | null>(null);
   const [isJamaModalOpen, setIsJamaModalOpen] = useState(false);
 
+  // Add Customer Modal & Shortcut
+  const [isAddCustomerModalOpen, setIsAddCustomerModalOpen] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  const [newCustomerAddress, setNewCustomerAddress] = useState('');
+  const [newCustomerLimit, setNewCustomerLimit] = useState('5000');
+  const [customerModalError, setCustomerModalError] = useState('');
+
+  // Hotkey: N to Add Customer (when not typing in an input) & Esc to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isAddCustomerModalOpen) {
+        e.preventDefault();
+        setIsAddCustomerModalOpen(false);
+        return;
+      }
+
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        activeEl instanceof HTMLSelectElement;
+      if (isInput) return;
+
+      if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setIsAddCustomerModalOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAddCustomerModalOpen]);
+
   // Today's recovered Jama calculation
   const [todayJamaRecovered, setTodayJamaRecovered] = useState<number>(0);
 
@@ -59,12 +93,11 @@ export const KhataView: React.FC<KhataViewProps> = ({
 
   const loadTodayJama = async () => {
     const todayDate = new Date().toISOString().split('T')[0];
-    const session = await db.daily_galla_sessions
-      .where({ session_date: todayDate })
-      .first();
+    const activeBiz = shopProfile?.business_type || getActiveBusinessType();
+    const activeShop = shopProfile?.id || getActiveShopId(activeBiz);
 
     const transactions = await db.khata_transactions
-      .filter((t) => t.created_at.startsWith(todayDate) && t.entry_type === 'CREDIT_JAMA_RECEIVED')
+      .filter((t) => t.created_at.startsWith(todayDate) && t.entry_type === 'CREDIT_JAMA_RECEIVED' && (t.shop_id === activeShop || (!t.shop_id && t.business_type === activeBiz)))
       .toArray();
 
     const sum = transactions.reduce((total, t) => total + t.amount, 0);
@@ -264,6 +297,47 @@ export const KhataView: React.FC<KhataViewProps> = ({
     }
   };
 
+  const handleCreateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCustomerName.trim()) {
+      setCustomerModalError('Please enter a customer name.');
+      return;
+    }
+    const cleanPhone = newCustomerPhone.replace(/\D/g, '');
+    if (cleanPhone && cleanPhone.length !== 10) {
+      setCustomerModalError('Phone number must be exactly 10 digits.');
+      return;
+    }
+
+    const shopId = localStorage.getItem('kirana_active_shop_id') || 'current_shop';
+    const newCust: Customer = {
+      id: crypto.randomUUID(),
+      shop_id: shopId,
+      name: newCustomerName.trim(),
+      phone: cleanPhone || '9999999999',
+      address_landmark: newCustomerAddress.trim() || undefined,
+      credit_limit: parseFloat(newCustomerLimit) || 5000,
+      current_udhari_balance: 0,
+      created_at: new Date().toISOString(),
+    };
+
+    await db.customers.put(newCust);
+    await db.queueSync({
+      table_name: 'customers',
+      operation: 'INSERT',
+      payload: newCust as unknown as Record<string, unknown>,
+      shop_id: shopId,
+    });
+
+    setNewCustomerName('');
+    setNewCustomerPhone('');
+    setNewCustomerAddress('');
+    setNewCustomerLimit('5000');
+    setCustomerModalError('');
+    setIsAddCustomerModalOpen(false);
+    if (onRefresh) onRefresh();
+  };
+
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
       {/* Top Header */}
@@ -277,6 +351,16 @@ export const KhataView: React.FC<KhataViewProps> = ({
             Automated WhatsApp statements &amp; passbook reconciliation | Zero accounting discrepancy
           </p>
         </div>
+
+        <button
+          type="button"
+          data-testid="add-customer-btn"
+          onClick={() => setIsAddCustomerModalOpen(true)}
+          className="px-4 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition"
+        >
+          <UserPlus className="w-4 h-4" />
+          <span>+ Add Customer [N]</span>
+        </button>
       </div>
 
       {smsToast && (
@@ -630,6 +714,121 @@ export const KhataView: React.FC<KhataViewProps> = ({
           if (onRefresh) onRefresh();
         }}
       />
+
+      {/* Add Customer Modal [N] */}
+      {isAddCustomerModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
+          data-testid="add-customer-modal"
+        >
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 rounded-xl">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Add New Khata Customer
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Press <kbd className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-[10px]">Esc</kbd> to cancel
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddCustomerModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {customerModalError && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-rose-700 dark:text-rose-400 text-xs font-semibold">
+                {customerModalError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateCustomer} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Customer Full Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g. Ramesh Patil"
+                  value={newCustomerName}
+                  onChange={(e) => setNewCustomerName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Mobile Number (10 Digits) *
+                </label>
+                <input
+                  type="tel"
+                  maxLength={10}
+                  placeholder="9876543210"
+                  value={newCustomerPhone}
+                  onChange={(e) => setNewCustomerPhone(e.target.value.replace(/\D/g, ''))}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Address / Locality (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Near Shiv Temple, Bazar Peth"
+                  value={newCustomerAddress}
+                  onChange={(e) => setNewCustomerAddress(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Credit Limit (₹)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="500"
+                  value={newCustomerLimit}
+                  onChange={(e) => setNewCustomerLimit(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsAddCustomerModalOpen(false)}
+                  className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-xs font-bold transition"
+                >
+                  Cancel (Esc)
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                >
+                  Save Customer (Enter)
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

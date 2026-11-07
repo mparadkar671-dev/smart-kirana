@@ -9,6 +9,7 @@ import {
   SaleItem,
 } from '../../types';
 import { HomemadeFoodService } from '../../services/homemadeFoodService';
+import { RecipeBomService, KitchenPrepSheet } from '../../services/recipeBomService';
 import { formatINR, roundCurrency, roundQty } from '../../utils/math';
 import {
   X,
@@ -46,8 +47,22 @@ export const AdvanceOrdersModal: React.FC<AdvanceOrdersModalProps> = ({
   onOrderCreated,
   onOrderCompletedAndBilled,
 }) => {
-  const [activeTab, setActiveTab] = useState<'new' | 'queue'>('new');
+  const [activeTab, setActiveTab] = useState<'new' | 'queue' | 'prep_sheet'>('new');
   const [orders, setOrders] = useState<AdvanceOrder[]>([]);
+  const [prepSheet, setPrepSheet] = useState<KitchenPrepSheet | null>(null);
+  const [isLoadingPrep, setIsLoadingPrep] = useState<boolean>(false);
+
+  const loadPrepSheet = async () => {
+    try {
+      setIsLoadingPrep(true);
+      const sheet = await RecipeBomService.calculateKitchenPrepRequirements();
+      setPrepSheet(sheet);
+    } catch (e) {
+      console.warn('Failed to calculate prep requirements', e);
+    } finally {
+      setIsLoadingPrep(false);
+    }
+  };
 
   // New Booking Form State
   const [customerName, setCustomerName] = useState('');
@@ -290,6 +305,23 @@ export const AdvanceOrdersModal: React.FC<AdvanceOrdersModalProps> = ({
                   {pendingOrdersCount} Pending
                 </span>
               )}
+            </button>
+
+            <button
+              type="button"
+              data-testid="advance-tab-prep-sheet"
+              onClick={() => {
+                setActiveTab('prep_sheet');
+                loadPrepSheet();
+              }}
+              className={`px-4 py-2 rounded-t-xl text-xs font-bold border-b-2 transition flex items-center gap-1.5 ${
+                activeTab === 'prep_sheet'
+                  ? 'border-amber-600 text-amber-700 dark:text-amber-400 bg-white dark:bg-slate-900'
+                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>📋 Kitchen Prep Sheet (BOM)</span>
             </button>
           </div>
         </div>
@@ -688,6 +720,149 @@ export const AdvanceOrdersModal: React.FC<AdvanceOrdersModalProps> = ({
                     </div>
                   );
                 })
+              )}
+            </div>
+          )}
+
+          {/* Tab 3: Kitchen Production & Raw Material BOM Sheet */}
+          {activeTab === 'prep_sheet' && (
+            <div data-testid="prep-sheet-view" className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>📋 Festival Advance Orders Prep &amp; BOM Requirements</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Aggregates all active advance bookings against current inventory to calculate exact kitchen prep needs and raw material procurement deficit.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadPrepSheet}
+                  disabled={isLoadingPrep}
+                  data-testid="refresh-prep-sheet-btn"
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition disabled:opacity-50"
+                >
+                  {isLoadingPrep ? 'Calculating...' : '🔄 Refresh Prep Sheet'}
+                </button>
+              </div>
+
+              {isLoadingPrep ? (
+                <div className="py-12 text-center text-xs text-slate-400">
+                  Aggregating BOM requirements across advance orders...
+                </div>
+              ) : !prepSheet || prepSheet.productRequirements.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-300 dark:border-slate-800 rounded-2xl">
+                  No pending advance orders to calculate prep sheets for.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Finished Goods Production Target */}
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                    <div className="px-4 py-2 bg-slate-100 dark:bg-slate-800 font-bold text-xs text-slate-800 dark:text-slate-200">
+                      1. Finished Food Items To Prepare ({prepSheet.productRequirements.length})
+                    </div>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 dark:bg-slate-850 text-slate-600 dark:text-slate-400">
+                        <tr>
+                          <th className="p-2.5 font-bold">Item Name</th>
+                          <th className="p-2.5 font-bold text-center">Total Booked</th>
+                          <th className="p-2.5 font-bold text-center">Current Stock</th>
+                          <th className="p-2.5 font-bold text-right">Net Kitchen Target</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                        {prepSheet.productRequirements.map((prod) => (
+                          <tr key={prod.productId} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                            <td className="p-2.5 font-bold text-slate-900 dark:text-white">
+                              {prod.productName}
+                            </td>
+                            <td className="p-2.5 text-center font-medium">
+                              {prod.totalOrderedQty} {prod.unitType}
+                            </td>
+                            <td className="p-2.5 text-center font-medium text-slate-600 dark:text-slate-400">
+                              {prod.currentStock} {prod.unitType}
+                            </td>
+                            <td className="p-2.5 text-right font-black text-amber-600 dark:text-amber-400">
+                              {prod.netProductionNeeded > 0
+                                ? `${prod.netProductionNeeded} ${prod.unitType}`
+                                : 'Stock Sufficient (0)'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Raw Material Procurement & Deficit Sheet */}
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                    <div className="px-4 py-2 bg-amber-100/70 dark:bg-amber-950/40 font-bold text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between">
+                      <span>2. Raw Material Requirements &amp; Deficit Sheet</span>
+                      <span>Total Est. Cost: {formatINR(prepSheet.totalEstimatedRawMaterialCost)}</span>
+                    </div>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 dark:bg-slate-850 text-slate-600 dark:text-slate-400">
+                        <tr>
+                          <th className="p-2.5 font-bold">Raw Material</th>
+                          <th className="p-2.5 font-bold text-center">Total Needed</th>
+                          <th className="p-2.5 font-bold text-center">In Stock</th>
+                          <th className="p-2.5 font-bold text-center">Procurement Deficit</th>
+                          <th className="p-2.5 font-bold text-right">Est. Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                        {prepSheet.rawMaterialsSummary.map((mat, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                            <td className="p-2.5 font-bold text-slate-900 dark:text-white">
+                              {mat.materialName}
+                            </td>
+                            <td className="p-2.5 text-center font-medium">
+                              {mat.totalQtyNeeded} {mat.unit}
+                            </td>
+                            <td className="p-2.5 text-center font-medium text-slate-600 dark:text-slate-400">
+                              {mat.currentStock} {mat.unit}
+                            </td>
+                            <td className="p-2.5 text-center">
+                              {mat.deficitQty > 0 ? (
+                                <span className="px-2 py-0.5 rounded-full font-bold bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300">
+                                  Need +{mat.deficitQty} {mat.unit}
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                  In Stock
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-2.5 text-right font-black text-slate-900 dark:text-white">
+                              {formatINR(mat.estimatedCost)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Procurement Action Summary */}
+                  <div className="p-3.5 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-slate-850 dark:to-slate-800 rounded-xl border border-amber-200 dark:border-amber-800 flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-bold text-amber-950 dark:text-amber-100">
+                        Kitchen Procurement Action Note:
+                      </span>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                        Use "Kirana ➡️ Gruh Udyog Stock Transfer" to transfer stock directly from Kirana retail inventory at 0% markup!
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs text-slate-500 block">Total Est. Raw Material Budget</span>
+                      <span
+                        data-testid="prep-total-cost"
+                        className="text-base font-black text-amber-700 dark:text-amber-300"
+                      >
+                        {formatINR(prepSheet.totalEstimatedRawMaterialCost)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           )}

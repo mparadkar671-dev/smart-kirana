@@ -159,7 +159,7 @@ describe('Zero / Low Stock Permission Warning & Strict Multi-Business Separation
 
     // Verify Kirana product & sales are NOT mixed into Homemade Food workspace!
     const hmfProducts = await db.products.toArray();
-    expect(hmfProducts.length).toBe(12);
+    expect(hmfProducts.length).toBe(8);
     expect(hmfProducts.some((p) => p.name.includes('Kolam Rice'))).toBe(false);
 
     // Invoices and expenses in Homemade Food are clean and isolated

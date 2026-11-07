@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Product } from '../../types';
 import { calculateReverseWeight, formatINR, roundQty, toPaise, toRupees } from '../../utils/math';
 import { X, Scale, IndianRupee, Check } from 'lucide-react';
@@ -19,6 +19,7 @@ export const LooseItemModal: React.FC<LooseItemModalProps> = ({
   const [mode, setMode] = useState<'WEIGHT' | 'AMOUNT'>('WEIGHT');
   const [weightKg, setWeightKg] = useState<number>(1.0);
   const [rupeeAmount, setRupeeAmount] = useState<number>(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (product) {
@@ -27,6 +28,28 @@ export const LooseItemModal: React.FC<LooseItemModalProps> = ({
       setRupeeAmount(product.selling_price);
     }
   }, [product, isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 50);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen || !product) return null;
 
@@ -136,12 +159,19 @@ export const LooseItemModal: React.FC<LooseItemModalProps> = ({
               <div className="relative">
                 <span className="absolute left-3.5 top-2.5 text-slate-400 dark:text-slate-500 font-bold text-sm">₹</span>
                 <input
+                  ref={inputRef}
                   type="number"
                   step="1"
                   min="1"
                   data-testid="loose-amount-input"
                   value={rupeeAmount || ''}
                   onChange={(e) => handleRupeeChange(parseFloat(e.target.value) || 0)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleConfirm();
+                    }
+                  }}
                   placeholder="e.g. 10, 20, 50"
                   className="w-full pl-8 pr-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-bold text-emerald-700 dark:text-emerald-400 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 />
@@ -167,7 +197,7 @@ export const LooseItemModal: React.FC<LooseItemModalProps> = ({
               onClick={onClose}
               className="px-4 py-2 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition"
             >
-              Cancel
+              Cancel (Esc)
             </button>
             <button
               type="button"
@@ -176,7 +206,7 @@ export const LooseItemModal: React.FC<LooseItemModalProps> = ({
               className="px-5 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-sm font-bold shadow-md transition flex items-center gap-2"
             >
               <Check className="w-4 h-4" />
-              <span>Add to Bill ({formatINR(rupeeAmount)})</span>
+              <span>Add to Bill ({formatINR(rupeeAmount)}) [Enter]</span>
             </button>
           </div>
         </div>

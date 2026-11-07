@@ -21,6 +21,17 @@ import { generateUniqueStoreBarcode } from '../utils/barcodeGenerator';
 import { roundCurrency, roundQty } from '../utils/math';
 import { BillingService } from './billingService';
 import { cloudSyncService } from './cloudSyncService';
+import {
+  resolveProductBusinessType,
+  getHomemadeShopIdForOwner,
+  getBaseKiranaShopId,
+  getHomemadeShopId,
+  getActiveShopId,
+  isHomemadeShopId,
+  HOMEMADE_CATEGORIES,
+  HOMEMADE_NAME_KEYWORDS,
+  KIRANA_CATEGORIES,
+} from '../utils/businessFirewall';
 
 export interface HomemadeStarterItem {
   marathiName: string;
@@ -72,178 +83,133 @@ export interface CapitalAndExpenseSummary {
 }
 
 /**
- * 12 Authentic Konkani / Maharashtrian Homemade Food (Gruh Udyog) Starter Catalog
+ * Authentic Konkani / Maharashtrian Homemade Food (Gruh Udyog) Catalog:
+ * Exactly the 8 authentic home products requested:
+ * 1. घावणे (Ghavane)
+ * 2. चपाती (Chapati)
+ * 3. आंबोळी (Amboli)
+ * 4. मोदक (Ukadiche Modak)
+ * 5. तांदळाचे लाडू (Tandlache Ladu)
+ * 6. खोबऱ्याची वडी (Khobryachi Vadi)
+ * 7. कांदे पोहे - घरगुती (Kande Pohe Homemade)
+ * 8. उपमा - घरगुती (Upma Homemade)
  */
-export const HOMEMADE_FOOD_STARTER_CATALOG: HomemadeStarterItem[] = [
-  {
-    marathiName: 'बेसन लाडू',
-    englishName: 'Besan Laddu',
-    shortCode: 'BSL',
-    category: 'Homemade Laddus & Sweets',
-    unitType: 'KG_LOOSE',
-    sellingPrice: 480,
-    makingCost: 340,
-    mrp: 500,
-    initialBatchQty: 5,
-    lowStockThreshold: 1,
-    searchKeywords: 'besan laddu, ladoo, बेसन लाडू, दिवाळी लाडू, साजूक तूप लाडू',
-    emoji: '🟡',
-  },
-  {
-    marathiName: 'रवा-नारळ लाडू',
-    englishName: 'Rava Coconut Laddu',
-    shortCode: 'RCL',
-    category: 'Homemade Laddus & Sweets',
-    unitType: 'KG_LOOSE',
-    sellingPrice: 420,
-    makingCost: 290,
-    mrp: 450,
-    initialBatchQty: 5,
-    lowStockThreshold: 1,
-    searchKeywords: 'rava laddu, naral laddu, coconut laddu, रवा लाडू, रवा नारळ लाडू',
-    emoji: '🥥',
-  },
-  {
-    marathiName: 'डिंक / ड्रायफ्रूट लाडू',
-    englishName: 'Dink Dryfruit Laddu',
-    shortCode: 'DDL',
-    category: 'Homemade Laddus & Sweets',
-    unitType: 'KG_LOOSE',
-    sellingPrice: 760,
-    makingCost: 540,
-    mrp: 800,
-    initialBatchQty: 4,
-    lowStockThreshold: 0.5,
-    searchKeywords: 'dink laddu, dryfruit laddu, डिंक लाडू, पौष्टिक लाडू, सुकामेवा लाडू',
-    emoji: '🌰',
-  },
-  {
-    marathiName: 'खोबऱ्याच्या वड्या / कापा',
-    englishName: 'Khobryachi Kapa (Coconut Barfi)',
-    shortCode: 'KHK',
-    category: 'Homemade Laddus & Sweets',
-    unitType: 'KG_LOOSE',
-    sellingPrice: 440,
-    makingCost: 250,
-    mrp: 480,
-    initialBatchQty: 5,
-    lowStockThreshold: 1,
-    searchKeywords: 'khobryachi kapa, naral vadi, khobra vadi, खोबऱ्याच्या वड्या, कापा, नारळ वडी',
-    emoji: '🥥',
-  },
-  {
-    marathiName: 'उकडीचे मोदक',
-    englishName: 'Ukadiche Modak',
-    shortCode: 'UMD',
-    category: 'Modak & Festive Specials',
-    unitType: 'PCS',
-    sellingPrice: 30,
-    makingCost: 14,
-    mrp: 30,
-    initialBatchQty: 42,
-    lowStockThreshold: 11,
-    searchKeywords: 'ukadiche modak, steamed modak, उकडीचे मोदक, मोदक, संकष्टी मोदक',
-    emoji: '🥟',
-  },
-  {
-    marathiName: 'तळणीचे मोदक',
-    englishName: 'Fried Modak',
-    shortCode: 'FMD',
-    category: 'Modak & Festive Specials',
-    unitType: 'PCS',
-    sellingPrice: 20,
-    makingCost: 11,
-    mrp: 20,
-    initialBatchQty: 40,
-    lowStockThreshold: 10,
-    searchKeywords: 'talniche modak, fried modak, तळणीचे मोदक, मोदक',
-    emoji: '🥟',
-  },
+export const EXACT_8_HOMEMADE_FOOD_CATALOG: HomemadeStarterItem[] = [
   {
     marathiName: 'घावणे',
-    englishName: 'Malvani Ghavane',
+    englishName: 'Ghavane',
     shortCode: 'GHV',
-    category: 'Konkani Fresh Tiffin & Poli',
+    category: 'Konkani Breakfast & Tiffin',
     unitType: 'PLATE',
-    sellingPrice: 40,
-    makingCost: 22,
+    sellingPrice: 35,
+    makingCost: 18,
     mrp: 40,
     initialBatchQty: 30,
     lowStockThreshold: 5,
-    searchKeywords: 'ghavane, malvani ghavane, घावणे, मालवणी घावणे, तांदळाचे घावणे',
+    searchKeywords: 'ghavane, malvani ghavane, घावणे, breakfast',
     emoji: '🥞',
   },
   {
-    marathiName: 'आंबोळी',
-    englishName: 'Soft Amboli',
-    shortCode: 'AMB',
-    category: 'Konkani Fresh Tiffin & Poli',
-    unitType: 'PLATE',
-    sellingPrice: 40,
-    makingCost: 20,
-    mrp: 40,
-    initialBatchQty: 30,
-    lowStockThreshold: 5,
-    searchKeywords: 'amboli, konkani amboli, आंबोळी, कोकणी आंबोळी',
-    emoji: '🥞',
-  },
-  {
-    marathiName: 'तांदळाची भाकरी',
-    englishName: 'Tandlachi Bhakri',
-    shortCode: 'TBK',
-    category: 'Fresh Bhakri & Chapati',
-    unitType: 'PCS',
-    sellingPrice: 15,
-    makingCost: 8,
-    mrp: 15,
-    initialBatchQty: 40,
-    lowStockThreshold: 10,
-    searchKeywords: 'tandlachi bhakri, rice bhakri, तांदळाची भाकरी, भाकरी',
-    emoji: '🫓',
-  },
-  {
-    marathiName: 'ज्वारी / बाजरी भाकरी',
-    englishName: 'Jowar-Bajra Bhakri',
-    shortCode: 'JBK',
-    category: 'Fresh Bhakri & Chapati',
-    unitType: 'PCS',
-    sellingPrice: 18,
-    makingCost: 9.5,
-    mrp: 18,
-    initialBatchQty: 35,
-    lowStockThreshold: 8,
-    searchKeywords: 'jowar bhakri, bajra bhakri, ज्वारी भाकरी, बाजरी भाकरी, गावरान भाकरी',
-    emoji: '🫓',
-  },
-  {
-    marathiName: 'घरगुती चपाती',
-    englishName: 'Soft Chapati (Poli)',
+    marathiName: 'चपाती',
+    englishName: 'Chapati',
     shortCode: 'CHP',
     category: 'Fresh Bhakri & Chapati',
     unitType: 'PCS',
     sellingPrice: 10,
     makingCost: 5.5,
-    mrp: 10,
-    initialBatchQty: 80,
-    lowStockThreshold: 15,
-    searchKeywords: 'chapati, poli, fulka, घरगुती चपाती, पोळी, गव्हाची पोळी',
+    mrp: 12,
+    initialBatchQty: 60,
+    lowStockThreshold: 10,
+    searchKeywords: 'chapati, poli, चपाती, पोळी, homemade chapati',
     emoji: '🫓',
   },
   {
-    marathiName: 'पुरणपोळी',
-    englishName: 'Puran Poli',
-    shortCode: 'PPL',
-    category: 'Modak & Festive Specials',
-    unitType: 'PCS',
-    sellingPrice: 30,
-    makingCost: 16,
-    mrp: 30,
+    marathiName: 'आंबोळी',
+    englishName: 'Amboli',
+    shortCode: 'AMB',
+    category: 'Konkani Breakfast & Tiffin',
+    unitType: 'PLATE',
+    sellingPrice: 40,
+    makingCost: 20,
+    mrp: 45,
     initialBatchQty: 25,
     lowStockThreshold: 5,
-    searchKeywords: 'puran poli, puranpoli, पुरणपोळी, सणाची पुरणपोळी',
+    searchKeywords: 'amboli, amaboli, आंबोळी, konkani amboli',
     emoji: '🥞',
   },
+  {
+    marathiName: 'मोदक',
+    englishName: 'Ukadiche Modak',
+    shortCode: 'UMD',
+    category: 'Modak & Festive Specials',
+    unitType: 'PCS',
+    sellingPrice: 25,
+    makingCost: 14,
+    mrp: 30,
+    initialBatchQty: 40,
+    lowStockThreshold: 5,
+    searchKeywords: 'modak, ukadiche modak, मोदक, उकडीचे मोदक, ganpati modak',
+    emoji: '🥟',
+  },
+  {
+    marathiName: 'तांदळाचे लाडू',
+    englishName: 'Tandlache Ladu',
+    shortCode: 'TLD',
+    category: 'Homemade Laddus & Vadi',
+    unitType: 'KG_LOOSE',
+    sellingPrice: 380,
+    makingCost: 260,
+    mrp: 420,
+    initialBatchQty: 5,
+    lowStockThreshold: 1,
+    searchKeywords: 'ladu, laddu, tandlache ladu, तांदळाचे लाडू, कोकणी लाडू, TLD1',
+    emoji: '🟡',
+  },
+  {
+    marathiName: 'खोबऱ्याची वडी',
+    englishName: 'Khobryachi Vadi',
+    shortCode: 'KHK',
+    category: 'Homemade Laddus & Vadi',
+    unitType: 'KG_LOOSE',
+    sellingPrice: 460,
+    makingCost: 310,
+    mrp: 500,
+    initialBatchQty: 5,
+    lowStockThreshold: 1,
+    searchKeywords: 'khobryachi vadi, kapa, khobryachi kapa, खोबऱ्याची वडी, खोबऱ्याच्या कापा, naralachi vadi, KBV1',
+    emoji: '🥥',
+  },
+  {
+    marathiName: 'कांदे पोहे - घरगुती',
+    englishName: 'Kande Pohe Homemade',
+    shortCode: 'KPH',
+    category: 'Konkani Breakfast & Tiffin',
+    unitType: 'PLATE',
+    sellingPrice: 30,
+    makingCost: 15,
+    mrp: 35,
+    initialBatchQty: 25,
+    lowStockThreshold: 5,
+    searchKeywords: 'kande pohe, pohe homemade, कांदे पोहे, घरगुती पोहे, breakfast',
+    emoji: '🥣',
+  },
+  {
+    marathiName: 'उपमा - घरगुती',
+    englishName: 'Upma Homemade',
+    shortCode: 'UPM',
+    category: 'Konkani Breakfast & Tiffin',
+    unitType: 'PLATE',
+    sellingPrice: 30,
+    makingCost: 15,
+    mrp: 35,
+    initialBatchQty: 25,
+    lowStockThreshold: 5,
+    searchKeywords: 'upma homemade, sanja, उपमा, घरगुती उपमा, breakfast',
+    emoji: '🥣',
+  },
 ];
+
+export const HOMEMADE_FOOD_STARTER_CATALOG = EXACT_8_HOMEMADE_FOOD_CATALOG;
 
 /**
  * Generates a warm Saffron/Amber 160x160px SVG DataURL thumbnail for Homemade Food items
@@ -280,38 +246,9 @@ export function isHomemadeFoodCategoryOrName(item: {
   name?: string;
   marathi_name?: string;
   category?: string;
+  business_type?: string | null;
 }): boolean {
-  const text = `${item.name || ''} ${item.marathi_name || ''} ${item.category || ''}`.toLowerCase();
-
-  const homemadeKeywords = [
-    'puran poli',
-    'पुरणपोळी',
-    'मोदक',
-    'modak',
-    'लाडू',
-    'laddu',
-    'ladoo',
-    'घावणे',
-    'ghavane',
-    'आंबोळी',
-    'amboli',
-    'भाकरी',
-    'bhakri',
-    'चपाती',
-    'chapati',
-    'कापा',
-    'kapa',
-    'vadi',
-    'वड्या',
-    'खोबऱ्या',
-    'festive specials',
-    'konkani',
-    'fresh tiffin',
-    'gruh udyog',
-    'homemade',
-  ];
-
-  return homemadeKeywords.some((kw) => text.includes(kw));
+  return resolveProductBusinessType(item) === 'HOMEMADE_FOOD';
 }
 
 /**
@@ -328,19 +265,36 @@ export async function repairMixedBusinessProducts(): Promise<{
   let kiranaCount = 0;
 
   const updates: Product[] = [];
+  const primaryKiranaShopId = getBaseKiranaShopId();
+  const hmfShopId = getHomemadeShopId(primaryKiranaShopId);
 
   for (const prod of allProducts) {
-    const shouldBeHomemade = isHomemadeFoodCategoryOrName(prod);
-    const expectedType: BusinessType = shouldBeHomemade ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL';
+    const expectedType: BusinessType = resolveProductBusinessType(prod);
+    let changed = false;
 
     if (prod.business_type !== expectedType) {
       prod.business_type = expectedType;
+      changed = true;
+    }
+
+    if (expectedType === 'HOMEMADE_FOOD') {
+      if (!prod.shop_id || !isHomemadeShopId(prod.shop_id)) {
+        prod.shop_id = hmfShopId;
+        changed = true;
+      }
+      homemadeCount++;
+    } else {
+      if (!prod.shop_id || isHomemadeShopId(prod.shop_id)) {
+        prod.shop_id = primaryKiranaShopId;
+        changed = true;
+      }
+      kiranaCount++;
+    }
+
+    if (changed) {
       updates.push(prod);
       repairedCount++;
     }
-
-    if (expectedType === 'HOMEMADE_FOOD') homemadeCount++;
-    else kiranaCount++;
   }
 
   if (updates.length > 0) {
@@ -391,87 +345,168 @@ export class HomemadeFoodService {
   }
 
   /**
-   * Seeds the 12 Homemade Konkani/Maharashtrian Food Menu items into the active store
+   * Purges any old or corrupted homemade food products from the primary Kirana store
    */
-  static async seedHomemadeFoodCatalog(): Promise<{
-    importedCount: number;
-    seededCount: number;
-    totalProducts: number;
-    totalHomemadeCount: number;
-  }> {
-    const profile = await db.getShopProfile();
-    const shopId = profile?.shop_id || profile?.id || 'homemade_food_shop';
-    const existingProducts = await db.products.toArray();
-    const usedBarcodes = new Set(existingProducts.map((p) => p.barcode).filter(Boolean));
-    const nowIso = new Date().toISOString();
+  static async purgeCorruptedHomemadeFromKirana(kiranaShopId?: string): Promise<number> {
+    const primaryId =
+      kiranaShopId ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_primary_shop_id') : null) ||
+      'current_shop';
+    const allProducts = await db.products.toArray();
+    const toDelete: string[] = [];
 
+    for (const p of allProducts) {
+      if (p.shop_id === primaryId) {
+        const isHmf =
+          p.business_type === 'HOMEMADE_FOOD' ||
+          HOMEMADE_CATEGORIES.has(p.category || '') ||
+          HOMEMADE_NAME_KEYWORDS.some((kw) => `${p.name} ${p.marathi_name || ''}`.toLowerCase().includes(kw));
+        const isKirana = KIRANA_CATEGORIES.has(p.category || '');
+        if (isHmf && !isKirana) {
+          toDelete.push(p.id);
+        }
+      }
+    }
+
+    if (toDelete.length > 0) {
+      await db.products.bulkDelete(toDelete);
+      try {
+        const { supabase } = await import('../lib/supabase');
+        if (supabase) {
+          await supabase.from('products').delete().eq('shop_id', primaryId).in('id', toDelete);
+        }
+      } catch {}
+    }
+    return toDelete.length;
+  }
+
+  /**
+   * Complete multi-tenant store reset:
+   * 1. Purges mixed homemade items from kiranaShopId
+   * 2. Clears old products from homemadeShopId
+   * 3. Ensures both shop_profiles exist with KRN and HMF prefixes
+   * 4. Seeds ONLY the user's exact 8-Product authentic catalog under homemadeShopId
+   */
+  static async cleanPurgeAndSeedHomemadeStore(
+    kiranaShopId?: string,
+    homemadeShopId?: string
+  ): Promise<{
+    purgedFromKirana: number;
+    seededCount: number;
+  }> {
+    const primaryId = getBaseKiranaShopId(
+      kiranaShopId ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_base_shop_id') || localStorage.getItem('kirana_primary_shop_id') : null) ||
+      'current_shop'
+    );
+    const hmfId = homemadeShopId || getHomemadeShopId(primaryId);
+
+    // 1. Purge corrupted homemade products from kiranaShopId
+    const purgedFromKirana = await this.purgeCorruptedHomemadeFromKirana(primaryId);
+
+    // 2. Clear old products under homemadeShopId
+    const oldHmf = await db.products.filter((p) => p.shop_id === hmfId).toArray();
+    if (oldHmf.length > 0) {
+      await db.products.bulkDelete(oldHmf.map((p) => p.id));
+      try {
+        const { supabase } = await import('../lib/supabase');
+        if (supabase) {
+          await supabase.from('products').delete().eq('shop_id', hmfId);
+        }
+      } catch {}
+    }
+
+    // 3. Ensure dual shop profiles exist in db.shop_profile
+    const nowIso = new Date().toISOString();
+    const existingKirana = await db.shop_profile.get(primaryId);
+    if (!existingKirana) {
+      await db.shop_profile.put({
+        ...DEFAULT_SHOP_PROFILE,
+        id: primaryId,
+        shop_id: primaryId,
+        business_type: 'KIRANA_RETAIL',
+        invoice_prefix: 'KRN',
+        updated_at: nowIso,
+      });
+    }
+
+    const existingHmf = await db.shop_profile.get(hmfId);
+    if (!existingHmf) {
+      await db.shop_profile.put({
+        ...DEFAULT_SHOP_PROFILE,
+        id: hmfId,
+        shop_id: hmfId,
+        shop_name: 'Laxmi Vatsalya Gruh Udyog (Homemade Foods)',
+        business_type: 'HOMEMADE_FOOD',
+        invoice_prefix: 'HMF',
+        updated_at: nowIso,
+      });
+    }
+
+    // 4. Seed strictly the 8 authentic Homemade Food products matching Supabase barcodes
     const productsToPut: Product[] = [];
     const logsToPut: InventoryLog[] = [];
-    let importedCount = 0;
+    const existingBarcodes = new Set((await db.products.toArray()).map((p) => p.barcode).filter(Boolean));
+    const canonicalBarcodes = [
+      '2009000000018',
+      '2009000000025',
+      '2009000000032',
+      '2009000000049',
+      '2009000000056',
+      '2009000000063',
+      '2009000000070',
+      '2009000000087',
+    ];
 
-    HOMEMADE_FOOD_STARTER_CATALOG.forEach((item, idx) => {
+    EXACT_8_HOMEMADE_FOOD_CATALOG.forEach((item, idx) => {
       const id = `hmf-prod-${String(idx + 1).padStart(3, '0')}`;
-      const existing = existingProducts.find(
-        (p) => p.id === id || p.name.toLowerCase().includes(item.englishName.toLowerCase())
-      );
-
-      let barcode = existing?.barcode || '';
-      if (!barcode) {
-        barcode = generateUniqueStoreBarcode(usedBarcodes);
-        usedBarcodes.add(barcode);
-      }
-
-      const shortCode = existing?.short_code || item.shortCode || `HMF${String(idx + 1).padStart(2, '0')}`;
+      const barcode = canonicalBarcodes[idx] || generateUniqueStoreBarcode(existingBarcodes);
+      existingBarcodes.add(barcode);
 
       const prod: Product = {
-        id: existing?.id || id,
-        shop_id: shopId,
+        id,
+        shop_id: hmfId,
         business_type: 'HOMEMADE_FOOD',
         name: `${item.marathiName} (${item.englishName})`,
         marathi_name: item.marathiName,
         search_keywords: item.searchKeywords,
-        short_code: shortCode,
+        short_code: item.shortCode,
         barcode,
         category: item.category,
         unit_type: item.unitType,
         purchase_price: item.makingCost,
         selling_price: item.sellingPrice,
         mrp: item.mrp,
-        current_stock: existing ? existing.current_stock : item.initialBatchQty,
+        current_stock: item.initialBatchQty,
         low_stock_threshold: item.lowStockThreshold,
         last_supplier_name: 'In-House Fresh Kitchen Batch',
         wholesaler_id: null,
         loan_account_id: null,
-        image_url:
-          existing?.image_url ||
-          generateHomemadeFoodThumbnail({
-            marathiName: item.marathiName,
-            englishName: item.englishName,
-            sellingPrice: item.sellingPrice,
-            unitType: item.unitType,
-            emoji: item.emoji,
-          }),
+        image_url: generateHomemadeFoodThumbnail({
+          marathiName: item.marathiName,
+          englishName: item.englishName,
+          sellingPrice: item.sellingPrice,
+          unitType: item.unitType,
+          emoji: item.emoji,
+        }),
         expiry_date: null,
         is_quick_tap: true,
         updated_at: nowIso,
       };
 
       productsToPut.push(prod);
-      if (!existing) {
-        importedCount++;
-        logsToPut.push({
-          id: `hmf-init-log-${prod.id}`,
-          shop_id: shopId,
-          business_type: 'HOMEMADE_FOOD',
-          product_id: prod.id,
-          change_qty: prod.current_stock,
-          reason_type: 'BATCH_MADE_IN',
-          unit_cost_at_time: prod.purchase_price,
-          reference_id: null,
-          notes: 'Initial fresh kitchen batch stock',
-          created_at: nowIso,
-        });
-      }
+      logsToPut.push({
+        id: `hmf-init-log-${id}`,
+        shop_id: hmfId,
+        business_type: 'HOMEMADE_FOOD',
+        product_id: id,
+        change_qty: prod.current_stock,
+        reason_type: 'BATCH_MADE_IN',
+        unit_cost_at_time: prod.purchase_price,
+        reference_id: null,
+        notes: 'Initial authentic fresh batch stock',
+        created_at: nowIso,
+      });
     });
 
     await db.transaction('rw', [db.products, db.inventory_logs], async () => {
@@ -481,14 +516,44 @@ export class HomemadeFoodService {
       }
     });
 
-    cloudSyncService.syncAllToCloud().catch(() => { });
+    try {
+      for (const p of productsToPut) {
+        await cloudSyncService.syncProduct(p);
+      }
+    } catch {}
 
+    return {
+      purgedFromKirana,
+      seededCount: productsToPut.length,
+    };
+  }
+
+  /**
+   * Seeds the authentic Homemade Konkani/Maharashtrian Food Menu items into the active store
+   */
+  static async seedHomemadeFoodCatalog(): Promise<{
+    importedCount: number;
+    seededCount: number;
+    totalProducts: number;
+    totalHomemadeCount: number;
+  }> {
+    const profile = await db.getShopProfile();
+    const primaryId = getBaseKiranaShopId(
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_base_shop_id') || localStorage.getItem('kirana_primary_shop_id') : null) ||
+      profile?.shop_id ||
+      'current_shop'
+    );
+    const shopId = profile?.business_type === 'HOMEMADE_FOOD'
+      ? (profile?.shop_id || getHomemadeShopId(primaryId))
+      : getHomemadeShopId(primaryId);
+
+    const res = await this.cleanPurgeAndSeedHomemadeStore(primaryId, shopId);
     const totalProducts = await db.products.count();
     return {
-      importedCount,
-      seededCount: importedCount,
+      importedCount: res.seededCount,
+      seededCount: res.seededCount,
       totalProducts,
-      totalHomemadeCount: totalProducts,
+      totalHomemadeCount: res.seededCount,
     };
   }
 
@@ -514,10 +579,13 @@ export class HomemadeFoodService {
     const currentBusinessType: BusinessType = currentProfile?.business_type || 'KIRANA_RETAIL';
 
     // 1. Save current business snapshot before switching to IndexedDB (unlimited quota) + inMemory
+    const currentProducts = (await db.products.toArray()).filter(
+      (p) => resolveProductBusinessType(p) === currentBusinessType
+    );
     const currentSnapshot: BusinessWorkspaceRecord = {
       business_type: currentBusinessType,
       shop_profile: currentProfile || DEFAULT_SHOP_PROFILE,
-      products: await db.products.toArray(),
+      products: currentProducts,
       inventory_logs: await db.inventory_logs.toArray(),
       customers: await db.customers.toArray(),
       sales_invoices: await db.sales_invoices.toArray(),
@@ -553,8 +621,17 @@ export class HomemadeFoodService {
       targetSnapshot = inMemoryWorkspaces[targetKey];
     }
 
-    const targetShopId = targetBusinessType === 'HOMEMADE_FOOD' ? 'homemade_food_shop' : 'current_shop';
+    const primaryKiranaShopId = getBaseKiranaShopId(
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_base_shop_id') || localStorage.getItem('kirana_primary_shop_id') : null) ||
+      (currentProfile?.shop_id && !isHomemadeShopId(currentProfile.shop_id) ? currentProfile.shop_id : 'current_shop')
+    );
+    const homemadeShopId = getHomemadeShopId(primaryKiranaShopId);
+    const targetShopId = targetBusinessType === 'HOMEMADE_FOOD' ? homemadeShopId : primaryKiranaShopId;
+
     if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('kirana_base_shop_id', primaryKiranaShopId);
+      localStorage.setItem('kirana_primary_shop_id', primaryKiranaShopId);
+      localStorage.setItem('kirana_homemade_shop_id', homemadeShopId);
       localStorage.setItem('kirana_active_shop_id', targetShopId);
       localStorage.setItem('kirana_active_business_type', targetBusinessType);
     }
@@ -589,7 +666,12 @@ export class HomemadeFoodService {
         await db.wholesalers.clear();
 
         if (targetSnapshot) {
-          if (targetSnapshot.products?.length) await db.products.bulkPut(targetSnapshot.products);
+          if (targetSnapshot.products?.length) {
+            const cleanTargetProds = targetSnapshot.products.filter(
+              (p) => resolveProductBusinessType(p) === targetBusinessType
+            );
+            if (cleanTargetProds.length) await db.products.bulkPut(cleanTargetProds);
+          }
           if (targetSnapshot.inventory_logs?.length) await db.inventory_logs.bulkPut(targetSnapshot.inventory_logs);
           if (targetSnapshot.customers?.length) {
             await db.customers.bulkPut(targetSnapshot.customers);
@@ -607,19 +689,20 @@ export class HomemadeFoodService {
 
           const restoredProfile: ShopProfile = {
             ...(targetSnapshot.shop_profile || DEFAULT_SHOP_PROFILE),
-            id: DEFAULT_SHOP_PROFILE.id,
+            id: targetShopId,
             shop_id: targetShopId,
             business_type: targetBusinessType,
             invoice_prefix: targetBusinessType === 'HOMEMADE_FOOD' ? 'HMF' : 'KRN',
             updated_at: new Date().toISOString(),
           };
           await db.shop_profile.put(restoredProfile);
+          await db.shop_profile.put({ ...restoredProfile, id: DEFAULT_SHOP_PROFILE.id });
         } else {
           // Initialize fresh workspace for targetBusinessType
           await db.customers.put({ ...WALK_IN_CUSTOMER_RECORD, shop_id: targetShopId });
           const newProfile: ShopProfile = {
             ...DEFAULT_SHOP_PROFILE,
-            id: DEFAULT_SHOP_PROFILE.id,
+            id: targetShopId,
             shop_id: targetShopId,
             business_type: targetBusinessType,
             invoice_prefix: targetBusinessType === 'HOMEMADE_FOOD' ? 'HMF' : 'KRN',
@@ -640,6 +723,7 @@ export class HomemadeFoodService {
             updated_at: new Date().toISOString(),
           };
           await db.shop_profile.put(newProfile);
+          await db.shop_profile.put({ ...newProfile, id: DEFAULT_SHOP_PROFILE.id });
         }
       }
     );
@@ -649,8 +733,10 @@ export class HomemadeFoodService {
     if (targetBusinessType === 'HOMEMADE_FOOD' && shouldSeed) {
       const count = await db.products.count();
       if (count === 0) {
-        await this.seedHomemadeFoodCatalog();
+        await this.cleanPurgeAndSeedHomemadeStore(primaryKiranaShopId, targetShopId);
       }
+    } else if (targetBusinessType === 'KIRANA_RETAIL') {
+      await this.purgeCorruptedHomemadeFromKirana(primaryKiranaShopId);
     }
 
     await repairMixedBusinessProducts();

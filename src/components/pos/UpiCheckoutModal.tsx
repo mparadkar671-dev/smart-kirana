@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { BillingService } from '../../services/billingService';
 import { formatINR } from '../../utils/math';
@@ -21,6 +21,27 @@ export const UpiCheckoutModal: React.FC<UpiCheckoutModalProps> = ({
   shopVpa,
   onPaymentConfirmed,
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        onPaymentConfirmed();
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose, onPaymentConfirmed]);
+
   if (!isOpen) return null;
 
   const upiIntentUrl = BillingService.generateUpiIntentUrl(shopVpa, shopName, amount);

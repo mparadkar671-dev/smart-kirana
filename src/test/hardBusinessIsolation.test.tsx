@@ -3,7 +3,24 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { db } from '../db/db';
 import { InventoryService } from '../services/inventoryService';
-import { HomemadeFoodService, isHomemadeFoodCategoryOrName, repairMixedBusinessProducts } from '../services/homemadeFoodService';
+import {
+  HomemadeFoodService,
+  isHomemadeFoodCategoryOrName,
+  repairMixedBusinessProducts,
+  EXACT_8_HOMEMADE_FOOD_CATALOG,
+} from '../services/homemadeFoodService';
+import {
+  filterProductsForBusiness,
+  resolveProductBusinessType,
+  getHomemadeShopIdForOwner,
+  getBaseKiranaShopId,
+  getHomemadeShopId,
+  getKiranaShopIdFromHomemade,
+  isHomemadeShopId,
+} from '../utils/businessFirewall';
+import { BillingService } from '../services/billingService';
+import { GallaService } from '../services/gallaService';
+import { ReportsService } from '../services/reportsService';
 import { InventoryView } from '../components/inventory/InventoryView';
 import { POSView } from '../components/pos/POSView';
 import { ProductModal } from '../components/inventory/ProductModal';
@@ -76,6 +93,10 @@ describe('Hard Data, UI, Category & Sync Isolation: KIRANA_RETAIL vs HOMEMADE_FO
         is_quick_tap: true,
       } as Product,
     ]);
+
+    // Intentionally corrupt records to simulate bad sync data
+    await db.products.update('p-toor', { business_type: 'HOMEMADE_FOOD' });
+    await db.products.update('p-puran', { business_type: 'KIRANA_RETAIL' });
 
     const res = await repairMixedBusinessProducts();
     expect(res.repairedCount).toBeGreaterThanOrEqual(2);
@@ -332,5 +353,256 @@ describe('Hard Data, UI, Category & Sync Isolation: KIRANA_RETAIL vs HOMEMADE_FO
     // Homemade food item must be wiped
     const ghavane = await db.products.get('p-ghavane');
     expect(ghavane).toBeUndefined();
+  });
+
+  it('6. Bulletproof businessFirewall: filterProductsForBusiness strictly separates Puran Poli and Toor Dal even if business_type is corrupted', () => {
+    const corruptedItems = [
+      {
+        id: 'p-puran',
+        name: 'पुरणपोळी (Puran Poli)',
+        category: 'Modak & Festive Specials',
+        business_type: 'HOMEMADE_FOOD',
+      },
+      {
+        id: 'p-toor',
+        name: 'तूर डाळ (Toor Dal (Arhar))',
+        category: 'Grains & Pulses',
+        // Intentionally corrupted to simulate bad cloud sync
+        business_type: 'HOMEMADE_FOOD',
+      },
+      {
+        id: 'p-moong',
+        name: 'मूग डाळ (Moong Dal)',
+        category: 'Dals & Pulses',
+        business_type: null,
+      },
+      {
+        id: 'p-modak',
+        name: 'उकडीचे मोदक (Ukadiche Modak)',
+        category: 'Festive Specials',
+        business_type: null,
+      },
+    ];
+
+    // Under HOMEMADE_FOOD, Grains & Pulses must NEVER appear
+    const hmfFiltered = filterProductsForBusiness(corruptedItems, 'HOMEMADE_FOOD');
+    expect(hmfFiltered.map((p) => p.name)).toEqual([
+      'पुरणपोळी (Puran Poli)',
+      'उकडीचे मोदक (Ukadiche Modak)',
+    ]);
+    expect(hmfFiltered.some((p) => p.category === 'Grains & Pulses')).toBe(false);
+    expect(hmfFiltered.some((p) => p.category === 'Dals & Pulses')).toBe(false);
+
+    // Under KIRANA_RETAIL, Homemade food must NEVER appear
+    const kiranaFiltered = filterProductsForBusiness(corruptedItems, 'KIRANA_RETAIL');
+    expect(kiranaFiltered.map((p) => p.name)).toEqual([
+      'तूर डाळ (Toor Dal (Arhar))',
+      'मूग डाळ (Moong Dal)',
+    ]);
+    expect(kiranaFiltered.some((p) => p.name.includes('पुरणपोळी'))).toBe(false);
+    expect(kiranaFiltered.some((p) => p.name.includes('मोदक'))).toBe(false);
+  });
+
+  it('7. STEP 5 Verification: kiranaShopId and homemadeShopId are deterministically derived UUIDs for the same Owner matching Supabase SQL', () => {
+    const ownerKiranaUuid = 'c7b9195a-49e0-4a88-8254-2035ef580001';
+    localStorage.setItem('kirana_base_shop_id', ownerKiranaUuid);
+    const ownerHmfUuid = getHomemadeShopId(ownerKiranaUuid);
+
+    // 1. Must be distinct
+    expect(ownerHmfUuid).not.toBe(ownerKiranaUuid);
+
+    // 2. Must end with exact Supabase SQL suffix -484d-4600-000000000001
+    expect(ownerHmfUuid.endsWith('-484d-4600-000000000001')).toBe(true);
+    expect(ownerHmfUuid).toBe(`${ownerKiranaUuid.substring(0, 18)}-484d-4600-000000000001`);
+
+    // 3. Must be deterministic across all calls (Desktop, Laptop, Mobile)
+    expect(getHomemadeShopId(ownerKiranaUuid)).toBe(ownerHmfUuid);
+    expect(getHomemadeShopIdForOwner(ownerKiranaUuid)).toBe(ownerHmfUuid);
+
+    // 4. Base resolution restores primary Kirana shop_id
+    expect(getBaseKiranaShopId(ownerHmfUuid)).toBe(ownerKiranaUuid);
+    expect(isHomemadeShopId(ownerHmfUuid)).toBe(true);
+    expect(isHomemadeShopId(ownerKiranaUuid)).toBe(false);
+  });
+
+  it('8. STEP 5 Verification: In HOMEMADE_FOOD mode, Inventory and POS contain ONLY the 8 authentic items and 0 Kirana items', async () => {
+    const kiranaShopId = 'c7b9195a-49e0-4a88-8254-2035ef580001';
+    const hmfShopId = getHomemadeShopIdForOwner(kiranaShopId);
+
+    // Add Kirana Dals to kiranaShopId
+    await db.products.bulkAdd([
+      {
+        id: 'kirana-toor',
+        shop_id: kiranaShopId,
+        name: 'तूर डाळ (Toor Dal)',
+        short_code: 'TD1',
+        barcode: '2000000000101',
+        category: 'Grains & Pulses',
+        unit_type: 'KG_LOOSE',
+        purchase_price: 130,
+        selling_price: 155,
+        mrp: 160,
+        current_stock: 50,
+        low_stock_threshold: 10,
+        business_type: 'KIRANA_RETAIL',
+        last_supplier_name: 'APMC Grain Mandi',
+      } as Product,
+      {
+        id: 'kirana-moong',
+        shop_id: kiranaShopId,
+        name: 'मूग डाळ (Moong Dal)',
+        short_code: 'MD1',
+        barcode: '2000000000102',
+        category: 'Dals & Pulses',
+        unit_type: 'KG_LOOSE',
+        purchase_price: 110,
+        selling_price: 135,
+        mrp: 140,
+        current_stock: 40,
+        low_stock_threshold: 8,
+        business_type: 'KIRANA_RETAIL',
+        last_supplier_name: 'APMC Grain Mandi',
+      } as Product,
+    ]);
+
+    // Clean & Seed the Homemade store
+    const seedRes = await HomemadeFoodService.cleanPurgeAndSeedHomemadeStore(kiranaShopId, hmfShopId);
+    expect(seedRes.seededCount).toBe(8);
+
+    const allDbProducts = await db.products.toArray();
+    // 2 Kirana + 8 Homemade = 10 total products in multi-tenant DB
+    expect(allDbProducts.length).toBe(10);
+
+    // Filter for HOMEMADE_FOOD mode
+    const hmfProducts = filterProductsForBusiness(allDbProducts, 'HOMEMADE_FOOD', hmfShopId);
+    expect(hmfProducts.length).toBe(8);
+
+    // Verify exactly the 8 authentic items exist
+    const names = hmfProducts.map((p) => p.name);
+    expect(names.some((n) => n.includes('घावणे'))).toBe(true);
+    expect(names.some((n) => n.includes('चपाती'))).toBe(true);
+    expect(names.some((n) => n.includes('आंबोळी'))).toBe(true);
+    expect(names.some((n) => n.includes('मोदक'))).toBe(true);
+    expect(names.some((n) => n.includes('तांदळाचे लाडू'))).toBe(true);
+    expect(names.some((n) => n.includes('खोबऱ्याची वडी'))).toBe(true);
+    expect(names.some((n) => n.includes('कांदे पोहे - घरगुती'))).toBe(true);
+    expect(names.some((n) => n.includes('उपमा - घरगुती'))).toBe(true);
+
+    // 0 Kirana items in HOMEMADE_FOOD
+    expect(hmfProducts.some((p) => p.name.includes('Toor Dal'))).toBe(false);
+    expect(hmfProducts.some((p) => p.name.includes('Moong Dal'))).toBe(false);
+    expect(hmfProducts.some((p) => p.category === 'Grains & Pulses')).toBe(false);
+    expect(hmfProducts.some((p) => p.category === 'Dals & Pulses')).toBe(false);
+
+    // Filter for KIRANA_RETAIL mode
+    const kiranaProducts = filterProductsForBusiness(allDbProducts, 'KIRANA_RETAIL', kiranaShopId);
+    expect(kiranaProducts.length).toBe(2);
+    expect(kiranaProducts.some((p) => p.name.includes('Toor Dal'))).toBe(true);
+    expect(kiranaProducts.some((p) => p.name.includes('Moong Dal'))).toBe(true);
+    expect(kiranaProducts.some((p) => p.name.includes('घावणे'))).toBe(false);
+    expect(kiranaProducts.some((p) => p.name.includes('मोदक'))).toBe(false);
+  });
+
+  it('9. STEP 5 Verification: "Kande Pohe Homemade" and "Upma Homemade" stay in HOMEMADE_FOOD and are NEVER misclassified into KIRANA_RETAIL', () => {
+    const kandePohe = {
+      name: 'कांदे पोहे - घरगुती (Kande Pohe Homemade)',
+      category: 'Konkani Breakfast & Tiffin',
+      business_type: 'HOMEMADE_FOOD',
+    };
+
+    const upma = {
+      name: 'उपमा - घरगुती (Upma Homemade)',
+      category: 'Konkani Breakfast & Tiffin',
+      business_type: 'HOMEMADE_FOOD',
+    };
+
+    expect(resolveProductBusinessType(kandePohe)).toBe('HOMEMADE_FOOD');
+    expect(resolveProductBusinessType(upma)).toBe('HOMEMADE_FOOD');
+
+    const filteredHmf = filterProductsForBusiness([kandePohe, upma], 'HOMEMADE_FOOD');
+    expect(filteredHmf.length).toBe(2);
+
+    const filteredKirana = filterProductsForBusiness([kandePohe, upma], 'KIRANA_RETAIL');
+    expect(filteredKirana.length).toBe(0);
+  });
+
+  it('10. STEP 5 Verification: Financials, Expenses, and P&L Reports have 0 overlap between businesses', async () => {
+    const kiranaShopId = 'c7b9195a-49e0-4a88-8254-2035ef580001';
+    const hmfShopId = getHomemadeShopIdForOwner(kiranaShopId);
+
+    // Record Kirana Sale & Operating Expense
+    await db.sales_invoices.add({
+      id: 'inv-kirana-1',
+      shop_id: kiranaShopId,
+      business_type: 'KIRANA_RETAIL',
+      invoice_number: 'KRN-001',
+      customer_id: '0000-WALK-IN',
+      subtotal_amount: 1500,
+      discount_roundoff: 0,
+      grand_total: 1500,
+      total_cogs: 1100,
+      payment_mode: 'CASH',
+      amount_paid_now: 1500,
+      udhari_added: 0,
+      status: 'COMPLETED',
+      created_at: new Date().toISOString(),
+    });
+
+    await db.expenses_and_drawings.add({
+      id: 'exp-kirana-1',
+      shop_id: kiranaShopId,
+      business_type: 'KIRANA_RETAIL',
+      entry_type: 'BUSINESS_EXPENSE',
+      category: 'SHOP_EXPENSE_RENT_ELEC',
+      amount: 400,
+      paid_via: 'CASH_GALLA',
+      description: 'Kirana shop electricity bill',
+      created_at: new Date().toISOString(),
+    });
+
+    // Record Homemade Food Sale & Raw Material Expense
+    await db.sales_invoices.add({
+      id: 'inv-hmf-1',
+      shop_id: hmfShopId,
+      business_type: 'HOMEMADE_FOOD',
+      invoice_number: 'HMF-001',
+      customer_id: '0000-WALK-IN',
+      subtotal_amount: 600,
+      discount_roundoff: 0,
+      grand_total: 600,
+      total_cogs: 320,
+      payment_mode: 'CASH',
+      amount_paid_now: 600,
+      udhari_added: 0,
+      status: 'COMPLETED',
+      created_at: new Date().toISOString(),
+    });
+
+    await db.expenses_and_drawings.add({
+      id: 'exp-hmf-1',
+      shop_id: hmfShopId,
+      business_type: 'HOMEMADE_FOOD',
+      entry_type: 'RAW_MATERIAL_EXPENSE',
+      category: 'RAW_MATERIAL_INGREDIENTS',
+      amount: 250,
+      paid_via: 'CASH_GALLA',
+      description: 'Rice flour & jaggery for Modak',
+      created_at: new Date().toISOString(),
+    });
+
+    // P&L for Kirana store (activeShopId = kiranaShopId)
+    const kiranaPnl = await ReportsService.getProfitAndLossData(undefined, kiranaShopId);
+    expect(kiranaPnl.salesRevenue).toBe(1500);
+    expect(kiranaPnl.cogs).toBe(1100);
+    expect(kiranaPnl.grossProfit).toBe(400);
+    expect(kiranaPnl.shopOperatingExpenses).toBe(400);
+
+    // P&L for Homemade Food store (activeShopId = hmfShopId)
+    const hmfPnl = await ReportsService.getProfitAndLossData(undefined, hmfShopId);
+    expect(hmfPnl.salesRevenue).toBe(600);
+    expect(hmfPnl.cogs).toBe(320);
+    expect(hmfPnl.grossProfit).toBe(280);
+    // Kirana 400 rent must NOT leak into Homemade Food P&L
+    expect(hmfPnl.shopOperatingExpenses).toBe(0);
   });
 });

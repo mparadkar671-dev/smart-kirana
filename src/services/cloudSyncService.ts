@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase';
-import { db, requestStoragePersistence } from '../db/db';
+import { db, kiranaDb, homemadeDb, requestStoragePersistence } from '../db/db';
 import {
   Product,
   Customer,
@@ -16,7 +16,14 @@ import {
   LoanAccount,
   BusinessType,
 } from '../types';
-import { isHomemadeFoodCategoryOrName, HomemadeFoodService } from './homemadeFoodService';
+import { isHomemadeFoodCategoryOrName, HomemadeFoodService, repairMixedBusinessProducts } from './homemadeFoodService';
+import {
+  resolveProductBusinessType,
+  getHomemadeShopIdForOwner,
+  getBaseKiranaShopId,
+  getHomemadeShopId,
+  isHomemadeShopId,
+} from '../utils/businessFirewall';
 
 export interface CloudSyncStatus {
   isSyncing: boolean;
@@ -30,12 +37,14 @@ type SyncStatusListener = (status: CloudSyncStatus) => void;
 class CloudSyncService {
   private status: CloudSyncStatus = {
     isSyncing: false,
-    lastSyncedAt: localStorage.getItem('kirana_last_cloud_sync'),
+    lastSyncedAt: typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_last_cloud_sync') : null,
     status: 'idle',
     message: 'Ready to sync',
   };
 
   private listeners: Set<SyncStatusListener> = new Set();
+  private realtimeChannel: any = null;
+  private heartbeatTimer: any = null;
 
   constructor() {
     this.initOnlineListener();
@@ -44,9 +53,23 @@ class CloudSyncService {
   private initOnlineListener() {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
-        this.setStatus({ status: 'syncing', message: 'Network restored. Flushing sync outbox...' });
-        this.flushOutbox();
+        this.setStatus({ status: 'syncing', message: 'Network restored. Synchronizing...' });
+        this.syncBidirectionalNow();
       });
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && navigator.onLine) {
+          this.syncBidirectionalNow();
+        }
+      });
+
+      // Periodic background heartbeat every 10 seconds when online
+      this.heartbeatTimer = setInterval(() => {
+        if (typeof navigator !== 'undefined' && navigator.onLine && !this.isTestEnv && !this.status.isSyncing) {
+          this.syncBidirectionalNow().catch(() => {});
+        }
+      }, 10000);
+
       // Request persistent storage durability
       requestStoragePersistence().then((res) => {
         if (res.persisted) {
@@ -119,15 +142,293 @@ class CloudSyncService {
   }
 
   /**
+   * Returns count of mutations currently waiting in offline outbox
+   */
+  async getQueuedCount(): Promise<number> {
+    try {
+      return await db.sync_outbox.where('status').equals('PENDING').count();
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Subscribes to real-time WebSocket broadcasting across all 10 store tables for canonical shop
+   */
+  subscribeToRealtimeStoreSync(shopId?: string): () => void {
+    if (this.realtimeChannel && supabase) {
+      try {
+        supabase.removeChannel(this.realtimeChannel);
+      } catch {
+        // Ignore
+      }
+      this.realtimeChannel = null;
+    }
+
+    if (!supabase || this.isTestEnv) {
+      return () => {};
+    }
+
+    const currentShopId =
+      shopId ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) ||
+      'current_shop';
+
+    try {
+      this.realtimeChannel = supabase
+        .channel(`store-live-sync-${currentShopId}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public' },
+          async (payload: any) => {
+            await this.handleRealtimePayload(payload, currentShopId);
+          }
+        )
+        .subscribe((status: string) => {
+          if (status === 'SUBSCRIBED') {
+            this.setStatus({
+              status: 'synced',
+              message: '🟢 Live Multi-Device Sync • Connected',
+            });
+          }
+        });
+    } catch (err) {
+      console.warn('Realtime subscription error:', err);
+    }
+
+    return () => this.unsubscribeRealtime();
+  }
+
+  /**
+   * Starts parallel multi-device live sync:
+   * 1. Supabase Realtime WebSockets across 10 tables
+   * 2. Cross-tab BroadcastChannel('smart_kirana_local_tabs') for 0ms same-device sync
+   * 3. 12-second heartbeat delta pull fallback
+   */
+  startParallelLiveSync(shopId?: string): () => void {
+    const unsubRealtime = this.subscribeToRealtimeStoreSync(shopId);
+
+    let tabChannel: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        tabChannel = new BroadcastChannel('smart_kirana_local_tabs');
+        tabChannel.onmessage = (event) => {
+          if (event?.data?.type === 'SYNC_EVENT' && event.data.table) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent('kirana-db-updated', {
+                  detail: { table: event.data.table, eventType: event.data.eventType, id: event.data.id },
+                })
+              );
+            }
+          }
+        };
+      } catch (err) {
+        console.warn('BroadcastChannel error:', err);
+      }
+    }
+
+    return () => {
+      unsubRealtime();
+      if (tabChannel) {
+        try {
+          tabChannel.close();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }
+
+  /**
+   * Removes active real-time channel
+   */
+  unsubscribeRealtime(): void {
+    if (this.realtimeChannel && supabase) {
+      try {
+        supabase.removeChannel(this.realtimeChannel);
+      } catch {
+        // Ignore
+      }
+      this.realtimeChannel = null;
+    }
+  }
+
+  /**
+   * Processes an incoming real-time change event from Supabase WebSocket
+   */
+  async handleRealtimePayload(payload: any, activeShopId?: string): Promise<void> {
+    if (!payload || !payload.table) return;
+    const table = payload.table;
+    const eventType = payload.eventType || payload.type;
+    const newRecord = payload.new;
+    const oldRecord = payload.old;
+
+    const currentShopId =
+      activeShopId ||
+      (typeof localStorage !== 'undefined'
+        ? localStorage.getItem('kirana_active_shop_id') || 'current_shop'
+        : 'current_shop');
+
+    // Multi-tenant dual shop validation
+    const baseShopId = getBaseKiranaShopId(currentShopId);
+    const hmfShopId = getHomemadeShopId(baseShopId);
+    const validShopIds = new Set([baseShopId, hmfShopId, currentShopId, 'current_shop']);
+
+    if (newRecord?.shop_id && !validShopIds.has(newRecord.shop_id)) {
+      return;
+    }
+
+    const isHmfPayload =
+      isHomemadeShopId(newRecord?.shop_id || oldRecord?.shop_id) ||
+      newRecord?.business_type === 'HOMEMADE_FOOD' ||
+      oldRecord?.business_type === 'HOMEMADE_FOOD';
+    const targetDb = isHmfPayload ? homemadeDb : kiranaDb;
+
+    try {
+      if (eventType === 'INSERT' || eventType === 'UPDATE') {
+        if (!newRecord) return;
+        if (table === 'shop_profile') {
+          if (validShopIds.has(newRecord.id)) {
+            await targetDb.updateShopProfile(newRecord);
+          }
+        } else if ((targetDb as any)[table]) {
+          if (table === 'products') {
+            const isHmf = isHomemadeShopId(newRecord.shop_id) || newRecord.business_type === 'HOMEMADE_FOOD';
+            newRecord.business_type = isHmf ? 'HOMEMADE_FOOD' : resolveProductBusinessType(newRecord);
+            if (!newRecord.unit_type && newRecord.unit) {
+              newRecord.unit_type = newRecord.unit;
+            }
+          }
+          await (targetDb as any)[table].put(newRecord);
+        }
+      } else if (eventType === 'DELETE') {
+        const idToDelete = oldRecord?.id || oldRecord?.session_date;
+        if (idToDelete) {
+          if ((kiranaDb as any)[table]) await (kiranaDb as any)[table].delete(idToDelete);
+          if ((homemadeDb as any)[table]) await (homemadeDb as any)[table].delete(idToDelete);
+        }
+      }
+
+      // Reconcile stock and ledger balances on inventory logs and khata transactions
+      if (table === 'inventory_logs' || table === 'khata_transactions') {
+        await targetDb.reconcileAllStockAndBalances().catch(() => {});
+      }
+
+      const now = new Date().toISOString();
+      this.setStatus({
+        isSyncing: false,
+        lastSyncedAt: now,
+        status: 'synced',
+        message: '🟢 Live Multi-Device Sync • Up to date',
+      });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('kirana-db-updated', {
+            detail: { table, eventType, id: newRecord?.id || oldRecord?.id },
+          })
+        );
+      }
+
+      if (typeof BroadcastChannel !== 'undefined') {
+        try {
+          const ch = new BroadcastChannel('smart_kirana_local_tabs');
+          ch.postMessage({
+            type: 'SYNC_EVENT',
+            table,
+            eventType,
+            id: newRecord?.id || oldRecord?.id,
+          });
+          ch.close();
+        } catch {
+          // ignore
+        }
+      }
+    } catch (e) {
+      console.warn(`Error applying realtime ${eventType} on ${table}:`, e);
+    }
+  }
+
+  /**
+   * Bidirectional Sync: Flushes pending local mutations first, then pulls newer cloud updates
+   */
+  async syncBidirectionalNow(): Promise<{
+    success: boolean;
+    pushedCount: number;
+    pulledCount: number;
+    errors: string[];
+  }> {
+    if (!supabase || this.isTestEnv) {
+      const queued = await this.getQueuedCount();
+      return { success: true, pushedCount: 0, pulledCount: 0, errors: [] };
+    }
+
+    if (this.status.isSyncing) {
+      return { success: true, pushedCount: 0, pulledCount: 0, errors: [] };
+    }
+
+    this.setStatus({ isSyncing: true, status: 'syncing', message: '🔄 Syncing across devices...' });
+
+    try {
+      // 1. Push pending local offline mutations
+      const outboxRes = await this.flushOutbox();
+      // 2. Pull newer remote records
+      const pullRes = await this.pullAllFromCloud();
+      // 3. Deterministically enforce business separation firewall on all local products
+      await repairMixedBusinessProducts();
+
+      const pendingCount = await this.getQueuedCount();
+      const now = new Date().toISOString();
+
+      if (pendingCount > 0) {
+        this.setStatus({
+          isSyncing: false,
+          lastSyncedAt: now,
+          status: 'offline',
+          message: `🟠 Offline Mode — ${pendingCount} changes queued`,
+        });
+      } else {
+        this.setStatus({
+          isSyncing: false,
+          lastSyncedAt: now,
+          status: 'synced',
+          message: '🟢 Live Multi-Device Sync • Up to date',
+        });
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('kirana-db-updated', { detail: { type: 'bidirectional-sync' } }));
+      }
+
+      return {
+        success: outboxRes.errors.length === 0 && pullRes.success,
+        pushedCount: outboxRes.processedCount,
+        pulledCount: pullRes.pulledCount,
+        errors: [...outboxRes.errors, ...pullRes.errors],
+      };
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.setStatus({
+        isSyncing: false,
+        status: 'error',
+        message: `Sync notice: ${msg}`,
+      });
+      return { success: false, pushedCount: 0, pulledCount: 0, errors: [msg] };
+    }
+  }
+
+  /**
    * Atomic Danger Vault Store Reset: Cleans records from Supabase PostgreSQL and local Dexie
    * Uses execute_store_vault_reset RPC with transactional snapshot archiving, with direct child-to-parent deletion fallback.
    */
   async executeStoreVaultReset(
     resetMode: 'WIPE_ALL_FRESH_STORE' | 'CLEAR_TRANSACTIONS_KEEP_PRODUCTS' | 'WIPE_ACTIVE_BUSINESS',
     saveCloudArchive = true,
-    scopedBusinessType?: BusinessType
+    scopedBusinessType?: BusinessType,
+    customShopId?: string
   ): Promise<{ success: boolean; error?: string; resetEpoch?: number }> {
-    const shopId = await this.getActiveShopId();
+    const shopId = customShopId || await this.getActiveShopId();
     let resetEpoch = Date.now();
     const isTestEnv = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
 
@@ -227,11 +528,15 @@ class CloudSyncService {
   async syncProduct(product: Product): Promise<void> {
     if (!supabase || this.isTestEnv) return;
     try {
+      const isHmf = product.business_type === 'HOMEMADE_FOOD' || isHomemadeShopId(product.shop_id);
+      const baseShopId = getBaseKiranaShopId(product.shop_id);
+      const shopIdToUse = isHmf ? getHomemadeShopId(baseShopId) : (product.shop_id || baseShopId);
+
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
         id: product.id,
-        shop_id: product.shop_id || 'current_shop',
-        business_type: product.business_type || 'KIRANA_RETAIL',
+        shop_id: shopIdToUse,
+        business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
         name: product.name,
         marathi_name: product.marathi_name || null,
         search_keywords: product.search_keywords || null,
@@ -239,7 +544,12 @@ class CloudSyncService {
         barcode: product.barcode,
         category: product.category,
         unit_type: product.unit_type,
+        unit: product.unit_type,
         purchase_price: product.purchase_price,
+        raw_material_cost: product.raw_material_cost || null,
+        equipment_fuel_cost: product.equipment_fuel_cost || null,
+        labour_cost: product.labour_cost || null,
+        wholesale_price: product.wholesale_price || null,
         selling_price: product.selling_price,
         mrp: product.mrp,
         current_stock: product.current_stock,
@@ -248,6 +558,9 @@ class CloudSyncService {
         supplier_phone: product.supplier_phone || null,
         wholesaler_id: product.wholesaler_id || null,
         loan_account_id: product.loan_account_id || null,
+        is_loan_funded: product.is_loan_funded ?? false,
+        shelf_life_days: product.shelf_life_days || null,
+        batch_notes: product.batch_notes || null,
         image_url: product.image_url || null,
         expiry_date: product.expiry_date || null,
         is_quick_tap: product.is_quick_tap,
@@ -258,6 +571,7 @@ class CloudSyncService {
       const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
       if (error) {
         const fallbackPayload = { ...payload };
+        delete fallbackPayload.unit;
         delete fallbackPayload.marathi_name;
         delete fallbackPayload.search_keywords;
         delete fallbackPayload.wholesaler_id;
@@ -455,6 +769,8 @@ class CloudSyncService {
             unit_purchase_cost: item.unit_purchase_cost,
             unit_selling_price: item.unit_selling_price,
             line_total: item.line_total,
+            is_loan_funded: item.is_loan_funded ?? false,
+            sale_rate_type: item.sale_rate_type || 'RETAIL_CUSTOMER',
           };
           if (userId) itemRow.user_id = userId;
           return itemRow;
@@ -749,7 +1065,7 @@ class CloudSyncService {
             const r: Record<string, unknown> = {
               id: p.id,
               shop_id: p.shop_id || shopId,
-              business_type: p.business_type || 'KIRANA_RETAIL',
+              business_type: resolveProductBusinessType(p),
               name: p.name,
               marathi_name: p.marathi_name || null,
               search_keywords: p.search_keywords || null,
@@ -961,80 +1277,108 @@ class CloudSyncService {
 
     try {
       const shopId = await this.getActiveShopId();
+      const primaryShopId = getBaseKiranaShopId(typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_base_shop_id') || localStorage.getItem('kirana_primary_shop_id') || shopId : shopId);
+      const hmfShopId = getHomemadeShopId(primaryShopId);
+      const shopIdsToPull = Array.from(new Set([shopId, primaryShopId, hmfShopId].filter(Boolean)));
+
       const localProfile = await db.getShopProfile();
       const localResetEpoch = localProfile.reset_epoch || 1;
 
-      // 1. Pull Shop Profile strictly for active shop_id
+      // 1. Pull Shop Profiles for both Kirana and Homemade Food stores
       try {
-        const { data: profile, error } = await supabase
+        const { data: profiles, error } = await supabase
           .from('shop_profile')
           .select('*')
-          .eq('id', shopId)
-          .maybeSingle();
+          .in('id', shopIdsToPull);
 
         if (error) throw new Error(error.message);
-        if (profile) {
-          // Check remote reset_epoch: only purge if remote wipe happened AFTER our local products were last updated
-          if (profile.reset_epoch && profile.reset_epoch > localResetEpoch) {
-            const localProds = await db.products.toArray();
-            const remoteWipedTime = profile.last_wiped_at ? new Date(profile.last_wiped_at).getTime() : 0;
-            const hasNewerLocalProducts = localProds.some((p) => {
-              const pTime = p.updated_at ? new Date(p.updated_at).getTime() : Date.now();
-              return pTime >= remoteWipedTime;
-            });
-            if (!hasNewerLocalProducts && remoteWipedTime > 0) {
-              console.log('Remote store wipe detected in pull. Purging local stale operational data.');
-              await db.clearAllRecordsToEmpty();
-              await db.sync_outbox.clear();
+        if (profiles && profiles.length > 0) {
+          for (const profile of profiles) {
+            // Check remote reset_epoch: only purge if remote wipe happened AFTER our local products were last updated
+            if (profile.id === shopId && profile.reset_epoch && profile.reset_epoch > localResetEpoch) {
+              const localProds = await db.products.toArray();
+              const remoteWipedTime = profile.last_wiped_at ? new Date(profile.last_wiped_at).getTime() : 0;
+              const hasNewerLocalProducts = localProds.some((p) => {
+                const pTime = p.updated_at ? new Date(p.updated_at).getTime() : Date.now();
+                return pTime >= remoteWipedTime;
+              });
+              if (!hasNewerLocalProducts && remoteWipedTime > 0) {
+                console.log('Remote store wipe detected in pull. Purging local stale operational data.');
+                await db.clearAllRecordsToEmpty();
+                await db.sync_outbox.clear();
+              }
             }
-          }
 
-          await db.updateShopProfile({
-            id: profile.id,
-            shop_id: profile.id,
-            shop_name: profile.shop_name,
-            owner_name: profile.owner_name,
-            phone: profile.phone,
-            upi_vpa: profile.upi_vpa || 'kirana@upi',
-            address: profile.address || '',
-            gst_footer_note: profile.gst_footer_note || '',
-            invite_code: profile.invite_code,
-            reset_epoch: profile.reset_epoch || 1,
-            last_wiped_at: profile.last_wiped_at,
-          });
-          pulledCount++;
+            const isHmfProfile = isHomemadeShopId(profile.id) || profile.business_type === 'HOMEMADE_FOOD';
+            await db.updateShopProfile({
+              id: profile.id,
+              shop_id: profile.id,
+              business_type: isHmfProfile ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
+              invoice_prefix: profile.invoice_prefix || (isHmfProfile ? 'HMF' : 'KRN'),
+              shop_name: profile.shop_name,
+              owner_name: profile.owner_name,
+              phone: profile.phone,
+              upi_vpa: profile.upi_vpa || 'kirana@upi',
+              address: profile.address || '',
+              gst_footer_note: profile.gst_footer_note || '',
+              invite_code: profile.invite_code,
+              reset_epoch: profile.reset_epoch || 1,
+              last_wiped_at: profile.last_wiped_at,
+            });
+            pulledCount++;
+          }
         }
       } catch (e) {
         console.warn('Pull shop_profile failed:', e);
       }
 
-      // 2. Pull Products strictly scoped by shop_id
+      // 2. Pull Products strictly scoped by shop_id and reconcile deletions
       try {
         const { data: prods, error } = await supabase
           .from('products')
           .select('*')
-          .eq('shop_id', shopId);
+          .in('shop_id', shopIdsToPull);
 
         if (error) throw new Error(error.message);
-        if (prods && prods.length > 0) {
+        if (prods) {
+          // Reconcile deletions: remove stale local products that no longer exist in remote Supabase
+          const remoteIds = new Set(prods.map((p) => p.id));
+          const localProds = await db.products.toArray();
+          const pendingOutbox = await db.sync_outbox.where('table_name').equals('products').toArray();
+          const pendingIds = new Set(pendingOutbox.map((o) => (o.payload?.id as string) || o.id));
+
+          const staleLocalIds: string[] = [];
+          for (const lp of localProds) {
+            const matchesShop = shopIdsToPull.includes(lp.shop_id || '') || 
+              (isHomemadeShopId(lp.shop_id) && shopIdsToPull.includes(hmfShopId));
+            if (matchesShop && !remoteIds.has(lp.id) && !pendingIds.has(lp.id)) {
+              staleLocalIds.push(lp.id);
+            }
+          }
+          if (staleLocalIds.length > 0) {
+            await db.products.bulkDelete(staleLocalIds);
+          }
+
           for (const p of prods) {
+            const isHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD';
+            const itemShopId = p.shop_id || (isHmf ? hmfShopId : primaryShopId);
             const productRecord: Product = {
               id: p.id,
-              shop_id: p.shop_id || shopId,
-              business_type: p.business_type || (isHomemadeFoodCategoryOrName(p) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL'),
+              shop_id: itemShopId,
+              business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
               name: p.name,
               marathi_name: p.marathi_name || undefined,
               search_keywords: p.search_keywords || undefined,
               short_code: p.short_code,
               barcode: p.barcode || '',
-              category: p.category || 'General',
-              unit_type: p.unit_type,
+              category: p.category || (isHmf ? 'Konkani Breakfast & Tiffin' : 'General'),
+              unit_type: p.unit_type || (p as any).unit || 'PCS',
               purchase_price: Number(p.purchase_price) || 0,
               selling_price: Number(p.selling_price) || 0,
               mrp: Number(p.mrp) || Number(p.selling_price) || 0,
               current_stock: Number(p.current_stock) || 0,
               low_stock_threshold: Number(p.low_stock_threshold) || 5,
-              last_supplier_name: p.last_supplier_name || 'General Wholesaler',
+              last_supplier_name: p.last_supplier_name || (isHmf ? 'In-House Kitchen' : 'General Wholesaler'),
               supplier_phone: p.supplier_phone || undefined,
               wholesaler_id: p.wholesaler_id || null,
               loan_account_id: p.loan_account_id || null,
@@ -1056,7 +1400,7 @@ class CloudSyncService {
         const { data: wholesalers, error } = await supabase
           .from('wholesalers')
           .select('*')
-          .eq('shop_id', shopId);
+          .in('shop_id', shopIdsToPull);
 
         if (!error && wholesalers && wholesalers.length > 0) {
           for (const w of wholesalers) {
@@ -1087,7 +1431,7 @@ class CloudSyncService {
         const { data: custs, error } = await supabase
           .from('customers')
           .select('*')
-          .eq('shop_id', shopId);
+          .in('shop_id', shopIdsToPull);
 
         if (error) throw new Error(error.message);
         if (custs && custs.length > 0) {
@@ -1118,7 +1462,7 @@ class CloudSyncService {
         const { data: users, error } = await supabase
           .from('store_users')
           .select('*')
-          .eq('shop_id', shopId);
+          .in('shop_id', shopIdsToPull);
 
         if (error) throw new Error(error.message);
         if (users && users.length > 0) {
@@ -1148,7 +1492,7 @@ class CloudSyncService {
         const { data: logs, error } = await supabase
           .from('inventory_logs')
           .select('*')
-          .eq('shop_id', shopId);
+          .in('shop_id', shopIdsToPull);
 
         if (error) throw new Error(error.message);
         if (logs && logs.length > 0) {
@@ -1177,7 +1521,7 @@ class CloudSyncService {
         const { data: txs, error } = await supabase
           .from('khata_transactions')
           .select('*')
-          .eq('shop_id', shopId);
+          .in('shop_id', shopIdsToPull);
 
         if (error) throw new Error(error.message);
         if (txs && txs.length > 0) {
@@ -1207,7 +1551,7 @@ class CloudSyncService {
         const { data: invoices, error } = await supabase
           .from('sales_invoices')
           .select('*')
-          .eq('shop_id', shopId);
+          .in('shop_id', shopIdsToPull);
 
         if (error) throw new Error(error.message);
         if (invoices && invoices.length > 0) {
@@ -1240,7 +1584,7 @@ class CloudSyncService {
         const { data: saleItems, error } = await supabase
           .from('sale_items')
           .select('*')
-          .eq('shop_id', shopId);
+          .in('shop_id', shopIdsToPull);
 
         if (error) throw new Error(error.message);
         if (saleItems && saleItems.length > 0) {

@@ -43,6 +43,8 @@ import {
   Landmark,
   Plus,
   Sparkles,
+  Coins,
+  HeartHandshake,
 } from 'lucide-react';
 
 interface ReportsViewProps {
@@ -843,6 +845,43 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
               </div>
             </div>
           </div>
+
+          {/* Capital Investment & Family Support Cards (when present) */}
+          {(pnlData.initialInvestment > 0 || pnlData.homeFamilyExpenses > 0) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-amber-50/70 dark:bg-amber-950/30 p-5 rounded-2xl border border-amber-200 dark:border-amber-800 shadow-2xs space-y-2">
+                <h3 className="font-bold text-sm text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                  <Coins className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  Initial Capital Investment (Utensils, Machinery, Setup)
+                </h3>
+                <p className="text-xs text-amber-800 dark:text-amber-300/80 leading-relaxed">
+                  Total capital invested in business equipment and infrastructure. Separated from operating expenses to reflect true running costs.
+                </p>
+                <div className="pt-2 flex justify-between items-center text-xs border-t border-amber-200 dark:border-amber-800/60">
+                  <span className="font-semibold text-amber-900 dark:text-amber-200">Total Capital Investment:</span>
+                  <span className="text-base font-extrabold text-amber-950 dark:text-amber-300" data-testid="pnl-initial-investment">
+                    {formatINR(pnlData.initialInvestment)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-purple-50/70 dark:bg-purple-950/30 p-5 rounded-2xl border border-purple-200 dark:border-purple-800 shadow-2xs space-y-2">
+                <h3 className="font-bold text-sm text-purple-900 dark:text-purple-300 flex items-center gap-1.5">
+                  <HeartHandshake className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                  Home &amp; Family Support Paid from Business
+                </h3>
+                <p className="text-xs text-purple-800 dark:text-purple-300/80 leading-relaxed">
+                  Household expenses and personal drawings supported directly by business income.
+                </p>
+                <div className="pt-2 flex justify-between items-center text-xs border-t border-purple-200 dark:border-purple-800/60">
+                  <span className="font-semibold text-purple-900 dark:text-purple-200">Total Home/Family Drawings:</span>
+                  <span className="text-base font-extrabold text-purple-950 dark:text-purple-300" data-testid="pnl-home-family">
+                    {formatINR(pnlData.homeFamilyExpenses)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

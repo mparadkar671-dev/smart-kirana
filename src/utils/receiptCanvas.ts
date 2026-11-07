@@ -36,6 +36,7 @@ export const generateReceiptCanvas = (options: GenerateReceiptCanvasOptions): HT
   // Calculate dynamic canvas height based on items and sections
   let estimatedHeight = 50; // top padding
   estimatedHeight += 120; // store header
+  estimatedHeight += 32; // bill type badge
   estimatedHeight += 90; // invoice & customer details
   estimatedHeight += 35; // table header
   estimatedHeight += Math.max(1, items.length) * 28 + 15; // items rows
@@ -101,6 +102,20 @@ export const generateReceiptCanvas = (options: GenerateReceiptCanvasOptions): HT
   }
 
   y += 8;
+
+  // 2.5 BILL TYPE BADGE
+  const isWholesale = items.some((i) => i.sale_rate_type === 'WHOLESALE_RETAILER');
+  const billTypeLabel = isWholesale ? 'B2B WHOLESALE INVOICE' : 'RETAIL BILL';
+  ctx.fillStyle = isWholesale ? '#eff6ff' : '#f8fafc';
+  ctx.fillRect(padding, y, contentWidth, 24);
+  ctx.strokeStyle = isWholesale ? '#93c5fd' : '#cbd5e1';
+  ctx.strokeRect(padding, y, contentWidth, 24);
+  ctx.fillStyle = isWholesale ? '#1e40af' : '#334155';
+  ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(billTypeLabel, width / 2, y + 16);
+  y += 32;
+
   drawDashedLine(y);
   y += 22;
 

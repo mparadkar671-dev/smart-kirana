@@ -796,3 +796,112 @@ OR name ILIKE ANY (ARRAY[
 UPDATE public.products
 SET business_type = 'KIRANA_RETAIL'
 WHERE business_type != 'HOMEMADE_FOOD';
+
+-- ============================================================================
+-- 12. REAL-TIME WEBSOCKET BROADCASTING (INSTAGRAM-STYLE MULTI-DEVICE SYNC)
+-- ============================================================================
+-- Enable real-time WebSocket broadcasting for all 10 store tables
+ALTER PUBLICATION supabase_realtime ADD TABLE public.shop_profile;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.products;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.inventory_logs;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.customers;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.sales_invoices;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.sale_items;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.khata_transactions;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.expenses_and_drawings;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.daily_galla_sessions;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.wholesalers;
+
+-- ============================================================================
+-- 13. DEDICATED 2ND SHOP_PROFILE IN SUPABASE FOR HOMEMADE FOOD & PHYSICAL SEPARATION
+-- ============================================================================
+DO $$
+DECLARE
+  v_kirana_shop RECORD;
+  v_hmf_shop_id UUID;
+BEGIN
+  -- Loop through every primary Kirana shop profile
+  FOR v_kirana_shop IN 
+    SELECT * FROM public.shop_profile 
+    WHERE business_type = 'KIRANA_RETAIL' OR id::text NOT LIKE '%-484d-4600-000000000001'
+  LOOP
+    -- Ensure primary shop is marked as KIRANA_RETAIL
+    UPDATE public.shop_profile 
+    SET business_type = 'KIRANA_RETAIL', invoice_prefix = 'KRN'
+    WHERE id = v_kirana_shop.id;
+
+    -- Create a deterministic UUID for this owner's Homemade Food business:
+    -- Keeps the first 18 characters of the Kirana UUID and appends '-484d-4600-000000000001'
+    v_hmf_shop_id := (substring(v_kirana_shop.id::text from 1 for 18) || '-484d-4600-000000000001')::uuid;
+
+    -- Insert the separate Homemade Food shop_profile if it doesn't exist
+    INSERT INTO public.shop_profile (
+      id, shop_name, owner_name, phone, upi_vpa, business_type, invoice_prefix
+    )
+    VALUES (
+      v_hmf_shop_id,
+      COALESCE(v_kirana_shop.shop_name, 'Laxmi') || ' (Homemade Food / Gruh Udyog)',
+      v_kirana_shop.owner_name,
+      v_kirana_shop.phone,
+      v_kirana_shop.upi_vpa,
+      'HOMEMADE_FOOD',
+      'HMF'
+    )
+    ON CONFLICT (id) DO UPDATE 
+    SET business_type = 'HOMEMADE_FOOD', invoice_prefix = 'HMF';
+
+    -- ========================================================================
+    -- DELETE ALL OLD/CORRUPTED HOMEMADE PRODUCTS FROM BOTH STORES FIRST
+    -- ========================================================================
+    DELETE FROM public.inventory_logs 
+    WHERE product_id IN (
+      SELECT id FROM public.products 
+      WHERE business_type = 'HOMEMADE_FOOD'
+         OR category ILIKE ANY (ARRAY['%Modak%', '%Festive%', '%Laddu%', '%Ladoo%', '%Ghavane%', '%Amboli%', '%Bhakri%', '%Chapati%', '%Poli%', '%Homemade%', '%Gruh Udyog%', '%Kapa%', '%Vadi%', '%Tiffin%', '%Breakfast%'])
+         OR name ILIKE ANY (ARRAY['%पुरणपोळी%', '%Puran Poli%', '%मोदक%', '%Modak%', '%लाडू%', '%Laddu%', '%Ladu%', '%घावणे%', '%Ghavane%', '%आंबोळी%', '%Amboli%', '%भाकरी%', '%Bhakri%', '%चपाती%', '%Chapati%', '%कापा%', '%Kapa%', '%वडी%', '%Vadi%', '%Homemade%'])
+    );
+
+    DELETE FROM public.products 
+    WHERE business_type = 'HOMEMADE_FOOD'
+       OR category ILIKE ANY (ARRAY['%Modak%', '%Festive%', '%Laddu%', '%Ladoo%', '%Ghavane%', '%Amboli%', '%Bhakri%', '%Chapati%', '%Poli%', '%Homemade%', '%Gruh Udyog%', '%Kapa%', '%Vadi%', '%Tiffin%', '%Breakfast%'])
+       OR name ILIKE ANY (ARRAY['%पुरणपोळी%', '%Puran Poli%', '%मोदक%', '%Modak%', '%लाडू%', '%Laddu%', '%Ladu%', '%घावणे%', '%Ghavane%', '%आंबोळी%', '%Amboli%', '%भाकरी%', '%Bhakri%', '%चपाती%', '%Chapati%', '%कापा%', '%Kapa%', '%वडी%', '%Vadi%', '%Homemade%']);
+
+    -- Ensure all remaining products in the Kirana store are strictly KIRANA_RETAIL
+    UPDATE public.products
+    SET business_type = 'KIRANA_RETAIL'
+    WHERE shop_id = v_kirana_shop.id;
+
+    -- ========================================================================
+    -- INSERT ONLY YOUR 8 EXACT HOMEMADE FOOD PRODUCTS INTO v_hmf_shop_id
+    -- ========================================================================
+    INSERT INTO public.products (
+      id, shop_id, business_type, name, short_code, barcode, category, unit, 
+      purchase_price, selling_price, mrp, current_stock, low_stock_threshold, is_quick_tap
+    ) VALUES
+      (gen_random_uuid(), v_hmf_shop_id, 'HOMEMADE_FOOD', 'घावणे (Malvani Ghavane)', 'GHV1', '2009000000018', 'Konkani Breakfast & Tiffin', 'PLATE', 18, 35, 40, 30, 5, true),
+      (gen_random_uuid(), v_hmf_shop_id, 'HOMEMADE_FOOD', 'घरगुती चपाती (Homemade Chapati)', 'CHP1', '2009000000025', 'Fresh Bhakri & Chapati', 'PCS', 5.5, 10, 12, 60, 10, true),
+      (gen_random_uuid(), v_hmf_shop_id, 'HOMEMADE_FOOD', 'आंबोळी (Soft Konkani Amboli)', 'AMB1', '2009000000032', 'Konkani Breakfast & Tiffin', 'PLATE', 20, 40, 45, 25, 5, true),
+      (gen_random_uuid(), v_hmf_shop_id, 'HOMEMADE_FOOD', 'उकडीचे मोदक (Homemade Modak)', 'MDK1', '2009000000049', 'Modak & Festive Specials', 'PCS', 14, 25, 30, 40, 10, true),
+      (gen_random_uuid(), v_hmf_shop_id, 'HOMEMADE_FOOD', 'तांदळाचे लाडू (Tandlache Ladu)', 'TLD1', '2009000000056', 'Homemade Laddus & Vadi', 'KG_LOOSE', 260, 380, 420, 5, 1, true),
+      (gen_random_uuid(), v_hmf_shop_id, 'HOMEMADE_FOOD', 'खोबऱ्याची वडी (Khobryachi Vadi / Kapa)', 'KBV1', '2009000000063', 'Homemade Laddus & Vadi', 'KG_LOOSE', 310, 460, 500, 5, 1, true),
+      (gen_random_uuid(), v_hmf_shop_id, 'HOMEMADE_FOOD', 'कांदे पोहे - घरगुती (Kande Pohe Homemade)', 'KPH1', '2009000000070', 'Konkani Breakfast & Tiffin', 'PLATE', 15, 30, 35, 25, 5, true),
+      (gen_random_uuid(), v_hmf_shop_id, 'HOMEMADE_FOOD', 'उपमा - घरगुती (Upma Homemade)', 'UPM1', '2009000000087', 'Konkani Breakfast & Tiffin', 'PLATE', 15, 30, 35, 25, 5, true);
+
+  END LOOP;
+END $$;
+
+-- ========================================================================
+-- PRODUCTION UPGRADE: ADD HOMEMADE FOOD COSTING & DUAL PRICING COLUMNS
+-- ========================================================================
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS raw_material_cost NUMERIC(10, 2) DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS equipment_fuel_cost NUMERIC(10, 2) DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS labour_cost NUMERIC(10, 2) DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS wholesale_price NUMERIC(10, 2) DEFAULT 0;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_loan_funded BOOLEAN DEFAULT false;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS shelf_life_days INTEGER DEFAULT NULL;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS batch_notes TEXT DEFAULT NULL;
+
+ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS is_loan_funded BOOLEAN DEFAULT false;
+ALTER TABLE public.sale_items ADD COLUMN IF NOT EXISTS sale_rate_type TEXT DEFAULT 'RETAIL_CUSTOMER';
+
+
