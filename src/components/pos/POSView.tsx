@@ -1215,11 +1215,6 @@ export const POSView: React.FC<POSViewProps> = ({
                   </h4>
                   <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2">
                     <span>{formatINR(item.unit_selling_price)}</span>
-                    {item.sale_rate_type === 'WHOLESALE_RETAILER' && (
-                      <span className="text-[9px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-950/60 px-1 py-0.2 rounded">
-                        Wholesale Rate
-                      </span>
-                    )}
                     <span>&times;</span>
                     <span className="font-semibold text-slate-700 dark:text-slate-300">
                       {item.qty}{' '}

@@ -82,6 +82,18 @@ const MainApp: React.FC = () => {
   const activeBusinessType: BusinessType = shopProfile?.business_type || getActiveBusinessType();
   const activeShopId: string = shopProfile?.id || getActiveShopId(activeBusinessType);
 
+  // Start parallel multi-device live synchronization (Realtime WebSockets + Cross-tab + Heartbeat)
+  useEffect(() => {
+    if (!isDbReady || !activeShopId) return;
+    const isTestEnv = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
+    if (isTestEnv) return;
+
+    const stopLiveSync = cloudSyncService.startParallelLiveSync(activeShopId);
+    return () => {
+      stopLiveSync();
+    };
+  }, [isDbReady, activeShopId]);
+
   // Live queries strictly filtered by activeShopId and activeBusinessType
   const products = useLiveQuery(
     async () => {

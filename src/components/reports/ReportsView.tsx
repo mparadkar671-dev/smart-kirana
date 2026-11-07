@@ -3,7 +3,6 @@ import { ShopProfile, SalesInvoice, PaymentMode, Customer, SaleItem, Product } f
 import { db } from '../../db/db';
 import { ReportsService, DateFilterRange } from '../../services/reportsService';
 import { LoanAccountService, LoanInventoryReportData } from '../../services/loanAccountService';
-import { CapitalAndExpenseSummary } from '../../services/homemadeFoodService';
 import { GallaService } from '../../services/gallaService';
 import { ReceiptModal } from '../pos/ReceiptModal';
 import { SalesReturnModal } from '../pos/SalesReturnModal';
@@ -62,8 +61,7 @@ export type ReportTab =
   | 'returns'
   | 'tax'
   | 'invoices'
-  | 'loans'
-  | 'homemade';
+  | 'loans';
 
 export type DatePreset =
   | 'TODAY'
@@ -103,7 +101,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
   const [taxData, setTaxData] = useState<any>(null);
   const [invoicesData, setInvoicesData] = useState<SalesInvoice[]>([]);
   const [loanReportData, setLoanReportData] = useState<LoanInventoryReportData | null>(null);
-  const [homemadeReportData, setHomemadeReportData] = useState<CapitalAndExpenseSummary | null>(null);
   const [selectedLoanFilterId, setSelectedLoanFilterId] = useState<string>('ALL');
   const [showAddLoanForm, setShowAddLoanForm] = useState<boolean>(false);
   const [newLoanTitle, setNewLoanTitle] = useState<string>('');
@@ -183,14 +180,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
 
     try {
       if (viewMode === 'dashboard') {
-        const [pnl, udh, invVal, gal, tx, loanRep, hmRep] = await Promise.all([
+        const [pnl, udh, invVal, gal, tx, loanRep] = await Promise.all([
           ReportsService.getProfitAndLossData(range),
           ReportsService.getCustomerKhataAgingData(),
           ReportsService.getStockValuationAndDeadStockData(),
           ReportsService.getDailyGallaShiftAuditData(range),
           ReportsService.getHsnTaxSummaryData(range),
           ReportsService.getLoanInventoryReportData(range, selectedLoanFilterId),
-          ReportsService.getHomemadeBusinessFinancialData(range),
         ]);
         setPnlData(pnl);
         setProductsData(pnl.itemWise || []);
@@ -199,7 +195,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         setGallaData(gal);
         setTaxData(tx);
         setLoanReportData(loanRep);
-        setHomemadeReportData(hmRep);
       } else {
         if (activeTab === 'pnl' || activeTab === 'products') {
           const pnl = await ReportsService.getProfitAndLossData(range);
@@ -233,9 +228,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         } else if (activeTab === 'loans') {
           const loanRep = await ReportsService.getLoanInventoryReportData(range, selectedLoanFilterId);
           setLoanReportData(loanRep);
-        } else if (activeTab === 'homemade') {
-          const hmRep = await ReportsService.getHomemadeBusinessFinancialData(range);
-          setHomemadeReportData(hmRep);
         }
       }
     } finally {
@@ -293,9 +285,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       } else if (activeTab === 'loans') {
         const res = await ReportsService.generateLoanInventoryReport(defaultProfile, range, selectedLoanFilterId);
         downloadFileBlob(res.xlsxBuffer, `Loan_Stock_Sales_PnL_Report_${dateStr}.xlsx`, mime);
-      } else if (activeTab === 'homemade') {
-        const res = await ReportsService.generateHomemadeBusinessReport(defaultProfile, range);
-        downloadFileBlob(res.xlsxBuffer, `Homemade_Business_Financial_PnL_${dateStr}.xlsx`, mime);
       }
     } catch (err: any) {
       alert(`Excel export failed: ${err.message}`);
@@ -337,9 +326,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
       } else if (activeTab === 'loans') {
         res = await ReportsService.generateLoanInventoryReport(defaultProfile, range, selectedLoanFilterId);
         downloadFileBlob(res.pdfBuffer, `Loan_Stock_Sales_PnL_${dateStr}.pdf`, mime);
-      } else if (activeTab === 'homemade') {
-        res = await ReportsService.generateHomemadeBusinessReport(defaultProfile, range);
-        downloadFileBlob(res.pdfBuffer, `Homemade_Business_Financial_PnL_${dateStr}.pdf`, mime);
       }
     } catch (err: any) {
       alert(`PDF export failed: ${err.message}`);
@@ -505,36 +491,22 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
         </div>
       </div>
 
-      {/* Business Scope & Isolation Indicator Banner */}
+      {/* Business Scope Indicator Banner */}
       <div
         data-testid="reports-business-scope-banner"
-        className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-          shopProfile?.business_type === 'HOMEMADE_FOOD'
-            ? 'bg-amber-950/25 border-amber-500/40 text-amber-200'
-            : 'bg-blue-950/25 border-blue-500/40 text-blue-200'
-        }`}
+        className="p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-blue-950/25 border-blue-500/40 text-blue-200"
       >
         <div className="flex items-center gap-2.5">
-          <span className="text-xl shrink-0">{shopProfile?.business_type === 'HOMEMADE_FOOD' ? '🍲' : '🏪'}</span>
+          <span className="text-xl shrink-0">🏪</span>
           <div>
             <div className="font-extrabold text-xs uppercase tracking-wider flex items-center gap-2">
-              <span>
-                {shopProfile?.business_type === 'HOMEMADE_FOOD'
-                  ? '🍲 Homemade Food & Gruh Udyog Financial Suite'
-                  : '🏪 Kirana Retail Store Financial Suite'}
-              </span>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
-                shopProfile?.business_type === 'HOMEMADE_FOOD'
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
-                  : 'bg-blue-500/20 text-blue-300 border-blue-500/50'
-              }`}>
-                {shopProfile?.business_type === 'HOMEMADE_FOOD' ? 'Isolated HMF Workspace' : 'Isolated KRN Workspace'}
+              <span>🏪 Kirana Retail Store Financial Suite</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold border bg-blue-500/20 text-blue-300 border-blue-500/50">
+                Kirana Retail POS (KRN)
               </span>
             </div>
             <p className="text-[11px] opacity-80 mt-0.5">
-              {shopProfile?.business_type === 'HOMEMADE_FOOD'
-                ? 'All figures, bills (HMF-), raw material expenses, initial setup recovery, and profits below belong strictly to Gruh Udyog.'
-                : 'All figures, bills (KRN-), inventory valuation, GST taxes, and profits below belong strictly to Kirana Retail.'}
+              All figures, bills (KRN-), FMCG inventory valuation, customer Udhari aging, GST taxes, and Vyapar profits below belong strictly to Kirana Retail.
             </p>
           </div>
         </div>
@@ -731,7 +703,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
             { id: 'tax' as ReportTab, label: '8. HSN & GST Tax', icon: Receipt },
             { id: 'invoices' as ReportTab, label: '9. Bill Register', icon: Layers },
             { id: 'loans' as ReportTab, label: '10. 🏦 Loan Stock & Daily Set-Aside', icon: Landmark },
-            { id: 'homemade' as ReportTab, label: '11. 🍲 Homemade Food & Capital P&L', icon: Sparkles },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -2107,231 +2078,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ shopProfile, onDataCha
                           <div className="text-[10px] text-slate-500">
                             Sold today: {row.todayQtySold} {row.unitType} ({formatINR(row.todaySalesRevenue)})
                           </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* =========================================================================
-          TAB 11: HOMEMADE BUSINESS (GRUH UDYOG) MONTHLY, YEARLY & CAPITAL P&L (Step 5)
-          ========================================================================= */}
-      {viewMode === 'tabular' && activeTab === 'homemade' && homemadeReportData && (
-        <div className="space-y-5" data-testid="homemade-financial-report-container">
-          {/* Top Summary & Capital Recovery Banner */}
-          <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 text-white rounded-2xl p-5 shadow-md space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/20 pb-3">
-              <div>
-                <h2 className="text-lg font-extrabold flex items-center gap-2">
-                  <span>🍲 Homemade Business (Gruh Udyog) Income, Expense, Home-Support &amp; Capital P&amp;L</span>
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-white/20 font-bold">
-                    {getDatePresetLabel()}
-                  </span>
-                </h2>
-                <p className="text-xs text-amber-100 mt-0.5">
-                  Complete accounting of Item-Wise Margins, Raw Material &amp; Gas Costs, Family Support Expenses &amp; Initial Setup Payback
-                </p>
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] uppercase font-bold text-amber-100">Capital Recovered %</div>
-                <div className="text-2xl font-black text-white" data-testid="rep-capital-recovered-pct">
-                  {homemadeReportData.capitalRecoveredPct.toFixed(1)}%
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              <div className="p-3 rounded-xl bg-white/10 backdrop-blur-xs">
-                <div className="text-[10px] uppercase font-bold text-amber-100">1. Sales Revenue</div>
-                <div className="text-base font-extrabold text-white mt-0.5" data-testid="rep-hm-sales">
-                  {formatINR(homemadeReportData.periodSalesRevenue)}
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-white/10 backdrop-blur-xs">
-                <div className="text-[10px] uppercase font-bold text-amber-100">2. Raw Material &amp; Gas</div>
-                <div className="text-base font-extrabold text-rose-200 mt-0.5" data-testid="rep-hm-raw-material">
-                  -{formatINR(homemadeReportData.periodRawMaterialExpenses)}
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-white/10 backdrop-blur-xs">
-                <div className="text-[10px] uppercase font-bold text-amber-100">3. True Business Profit</div>
-                <div className="text-base font-extrabold text-emerald-200 mt-0.5" data-testid="rep-hm-true-profit">
-                  {formatINR(homemadeReportData.trueBusinessNetProfit)}
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-white/10 backdrop-blur-xs">
-                <div className="text-[10px] uppercase font-bold text-amber-100">4. Home &amp; Family Supported</div>
-                <div className="text-base font-extrabold text-amber-200 mt-0.5" data-testid="rep-hm-home-expenses">
-                  {formatINR(homemadeReportData.periodHomeFamilyExpenses)}
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-white/10 backdrop-blur-xs">
-                <div className="text-[10px] uppercase font-bold text-amber-100">5. Net Retained Savings</div>
-                <div className="text-base font-extrabold text-white mt-0.5" data-testid="rep-hm-retained-savings">
-                  {formatINR(homemadeReportData.netRetainedCashSavings)}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Monthly / Yearly Income, Expense & Home-Support Statement */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                📊 Monthly / Yearly Income, Expense, Home-Support &amp; Capital Recovery Statement
-              </h3>
-              <span className="text-xs font-semibold text-slate-500">
-                Initial Setup Investment: {formatINR(homemadeReportData.totalInitialInvestmentAllTime)}
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs" data-testid="homemade-statement-table">
-                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-bold">
-                  <tr>
-                    <th className="p-3">Financial Statement Line</th>
-                    <th className="p-3">Ledger Classification</th>
-                    <th className="p-3 text-right">Amount (₹)</th>
-                    <th className="p-3">Explanation</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  <tr>
-                    <td className="p-3 font-bold text-slate-900 dark:text-white">1. Total Sales Revenue</td>
-                    <td className="p-3 font-mono text-[10px] text-emerald-600">SALES_REVENUE</td>
-                    <td className="p-3 text-right font-extrabold text-slate-900 dark:text-white">
-                      {formatINR(homemadeReportData.periodSalesRevenue)}
-                    </td>
-                    <td className="p-3 text-slate-500">All completed counter &amp; advance order bills</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3 font-medium text-slate-800 dark:text-slate-200">
-                      2. Less: Raw Material &amp; Packaging Expenses
-                    </td>
-                    <td className="p-3 font-mono text-[10px] text-rose-600">RAW_MATERIAL_EXPENSE</td>
-                    <td className="p-3 text-right font-bold text-rose-600">
-                      -{formatINR(homemadeReportData.periodRawMaterialExpenses)}
-                    </td>
-                    <td className="p-3 text-slate-500">Besan, Ghee, Coconut, Jaggery, Rice Flour, LPG Gas, Boxes</td>
-                  </tr>
-                  <tr>
-                    <td className="p-3 font-medium text-slate-800 dark:text-slate-200">
-                      3. Less: Operating Expenses
-                    </td>
-                    <td className="p-3 font-mono text-[10px] text-amber-600">BUSINESS_EXPENSE</td>
-                    <td className="p-3 text-right font-bold text-amber-600">
-                      -{formatINR(homemadeReportData.periodOperatingExpenses)}
-                    </td>
-                    <td className="p-3 text-slate-500">Delivery transport, helper wages, electricity</td>
-                  </tr>
-                  <tr className="bg-emerald-50/50 dark:bg-emerald-950/20">
-                    <td className="p-3 font-extrabold text-emerald-900 dark:text-emerald-300">
-                      4. (=) True Business Net Profit
-                    </td>
-                    <td className="p-3 font-mono text-[10px] font-bold text-emerald-700">TRUE_NET_PROFIT</td>
-                    <td className="p-3 text-right font-black text-emerald-700 dark:text-emerald-300">
-                      {formatINR(homemadeReportData.trueBusinessNetProfit)}
-                    </td>
-                    <td className="p-3 text-emerald-700 dark:text-emerald-400 font-semibold">
-                      Sales Revenue - (Raw Material + Operating Expenses)
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="p-3 font-medium text-purple-800 dark:text-purple-300">
-                      5. Less: Home &amp; Family Expenses Supported by Business
-                    </td>
-                    <td className="p-3 font-mono text-[10px] text-purple-600">HOME_FAMILY_EXPENSE</td>
-                    <td className="p-3 text-right font-bold text-purple-700 dark:text-purple-300">
-                      -{formatINR(homemadeReportData.periodHomeFamilyExpenses)}
-                    </td>
-                    <td className="p-3 text-slate-500">Household grocery, school fees, medical, personal drawings</td>
-                  </tr>
-                  <tr className="bg-blue-50/50 dark:bg-blue-950/20">
-                    <td className="p-3 font-extrabold text-blue-900 dark:text-blue-300">
-                      6. (=) Net Retained Cash Savings
-                    </td>
-                    <td className="p-3 font-mono text-[10px] font-bold text-blue-700">NET_RETAINED_SAVINGS</td>
-                    <td className="p-3 text-right font-black text-blue-800 dark:text-blue-300">
-                      {formatINR(homemadeReportData.netRetainedCashSavings)}
-                    </td>
-                    <td className="p-3 text-blue-700 dark:text-blue-400 font-semibold">
-                      True Business Net Profit - Home &amp; Family Expenses
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="p-3 font-bold text-indigo-800 dark:text-indigo-300">
-                      7. Total Initial Capital Investment (All-Time)
-                    </td>
-                    <td className="p-3 font-mono text-[10px] text-indigo-600">INITIAL_INVESTMENT</td>
-                    <td className="p-3 text-right font-bold text-indigo-700 dark:text-indigo-300">
-                      {formatINR(homemadeReportData.totalInitialInvestmentAllTime)}
-                    </td>
-                    <td className="p-3 text-slate-500">
-                      Recovered: {homemadeReportData.capitalRecoveredPct.toFixed(1)}% | Remaining to Break Even:{' '}
-                      {formatINR(homemadeReportData.remainingToBreakEven)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Product-Wise Profitability Table */}
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                🍪 Item-Wise Sales, Making Cost &amp; Gross Profit Breakdown ({homemadeReportData.itemWiseProfitability.length} Items)
-              </h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs" data-testid="homemade-itemwise-table">
-                <thead className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-slate-500 uppercase font-bold">
-                  <tr>
-                    <th className="p-3">Item Name</th>
-                    <th className="p-3">Category</th>
-                    <th className="p-3 text-right">Total Qty Sold</th>
-                    <th className="p-3 text-right">Total Revenue (₹)</th>
-                    <th className="p-3 text-right">Est. Making Cost (₹)</th>
-                    <th className="p-3 text-right">Gross Profit (₹)</th>
-                    <th className="p-3 text-center">Margin %</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {homemadeReportData.itemWiseProfitability.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-6 text-center text-slate-400">
-                        No items sold in this period yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    homemadeReportData.itemWiseProfitability.map((item) => (
-                      <tr key={item.productId} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                        <td className="p-3 font-bold text-slate-900 dark:text-white">
-                          {item.marathiName && !item.productName.includes(item.marathiName)
-                            ? `${item.marathiName} (${item.productName})`
-                            : item.productName}
-                        </td>
-                        <td className="p-3 text-slate-500">{item.category}</td>
-                        <td className="p-3 text-right font-bold text-slate-800 dark:text-slate-200">
-                          {item.qtySold} {item.unitType}
-                        </td>
-                        <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
-                          {formatINR(item.totalRevenue)}
-                        </td>
-                        <td className="p-3 text-right text-slate-600 dark:text-slate-400">
-                          {formatINR(item.estimatedMakingCost)}
-                        </td>
-                        <td className="p-3 text-right font-extrabold text-emerald-600 dark:text-emerald-400">
-                          {formatINR(item.grossProfit)}
-                        </td>
-                        <td className="p-3 text-center">
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-[10px]">
-                            {item.marginPct.toFixed(1)}%
-                          </span>
                         </td>
                       </tr>
                     ))
