@@ -129,4 +129,58 @@ describe('Product Addition, Sample Seeding & Visibility Persistence Suite', () =
     expect(rava).toBeDefined();
     expect(rava?.business_type).toBe('KIRANA_RETAIL');
   });
+
+  it('5. seedDemoProducts() always persists sample products and queues them for cloud sync', async () => {
+    const activeShopId = 'store-test-pune-001';
+    localStorage.setItem('kirana_active_shop_id', activeShopId);
+
+    // Seed 25 products
+    await db.seedDemoProducts();
+    const count = await db.products.count();
+    expect(count).toBe(25);
+
+    const allInDb = await db.products.toArray();
+    const visible = filterProductsForBusiness(allInDb, 'KIRANA_RETAIL', activeShopId);
+    expect(visible.length).toBe(25);
+
+    // Verify sync outbox has items queued
+    const outboxCount = await db.sync_outbox.count();
+    expect(outboxCount).toBe(25);
+
+    // Verify subsequent click succeeds cleanly without throwing constraint errors
+    await db.seedDemoProducts();
+    expect(await db.products.count()).toBe(25);
+  });
+
+  it('6. Products created with user shop_id remain 100% visible across base shop_id variants', () => {
+    const baseShopId = 'shop-pune-market-001';
+    const activeShopId = 'shop-pune-market-001';
+
+    const testProducts = [
+      {
+        id: 'p-1',
+        shop_id: 'shop-pune-market-001',
+        name: 'Tur Dal 1kg',
+        category: 'Dals & Pulses',
+        business_type: 'KIRANA_RETAIL' as const,
+      },
+      {
+        id: 'p-2',
+        shop_id: 'current_shop',
+        name: 'Chana Dal 1kg',
+        category: 'Dals & Pulses',
+        business_type: 'KIRANA_RETAIL' as const,
+      },
+      {
+        id: 'p-3',
+        shop_id: undefined,
+        name: 'Moong Dal 1kg',
+        category: 'Dals & Pulses',
+        business_type: 'KIRANA_RETAIL' as const,
+      },
+    ];
+
+    const visible = filterProductsForBusiness(testProducts, 'KIRANA_RETAIL', activeShopId);
+    expect(visible.length).toBe(3);
+  });
 });

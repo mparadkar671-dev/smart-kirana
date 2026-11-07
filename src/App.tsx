@@ -81,9 +81,9 @@ const MainApp: React.FC = () => {
   const shopProfile = useLiveQuery(() => db.getShopProfile(), []);
   const activeBusinessType: BusinessType = shopProfile?.business_type || getActiveBusinessType();
   const activeShopId: string =
+    (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) ||
     shopProfile?.shop_id ||
     shopProfile?.id ||
-    (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) ||
     'current_shop';
 
   // Start parallel multi-device live synchronization (Realtime WebSockets + Cross-tab + Heartbeat)

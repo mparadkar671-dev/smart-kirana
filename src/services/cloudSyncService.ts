@@ -1355,18 +1355,13 @@ class CloudSyncService {
         if (error) throw new Error(error.message);
         if (profiles && profiles.length > 0) {
           for (const profile of profiles) {
-            // Check remote reset_epoch: only purge if remote wipe happened AFTER our local products were last updated
+            // Multi-device watermark: update local reset_epoch to track cloud state without wiping active local products
             if (profile.id === shopId && profile.reset_epoch && profile.reset_epoch > localResetEpoch) {
               const localProds = await db.products.toArray();
-              const remoteWipedTime = profile.last_wiped_at ? new Date(profile.last_wiped_at).getTime() : 0;
-              const hasNewerLocalProducts = localProds.some((p) => {
-                const pTime = p.updated_at ? new Date(p.updated_at).getTime() : Date.now();
-                return pTime >= remoteWipedTime;
-              });
-              if (!hasNewerLocalProducts && remoteWipedTime > 0) {
-                console.log('Remote store wipe detected in pull. Purging local stale operational data.');
-                await db.clearAllRecordsToEmpty();
-                await db.sync_outbox.clear();
+              await db.updateShopProfile({ reset_epoch: profile.reset_epoch });
+              if (localProds.length > 0) {
+                // Ensure local products are backed up and synced to the cloud
+                this.syncAllToCloud().catch(() => {});
               }
             }
 

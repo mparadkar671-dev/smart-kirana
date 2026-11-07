@@ -227,21 +227,38 @@ export function filterProductsForBusiness<
   }
 >(products: T[], activeMode: BusinessMode, activeShopId?: string): T[] {
   return products.filter((p) => {
+    // 1. Business Mode Firewall
+    if (resolveProductBusinessType(p) !== activeMode) {
+      return false;
+    }
+
+    // 2. Multi-tenant shop_id verification
     if (activeShopId && p.shop_id && p.shop_id !== activeShopId) {
       // Local fallback: allow products created with default 'current_shop' or matching activeShopId
       if (p.shop_id === 'current_shop' || activeShopId === 'current_shop') {
-        // Allow
-      } else {
+        return true;
+      }
+      if (activeMode === 'HOMEMADE_FOOD') {
         const isProductHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD';
         const isActiveHmf = isHomemadeShopId(activeShopId) || activeMode === 'HOMEMADE_FOOD';
-        // If both represent HOMEMADE_FOOD, permit the product
         if (isProductHmf && isActiveHmf) {
-          // Allow
-        } else {
-          return false;
+          return true;
         }
+        return false;
+      } else {
+        // KIRANA_RETAIL: Allow if both are Kirana retail and share base shop_id
+        const isProductHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD';
+        const isActiveHmf = isHomemadeShopId(activeShopId);
+        if (!isProductHmf && !isActiveHmf) {
+          const baseP = getBaseKiranaShopId(p.shop_id);
+          const baseActive = getBaseKiranaShopId(activeShopId);
+          if (baseP === baseActive || baseP === 'current_shop' || baseActive === 'current_shop') {
+            return true;
+          }
+        }
+        return false;
       }
     }
-    return resolveProductBusinessType(p) === activeMode;
+    return true;
   });
 }

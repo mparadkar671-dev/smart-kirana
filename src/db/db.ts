@@ -369,44 +369,72 @@ export class KiranaDatabase extends Dexie {
    * Seeds 25 realistic Indian Kirana products and sample customers
    */
   async seedDemoProducts(): Promise<void> {
-    const count = await this.products.count();
-    if (count === 0) {
-      const items = INITIAL_PRODUCTS.map((prod) => ({
-        ...prod,
-        business_type: 'KIRANA_RETAIL' as const,
-      }));
-      await this.products.bulkAdd(items);
+    const rawShopId =
+      (typeof localStorage !== 'undefined'
+        ? localStorage.getItem('kirana_active_shop_id') ||
+          localStorage.getItem('kirana_base_shop_id') ||
+          localStorage.getItem('smart_kirana_shop_id')
+        : null) || 'current_shop';
 
-      // Add initial stock logs for audit trail
-      const initialLogs: InventoryLog[] = items.map((prod) => ({
-        id: `init-log-${prod.id}`,
-        shop_id: 'current_shop',
-        business_type: 'KIRANA_RETAIL' as const,
-        product_id: prod.id,
-        change_qty: prod.current_stock,
-        reason_type: 'PURCHASE_IN',
-        unit_cost_at_time: prod.purchase_price,
-        reference_id: null,
-        notes: 'Initial inventory stock opening balance',
-        created_at: new Date().toISOString(),
-      }));
-      await this.inventory_logs.bulkAdd(initialLogs);
+    const items = INITIAL_PRODUCTS.map((prod) => ({
+      ...prod,
+      shop_id: rawShopId,
+      business_type: 'KIRANA_RETAIL' as const,
+      updated_at: new Date().toISOString(),
+    }));
 
-      // Seed initial demo customers
-      for (const cust of INITIAL_CUSTOMERS) {
-        if (cust.id !== WALK_IN_CUSTOMER_ID) {
-          const existing = await this.customers.get(cust.id);
-          if (!existing) {
-            await this.customers.add(cust);
-          }
+    await this.products.bulkPut(items);
+
+    // Add initial stock logs for audit trail
+    const initialLogs: InventoryLog[] = items.map((prod) => ({
+      id: `init-log-${prod.id}`,
+      shop_id: rawShopId,
+      business_type: 'KIRANA_RETAIL' as const,
+      product_id: prod.id,
+      change_qty: prod.current_stock,
+      reason_type: 'PURCHASE_IN',
+      unit_cost_at_time: prod.purchase_price,
+      reference_id: null,
+      notes: 'Initial inventory stock opening balance',
+      created_at: new Date().toISOString(),
+    }));
+    await this.inventory_logs.bulkPut(initialLogs);
+
+    // Queue sync in outbox so sample products sync across all devices & Supabase
+    for (const p of items) {
+      await this.queueSync(
+        {
+          table_name: 'products',
+          operation: 'INSERT',
+          payload: p as unknown as Record<string, unknown>,
+          shop_id: rawShopId,
+        },
+        this.sync_outbox
+      ).catch(() => {});
+    }
+
+    // Seed initial demo customers if not already present
+    for (const cust of INITIAL_CUSTOMERS) {
+      if (cust.id !== WALK_IN_CUSTOMER_ID) {
+        const existing = await this.customers.get(cust.id);
+        if (!existing) {
+          await this.customers.put({
+            ...cust,
+            shop_id: rawShopId,
+          });
         }
       }
+    }
 
-      // Seed initial demo wholesalers if empty
-      const wsCount = await this.wholesalers.count();
-      if (wsCount === 0) {
-        await this.wholesalers.bulkAdd(INITIAL_WHOLESALERS);
-      }
+    // Seed initial demo wholesalers if empty
+    const wsCount = await this.wholesalers.count();
+    if (wsCount === 0) {
+      await this.wholesalers.bulkPut(
+        INITIAL_WHOLESALERS.map((w) => ({
+          ...w,
+          shop_id: rawShopId,
+        }))
+      );
     }
   }
 
