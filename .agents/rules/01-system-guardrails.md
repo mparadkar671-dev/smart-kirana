@@ -103,3 +103,4 @@ Before declaring any feature, bug fix, or refactoring complete:
 1. **Zero TypeScript Errors**: `npm run build` must compile cleanly without type warnings.
 2. **100% Vitest Suite Pass**: Execute `npx vitest run`. All test files (currently 29 files, 147+ tests) must pass with zero failures.
 3. **Preserve Documentation**: Never delete comments, ADRs, or test coverage. Any schema change must update both Dexie in `src/db/db.ts` and `docs/SCHEMA_AND_INVARIANTS.md`.
+

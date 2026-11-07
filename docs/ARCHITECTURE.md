@@ -320,3 +320,4 @@ export const db = new Proxy({} as KiranaDexie, {
 1. **Zero Contamination**: Kirana products, sales, customers, and expenses physically exist in a separate SQLite/IndexedDB file from Gruh Udyog.
 2. **Transparent Codebase**: All services and React hooks continue to interact with a single `db` interface without repetitive if-else switching logic.
 3. **Coordinated Inter-Business Transfers**: Inter-business inventory movements (e.g., Kirana sugar transferred to the Gruh Udyog kitchen) are coordinated across `kiranaDb` and `homemadeDb` in an atomic sequence with audit logging.
+

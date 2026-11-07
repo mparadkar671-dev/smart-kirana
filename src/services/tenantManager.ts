@@ -148,8 +148,11 @@ export const STANDARD_8_HOMEMADE_FOOD_CATALOG = [
  */
 export function getBaseKiranaShopId(shopId?: string | null): string {
   if (typeof localStorage !== 'undefined') {
-    const savedBase = localStorage.getItem('kirana_base_shop_id') || localStorage.getItem('kirana_primary_shop_id');
-    if (savedBase && !savedBase.endsWith(HMF_SHOP_ID_SUFFIX)) return savedBase;
+    const savedBase =
+      localStorage.getItem('kirana_base_shop_id') ||
+      localStorage.getItem('kirana_primary_shop_id') ||
+      localStorage.getItem('kirana_active_shop_id');
+    if (savedBase && !savedBase.endsWith(HMF_SHOP_ID_SUFFIX) && !savedBase.endsWith('_hmf')) return savedBase;
   }
   if (!shopId) return 'current_shop';
   if (shopId.endsWith(HMF_SHOP_ID_SUFFIX)) {
@@ -186,15 +189,13 @@ export function isHomemadeShopId(shopId?: string | null): boolean {
   if (
     s.endsWith(HMF_SHOP_ID_SUFFIX) ||
     s.endsWith('_hmf') ||
-    s.endsWith('ba7c') ||
-    s.endsWith('ceef') ||
     s === 'homemade_food_shop'
   ) {
     return true;
   }
   if (typeof localStorage !== 'undefined') {
     const stored = localStorage.getItem('kirana_homemade_shop_id');
-    if (stored && s === stored.toLowerCase()) return true;
+    if (stored && s === stored.toLowerCase() && stored.toLowerCase() !== 'current_shop') return true;
   }
   return false;
 }

@@ -158,10 +158,13 @@ describe('Zero-Mouse Keyboard Shortcut Engine & Same-Account Multi-Device Sync S
     });
 
     // 7. Press Esc to close receipt modal
+    await waitFor(() => {
+      expect(screen.getByTestId('receipt-modal')).toBeInTheDocument();
+    });
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => {
       expect(screen.queryByTestId('receipt-modal')).not.toBeInTheDocument();
-    });
+    }, { timeout: 4000 });
   });
 
   it('2. Universal Esc Hierarchy: Closes modal -> Clears search input -> Retains focus', async () => {

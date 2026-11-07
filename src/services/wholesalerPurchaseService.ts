@@ -269,6 +269,22 @@ export class WholesalerPurchaseService {
               expected_closing_cash: newExpected,
             });
             gallaSessionUpdated = true;
+          } else {
+            const newSession: DailyGallaSession = {
+              id: `galla-${shopId.slice(0, 8)}-${todayDate}-${Math.random().toString(36).slice(2, 6)}`,
+              shop_id: shopId,
+              business_type: bizType,
+              session_date: todayDate,
+              opening_cash: 0,
+              cash_sales_total: 0,
+              cash_udhari_recovered: 0,
+              cash_expenses_out: amountPaid,
+              expected_closing_cash: roundCurrency(-amountPaid),
+              actual_counted_cash: null,
+              discrepancy: null,
+            };
+            await activeDb.daily_galla_sessions.add(newSession);
+            gallaSessionUpdated = true;
           }
 
           // Also record an Expense entry for tracking
@@ -361,6 +377,21 @@ export class WholesalerPurchaseService {
               cash_expenses_out: newExpenses,
               expected_closing_cash: newExpected,
             });
+          } else {
+            const newSession: DailyGallaSession = {
+              id: `galla-${shopId.slice(0, 8)}-${todayDate}-${Math.random().toString(36).slice(2, 6)}`,
+              shop_id: shopId,
+              business_type: bizType,
+              session_date: todayDate,
+              opening_cash: 0,
+              cash_sales_total: 0,
+              cash_udhari_recovered: 0,
+              cash_expenses_out: amount,
+              expected_closing_cash: roundCurrency(-amount),
+              actual_counted_cash: null,
+              discrepancy: null,
+            };
+            await activeDb.daily_galla_sessions.add(newSession);
           }
 
           const exp: ExpenseAndDrawing = {

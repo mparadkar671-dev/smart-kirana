@@ -131,3 +131,4 @@ Examples:
 ### Consequences
 - **Positive**: Zero unique key constraint collisions in Supabase during offline reconnects.
 - **Positive**: Human-readable invoice codes that identify the originating counter.
+

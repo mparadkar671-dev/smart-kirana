@@ -177,3 +177,4 @@ For perishable items with active production batches:
 $$\text{BatchQtyRemaining}_{\text{oldest}} = \max(0, \text{BatchQtyRemaining}_{\text{oldest}} - \text{SaleQty})$$
 If $\text{SaleQty} > \text{BatchQtyRemaining}_{\text{oldest}}$, cascade remaining demand to the next chronological batch.
 $$\sum \text{BatchRemaining} \equiv \text{Product.current\_stock}$$
+

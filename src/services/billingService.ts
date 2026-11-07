@@ -301,7 +301,14 @@ export class BillingService {
 
         if (isCashPaid) {
           const gallaSession = await db.daily_galla_sessions
-            .filter(s => s.session_date === todayDate && (s.shop_id === activeShopId || (!s.shop_id && s.business_type === activeBizType)))
+            .filter(
+              (s) =>
+                s.session_date === todayDate &&
+                (s.shop_id === activeShopId ||
+                  s.shop_id === 'current_shop' ||
+                  activeShopId === 'current_shop' ||
+                  (!s.shop_id && s.business_type === activeBizType))
+            )
             .first();
 
           if (gallaSession) {

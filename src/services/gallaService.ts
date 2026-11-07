@@ -24,7 +24,14 @@ export class GallaService {
     const activeBiz = isHomemadeShopId(activeShopId) ? 'HOMEMADE_FOOD' : getActiveBusinessType();
 
     let session = await db.daily_galla_sessions
-      .filter((s) => s.session_date === todayDate && (s.shop_id === activeShopId || (!s.shop_id && s.business_type === activeBiz)))
+      .filter(
+        (s) =>
+          s.session_date === todayDate &&
+          (s.shop_id === activeShopId ||
+            s.shop_id === 'current_shop' ||
+            activeShopId === 'current_shop' ||
+            (!s.shop_id && s.business_type === activeBiz))
+      )
       .first();
 
     if (!session) {
@@ -57,7 +64,14 @@ export class GallaService {
 
     await db.transaction('rw', db.daily_galla_sessions, async () => {
       let session = await db.daily_galla_sessions
-        .filter((s) => s.session_date === sessionDate && (s.shop_id === activeShopId || (!s.shop_id && s.business_type === activeBiz)))
+        .filter(
+          (s) =>
+            s.session_date === sessionDate &&
+            (s.shop_id === activeShopId ||
+              s.shop_id === 'current_shop' ||
+              activeShopId === 'current_shop' ||
+              (!s.shop_id && s.business_type === activeBiz))
+        )
         .first();
 
       if (!session) {
@@ -153,7 +167,14 @@ export class GallaService {
 
       if (params.paidVia === 'CASH_GALLA') {
         const currentSession = await db.daily_galla_sessions
-          .filter((s) => s.session_date === todayDate && (s.shop_id === activeShopId || (!s.shop_id && s.business_type === activeBiz)))
+          .filter(
+            (s) =>
+              s.session_date === todayDate &&
+              (s.shop_id === activeShopId ||
+                s.shop_id === 'current_shop' ||
+                activeShopId === 'current_shop' ||
+                (!s.shop_id && s.business_type === activeBiz))
+          )
           .first();
 
         if (currentSession) {
@@ -185,6 +206,26 @@ export class GallaService {
             expected_closing_cash: newExpected,
             discrepancy,
           };
+        } else {
+          const newSession: DailyGallaSession = {
+            id: `galla-${activeShopId.slice(0, 8)}-${todayDate}-${Math.random().toString(36).slice(2, 6)}`,
+            shop_id: activeShopId,
+            business_type: activeBiz,
+            session_date: todayDate,
+            opening_cash: 0,
+            cash_sales_total: 0,
+            cash_udhari_recovered: 0,
+            cash_expenses_out: expAmount,
+            expected_closing_cash: roundCurrency(-expAmount),
+            actual_counted_cash: null,
+            discrepancy: null,
+          };
+          await db.daily_galla_sessions.add(newSession);
+          await db.queueSync(
+            { table_name: 'daily_galla_sessions', operation: 'INSERT', payload: newSession as unknown as Record<string, unknown>, shop_id: expense.shop_id },
+            db.sync_outbox
+          );
+          session = newSession;
         }
       }
     });
@@ -207,7 +248,14 @@ export class GallaService {
 
     await db.transaction('rw', [db.daily_galla_sessions, db.sync_outbox], async () => {
       const session = await db.daily_galla_sessions
-        .filter((s) => s.session_date === sessionDate && (s.shop_id === activeShopId || (!s.shop_id && s.business_type === activeBiz)))
+        .filter(
+          (s) =>
+            s.session_date === sessionDate &&
+            (s.shop_id === activeShopId ||
+              s.shop_id === 'current_shop' ||
+              activeShopId === 'current_shop' ||
+              (!s.shop_id && s.business_type === activeBiz))
+        )
         .first();
       if (!session) throw new Error(`No galla session found for date: ${sessionDate}`);
 

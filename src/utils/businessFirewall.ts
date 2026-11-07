@@ -79,8 +79,11 @@ export const HOMEMADE_NAME_KEYWORDS = [
 export function getBaseKiranaShopId(shopId?: string | null): string {
   // If already on the HMF shop_id, restore or look up the base Kirana shop_id from localStorage
   if (typeof localStorage !== 'undefined') {
-    const savedBase = localStorage.getItem('kirana_base_shop_id') || localStorage.getItem('kirana_primary_shop_id');
-    if (savedBase && !savedBase.endsWith('-484d-4600-000000000001')) return savedBase;
+    const savedBase =
+      localStorage.getItem('kirana_base_shop_id') ||
+      localStorage.getItem('kirana_primary_shop_id') ||
+      localStorage.getItem('kirana_active_shop_id');
+    if (savedBase && !savedBase.endsWith('-484d-4600-000000000001') && !savedBase.endsWith('_hmf')) return savedBase;
   }
   if (!shopId) return 'current_shop';
   if (shopId.endsWith('-484d-4600-000000000001')) {

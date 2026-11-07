@@ -249,12 +249,18 @@ export class InventoryService {
    */
   static async bulkToggleQuickTap(productIds: string[], isQuickTap: boolean): Promise<void> {
     if (!productIds || productIds.length === 0) return;
-    await db.transaction('rw', [db.products], async () => {
+    const shopId = (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) || 'current_shop';
+    const nowIso = new Date().toISOString();
+    await db.transaction('rw', [db.products, db.sync_outbox], async () => {
       for (const id of productIds) {
         await db.products.update(id, {
           is_quick_tap: isQuickTap,
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso,
         });
+        await db.queueSync(
+          { table_name: 'products', operation: 'UPDATE', payload: { id, is_quick_tap: isQuickTap, updated_at: nowIso }, shop_id: shopId },
+          db.sync_outbox
+        );
       }
     });
   }
@@ -264,12 +270,18 @@ export class InventoryService {
    */
   static async bulkUpdateCategory(productIds: string[], newCategory: string): Promise<void> {
     if (!productIds || productIds.length === 0 || !newCategory) return;
-    await db.transaction('rw', [db.products], async () => {
+    const shopId = (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) || 'current_shop';
+    const nowIso = new Date().toISOString();
+    await db.transaction('rw', [db.products, db.sync_outbox], async () => {
       for (const id of productIds) {
         await db.products.update(id, {
           category: newCategory,
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso,
         });
+        await db.queueSync(
+          { table_name: 'products', operation: 'UPDATE', payload: { id, category: newCategory, updated_at: nowIso }, shop_id: shopId },
+          db.sync_outbox
+        );
       }
     });
   }
