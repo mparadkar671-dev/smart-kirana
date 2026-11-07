@@ -397,10 +397,16 @@ function generateShortCode(englishName: string, index: number, usedCodes: Set<st
 export async function bulkImportKiranaProducts(
   rows: RawSheetProductRow[]
 ): Promise<{ importedCount: number; updatedCount: number; totalProducts: number }> {
+  const shopProfile = await db.getShopProfile().catch(() => null);
   const shopId =
-    typeof localStorage !== 'undefined'
-      ? localStorage.getItem('smart_kirana_shop_id') || 'current_shop'
-      : 'current_shop';
+    (typeof localStorage !== 'undefined'
+      ? localStorage.getItem('kirana_active_shop_id') ||
+        localStorage.getItem('kirana_base_shop_id') ||
+        localStorage.getItem('smart_kirana_shop_id')
+      : null) ||
+    shopProfile?.shop_id ||
+    shopProfile?.id ||
+    'current_shop';
 
   const existingProducts = await db.products.toArray();
   const existingBarcodes = new Set<string>(

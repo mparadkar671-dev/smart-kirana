@@ -27,12 +27,15 @@ export const HOMEMADE_CATEGORIES = new Set([
 ]);
 
 export const KIRANA_CATEGORIES = new Set([
+  'All Categories',
+  'Groceries',
   'Grains & Pulses',
   'Dals & Pulses',
   'Grains & Flours',
   'Grains & Staples',
   'Flours & Grains',
   'Spices & Masala',
+  'Spices & Masalas',
   'Edible Oil & Ghee',
   'Edible Oils',
   'Oil & Ghee',
@@ -116,15 +119,13 @@ export function isHomemadeShopId(shopId?: string | null): boolean {
   if (
     s.endsWith('-484d-4600-000000000001') ||
     s.endsWith('_hmf') ||
-    s.endsWith('ba7c') ||
-    s.endsWith('ceef') ||
     s === 'homemade_food_shop'
   ) {
     return true;
   }
   if (typeof localStorage !== 'undefined') {
     const stored = localStorage.getItem('kirana_homemade_shop_id');
-    if (stored && s === stored.toLowerCase()) return true;
+    if (stored && s === stored.toLowerCase() && stored.toLowerCase() !== 'current_shop') return true;
   }
   return false;
 }
@@ -161,12 +162,12 @@ export function getActiveBusinessType(): BusinessMode {
  * Deterministically resolves whether a product belongs to KIRANA_RETAIL or HOMEMADE_FOOD.
  * 
  * Rules:
- * 1. Physical shop_id check: If shop_id is the secondary homemadeShopId, return 'HOMEMADE_FOOD'.
- * 2. Hard Rule: Any standard Kirana category (e.g., "Grains & Pulses", "Dals & Pulses") is ALWAYS KIRANA_RETAIL,
- *    even if corrupted or overwritten by cloud sync.
- * 3. Hard Rule: Any Homemade category or specific homemade food title is ALWAYS HOMEMADE_FOOD.
- * 4. Fallback: If explicit business_type === 'HOMEMADE_FOOD', return 'HOMEMADE_FOOD'.
- * 5. Default: Everything else is 'KIRANA_RETAIL'.
+ * 1. Hard Rule: Any standard Kirana category (e.g., "Grains & Pulses", "Groceries") is ALWAYS KIRANA_RETAIL.
+ * 2. Hard Rule: Any Homemade category is ALWAYS HOMEMADE_FOOD.
+ * 3. Physical shop_id check: If shop_id is the secondary homemadeShopId, return 'HOMEMADE_FOOD'.
+ * 4. Explicit business_type check: If business_type is defined, honor it.
+ * 5. Hard Rule: Any Homemade food name keyword is HOMEMADE_FOOD.
+ * 6. Default: Everything else is 'KIRANA_RETAIL'.
  */
 export function resolveProductBusinessType(product: {
   id?: string;
@@ -179,26 +180,31 @@ export function resolveProductBusinessType(product: {
   const cat = (product.category || '').trim();
   const nameLower = `${product.name || ''} ${product.marathi_name || ''}`.toLowerCase();
 
-  // 1. Hard rule: Any standard Kirana category (like "Grains & Pulses") is ALWAYS KIRANA_RETAIL
+  // 1. Hard rule: Any standard Kirana category is ALWAYS KIRANA_RETAIL
   if (KIRANA_CATEGORIES.has(cat)) {
     return 'KIRANA_RETAIL';
   }
 
-  // 2. Physical tenant shop_id check
+  // 2. Hard rule: Any Homemade category is ALWAYS HOMEMADE_FOOD
+  if (HOMEMADE_CATEGORIES.has(cat)) {
+    return 'HOMEMADE_FOOD';
+  }
+
+  // 3. Physical tenant shop_id check
   if (product.shop_id && isHomemadeShopId(product.shop_id)) {
     return 'HOMEMADE_FOOD';
   }
 
-  // 3. Hard rule: Any Homemade category or Homemade food name is ALWAYS HOMEMADE_FOOD
-  if (
-    HOMEMADE_CATEGORIES.has(cat) ||
-    HOMEMADE_NAME_KEYWORDS.some((kw) => nameLower.includes(kw))
-  ) {
+  // 4. Honor explicit business_type if set
+  if (product.business_type === 'KIRANA_RETAIL') {
+    return 'KIRANA_RETAIL';
+  }
+  if (product.business_type === 'HOMEMADE_FOOD') {
     return 'HOMEMADE_FOOD';
   }
 
-  // 4. Fallback to explicit business_type if valid, otherwise default to KIRANA_RETAIL
-  if (product.business_type === 'HOMEMADE_FOOD') {
+  // 5. Keyword match for traditional homemade specialties
+  if (HOMEMADE_NAME_KEYWORDS.some((kw) => nameLower.includes(kw))) {
     return 'HOMEMADE_FOOD';
   }
 
@@ -219,13 +225,18 @@ export function filterProductsForBusiness<
 >(products: T[], activeMode: BusinessMode, activeShopId?: string): T[] {
   return products.filter((p) => {
     if (activeShopId && p.shop_id && p.shop_id !== activeShopId) {
-      const isProductHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD';
-      const isActiveHmf = isHomemadeShopId(activeShopId) || activeMode === 'HOMEMADE_FOOD';
-      // If both represent HOMEMADE_FOOD, permit the product
-      if (isProductHmf && isActiveHmf) {
+      // Local fallback: allow products created with default 'current_shop' or matching activeShopId
+      if (p.shop_id === 'current_shop' || activeShopId === 'current_shop') {
         // Allow
       } else {
-        return false;
+        const isProductHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD';
+        const isActiveHmf = isHomemadeShopId(activeShopId) || activeMode === 'HOMEMADE_FOOD';
+        // If both represent HOMEMADE_FOOD, permit the product
+        if (isProductHmf && isActiveHmf) {
+          // Allow
+        } else {
+          return false;
+        }
       }
     }
     return resolveProductBusinessType(p) === activeMode;
