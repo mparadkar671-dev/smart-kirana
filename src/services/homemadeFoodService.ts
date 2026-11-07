@@ -1,4 +1,4 @@
-import { db } from '../db/db';
+import { db, kiranaDb, homemadeDb } from '../db/db';
 import {
   Product,
   UnitType,
@@ -27,6 +27,7 @@ import {
   getBaseKiranaShopId,
   getHomemadeShopId,
   getActiveShopId,
+  getActiveBusinessType,
   isHomemadeShopId,
   HOMEMADE_CATEGORIES,
   HOMEMADE_NAME_KEYWORDS,
@@ -259,16 +260,26 @@ export async function repairMixedBusinessProducts(): Promise<{
   homemadeCount: number;
   kiranaCount: number;
 }> {
-  const allProducts = await db.products.toArray();
+  const kiranaItems = await kiranaDb.products.toArray().catch(() => []);
+  const hmfItems = await homemadeDb.products.toArray().catch(() => []);
+  const activeItems = await db.products.toArray().catch(() => []);
+
+  // Merge unique products by id
+  const productMap = new Map<string, Product>();
+  for (const p of [...kiranaItems, ...hmfItems, ...activeItems]) {
+    if (p && p.id) {
+      productMap.set(p.id, p);
+    }
+  }
+
   let repairedCount = 0;
   let homemadeCount = 0;
   let kiranaCount = 0;
 
-  const updates: Product[] = [];
   const primaryKiranaShopId = getBaseKiranaShopId();
   const hmfShopId = getHomemadeShopId(primaryKiranaShopId);
 
-  for (const prod of allProducts) {
+  for (const prod of Array.from(productMap.values())) {
     const expectedType: BusinessType = resolveProductBusinessType(prod);
     let changed = false;
 
@@ -283,28 +294,25 @@ export async function repairMixedBusinessProducts(): Promise<{
         changed = true;
       }
       homemadeCount++;
+      await homemadeDb.products.put(prod);
+      await kiranaDb.products.delete(prod.id).catch(() => {});
     } else {
       if (!prod.shop_id || isHomemadeShopId(prod.shop_id)) {
         prod.shop_id = primaryKiranaShopId;
         changed = true;
       }
       kiranaCount++;
+      await kiranaDb.products.put(prod);
+      await homemadeDb.products.delete(prod.id).catch(() => {});
     }
 
     if (changed) {
-      updates.push(prod);
       repairedCount++;
-    }
-  }
-
-  if (updates.length > 0) {
-    await db.products.bulkPut(updates);
-    try {
-      for (const p of updates) {
-        await cloudSyncService.syncProduct(p);
+      try {
+        await cloudSyncService.syncProduct(prod);
+      } catch {
+        // Ignore in offline/test
       }
-    } catch {
-      // Ignore in offline/test
     }
   }
 
@@ -345,47 +353,53 @@ export class HomemadeFoodService {
   }
 
   /**
-   * Purges any old or corrupted homemade food products from the primary Kirana store
+   * Safely relocates any misplaced homemade food products to the Homemade Food store.
+   * NEVER destroys products; preserves user-created food items.
    */
   static async purgeCorruptedHomemadeFromKirana(kiranaShopId?: string): Promise<number> {
     const primaryId =
       kiranaShopId ||
       (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_primary_shop_id') : null) ||
       'current_shop';
-    const allProducts = await db.products.toArray();
-    const toDelete: string[] = [];
+    const hmfId = getHomemadeShopId(primaryId);
+    const allProducts = await kiranaDb.products.toArray();
+    let relocatedCount = 0;
 
     for (const p of allProducts) {
-      if (p.shop_id === primaryId) {
+      if (p.shop_id === primaryId || !p.shop_id) {
         const isHmf =
           p.business_type === 'HOMEMADE_FOOD' ||
           HOMEMADE_CATEGORIES.has(p.category || '') ||
           HOMEMADE_NAME_KEYWORDS.some((kw) => `${p.name} ${p.marathi_name || ''}`.toLowerCase().includes(kw));
         const isKirana = KIRANA_CATEGORIES.has(p.category || '');
         if (isHmf && !isKirana) {
-          toDelete.push(p.id);
+          const relocated: Product = {
+            ...p,
+            shop_id: hmfId,
+            business_type: 'HOMEMADE_FOOD',
+          };
+          await homemadeDb.products.put(relocated);
+          await kiranaDb.products.delete(p.id).catch(() => {});
+          if (getActiveBusinessType() === 'HOMEMADE_FOOD') {
+            await db.products.put(relocated).catch(() => {});
+          } else {
+            await db.products.delete(p.id).catch(() => {});
+          }
+          try {
+            await cloudSyncService.syncProduct(relocated);
+          } catch {}
+          relocatedCount++;
         }
       }
     }
-
-    if (toDelete.length > 0) {
-      await db.products.bulkDelete(toDelete);
-      try {
-        const { supabase } = await import('../lib/supabase');
-        if (supabase) {
-          await supabase.from('products').delete().eq('shop_id', primaryId).in('id', toDelete);
-        }
-      } catch {}
-    }
-    return toDelete.length;
+    return relocatedCount;
   }
 
   /**
-   * Complete multi-tenant store reset:
-   * 1. Purges mixed homemade items from kiranaShopId
-   * 2. Clears old products from homemadeShopId
-   * 3. Ensures both shop_profiles exist with KRN and HMF prefixes
-   * 4. Seeds ONLY the user's exact 8-Product authentic catalog under homemadeShopId
+   * Complete multi-tenant store reset / seeding:
+   * 1. Safely relocates any misplaced homemade items to homemadeShopId
+   * 2. Ensures both shop_profiles exist with KRN and HMF prefixes
+   * 3. Seeds the 8-Product authentic catalog without wiping existing user-added items!
    */
   static async cleanPurgeAndSeedHomemadeStore(
     kiranaShopId?: string,
@@ -401,22 +415,10 @@ export class HomemadeFoodService {
     );
     const hmfId = homemadeShopId || getHomemadeShopId(primaryId);
 
-    // 1. Purge corrupted homemade products from kiranaShopId
+    // 1. Relocate misplaced products
     const purgedFromKirana = await this.purgeCorruptedHomemadeFromKirana(primaryId);
 
-    // 2. Clear old products under homemadeShopId
-    const oldHmf = await db.products.filter((p) => p.shop_id === hmfId).toArray();
-    if (oldHmf.length > 0) {
-      await db.products.bulkDelete(oldHmf.map((p) => p.id));
-      try {
-        const { supabase } = await import('../lib/supabase');
-        if (supabase) {
-          await supabase.from('products').delete().eq('shop_id', hmfId);
-        }
-      } catch {}
-    }
-
-    // 3. Ensure dual shop profiles exist in db.shop_profile
+    // 2. Ensure dual shop profiles exist in db.shop_profile
     const nowIso = new Date().toISOString();
     const existingKirana = await db.shop_profile.get(primaryId);
     if (!existingKirana) {
@@ -509,12 +511,14 @@ export class HomemadeFoodService {
       });
     });
 
-    await db.transaction('rw', [db.products, db.inventory_logs], async () => {
-      await db.products.bulkPut(productsToPut);
+    await homemadeDb.transaction('rw', [homemadeDb.products, homemadeDb.inventory_logs], async () => {
+      await homemadeDb.products.bulkPut(productsToPut);
       if (logsToPut.length > 0) {
-        await db.inventory_logs.bulkPut(logsToPut);
+        await homemadeDb.inventory_logs.bulkPut(logsToPut);
       }
     });
+
+    // Seeded strictly into homemadeDb
 
     try {
       for (const p of productsToPut) {

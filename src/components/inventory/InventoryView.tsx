@@ -8,7 +8,7 @@ import { BatchSpoilageModal } from './BatchSpoilageModal';
 import { WholesalerPurchaseModal } from './WholesalerPurchaseModal';
 import { InventoryService } from '../../services/inventoryService';
 import { HomemadeFoodService, isHomemadeFoodCategoryOrName } from '../../services/homemadeFoodService';
-import { filterProductsForBusiness } from '../../utils/businessFirewall';
+import { filterProductsForBusiness, getActiveBusinessType } from '../../utils/businessFirewall';
 import {
   MAHARASHTRA_105_KIRANA_CATALOG,
   parseKiranaCatalogCsv,
@@ -51,7 +51,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   shopProfile,
   onRefresh,
 }) => {
-  const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+  const activeBusinessType: BusinessType = shopProfile?.business_type || getActiveBusinessType();
   const isHomemade = activeBusinessType === 'HOMEMADE_FOOD';
 
   // Strict business isolation defense-in-depth:

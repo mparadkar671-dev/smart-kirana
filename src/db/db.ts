@@ -1014,6 +1014,23 @@ export function getActiveDb(activeBusinessType?: BusinessType): KiranaDatabase {
 export const db = new Proxy(kiranaDb, {
   get(_target, prop, receiver) {
     const active = getActiveDb();
+    if (prop === 'products') {
+      const activeProducts = active.products;
+      return new Proxy(activeProducts, {
+        get(pTarget, pProp, pReceiver) {
+          if (pProp === 'get') {
+            return async (key: string | number) => {
+              const res = await activeProducts.get(key as any);
+              if (res) return res;
+              const otherDb = active === kiranaDb ? homemadeDb : kiranaDb;
+              return await otherDb.products.get(key as any);
+            };
+          }
+          const val = Reflect.get(pTarget, pProp, pReceiver);
+          return typeof val === 'function' ? val.bind(pTarget) : val;
+        },
+      });
+    }
     const val = Reflect.get(active, prop, receiver);
     if (typeof val === 'function') {
       return val.bind(active);

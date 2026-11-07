@@ -42,8 +42,7 @@ const MainApp: React.FC = () => {
         const bizType = profile?.business_type || 'KIRANA_RETAIL';
         const allProds = await db.products.toArray();
         const bizCount = filterProductsForBusiness(allProds, bizType).length;
-        const threshold = bizType === 'HOMEMADE_FOOD' ? 8 : 10;
-        if (bizCount < threshold) {
+        if (bizCount === 0) {
           if (bizType === 'HOMEMADE_FOOD') {
             await HomemadeFoodService.seedHomemadeFoodCatalog();
           } else {

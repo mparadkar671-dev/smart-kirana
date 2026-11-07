@@ -8,6 +8,7 @@ import { generateUniqueStoreBarcode, getBarcodePatternBars } from '../../utils/b
 import { compressProductImage } from '../../utils/imageCompressor';
 import { generateSmartProductThumbnail, normalizeProductImageToSquare } from '../../utils/productImageEngine';
 import { db } from '../../db/db';
+import { getActiveBusinessType } from '../../utils/businessFirewall';
 import {
   X,
   Sparkles,
@@ -38,7 +39,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   businessType,
 }) => {
   const effectiveBusinessType: BusinessType =
-    productToEdit?.business_type || businessType || 'KIRANA_RETAIL';
+    productToEdit?.business_type || businessType || getActiveBusinessType();
   const isHomemade = effectiveBusinessType === 'HOMEMADE_FOOD';
   const activeCategories = isHomemade ? HOMEMADE_FOOD_CATEGORIES : KIRANA_CATEGORIES;
 
@@ -228,7 +229,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         }));
       });
     }
-  }, [productToEdit, isOpen]);
+  }, [productToEdit, isOpen, effectiveBusinessType, isHomemade]);
 
   if (!isOpen) return null;
 

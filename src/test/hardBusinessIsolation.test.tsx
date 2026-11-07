@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { db } from '../db/db';
+import { db, kiranaDb, homemadeDb } from '../db/db';
 import { InventoryService } from '../services/inventoryService';
 import {
   HomemadeFoodService,
@@ -29,7 +29,8 @@ import { Product, ShopProfile } from '../types';
 
 describe('Hard Data, UI, Category & Sync Isolation: KIRANA_RETAIL vs HOMEMADE_FOOD', () => {
   beforeEach(async () => {
-    await db.clearAllRecordsToEmpty();
+    await kiranaDb.clearAllRecordsToEmpty();
+    await homemadeDb.clearAllRecordsToEmpty();
     await HomemadeFoodService.resetWorkspaceSnapshots();
 
     await db.shop_profile.put({
@@ -469,7 +470,10 @@ describe('Hard Data, UI, Category & Sync Isolation: KIRANA_RETAIL vs HOMEMADE_FO
     const seedRes = await HomemadeFoodService.cleanPurgeAndSeedHomemadeStore(kiranaShopId, hmfShopId);
     expect(seedRes.seededCount).toBe(8);
 
-    const allDbProducts = await db.products.toArray();
+    const allDbProducts = [
+      ...(await kiranaDb.products.toArray()),
+      ...(await homemadeDb.products.toArray()),
+    ];
     // 2 Kirana + 8 Homemade = 10 total products in multi-tenant DB
     expect(allDbProducts.length).toBe(10);
 
@@ -604,5 +608,51 @@ describe('Hard Data, UI, Category & Sync Isolation: KIRANA_RETAIL vs HOMEMADE_FO
     expect(hmfPnl.grossProfit).toBe(280);
     // Kirana 400 rent must NOT leak into Homemade Food P&L
     expect(hmfPnl.shopOperatingExpenses).toBe(0);
+  });
+
+  it('11. Custom homemade product created by user never collapses, disappears, or leaks on sync and repair', async () => {
+    localStorage.setItem('kirana_active_business_type', 'HOMEMADE_FOOD');
+    const primaryKiranaShopId = '8f3a5b2c-1234-4567-890a-bcde12345678';
+    const hmfShopId = getHomemadeShopId(primaryKiranaShopId);
+    localStorage.setItem('kirana_primary_shop_id', primaryKiranaShopId);
+    localStorage.setItem('kirana_active_shop_id', hmfShopId);
+
+    // Create a merchant's custom homemade product
+    const customChakali = await InventoryService.createProduct({
+      name: 'कुरकुरीत चकली (Chakali 250g)',
+      marathi_name: 'कुरकुरीत चकली',
+      short_code: 'CHK25',
+      barcode: '2009000000999',
+      category: 'Snacks & Namkeen (नाश्ता व नमकीन)',
+      unit_type: 'PCS',
+      purchase_price: 60,
+      selling_price: 100,
+      mrp: 100,
+      current_stock: 40,
+      low_stock_threshold: 5,
+      is_quick_tap: true,
+      business_type: 'HOMEMADE_FOOD',
+    });
+
+    expect(customChakali.id).toBeDefined();
+    expect(customChakali.business_type).toBe('HOMEMADE_FOOD');
+
+    // Run repairMixedBusinessProducts
+    await repairMixedBusinessProducts();
+
+    // Verify it is in homemadeDb and NOT wiped
+    const inHmfDb = await db.products.get(customChakali.id);
+    expect(inHmfDb).toBeDefined();
+    expect(inHmfDb?.name).toContain('चकली');
+    expect(inHmfDb?.business_type).toBe('HOMEMADE_FOOD');
+
+    // Verify filterProductsForBusiness returns it
+    const allProds = await db.products.toArray();
+    const visibleInHmf = filterProductsForBusiness(allProds, 'HOMEMADE_FOOD', hmfShopId);
+    expect(visibleInHmf.some((p) => p.id === customChakali.id)).toBe(true);
+
+    // Verify it does NOT appear in Kirana
+    const visibleInKirana = filterProductsForBusiness(allProds, 'KIRANA_RETAIL', primaryKiranaShopId);
+    expect(visibleInKirana.some((p) => p.id === customChakali.id)).toBe(false);
   });
 });

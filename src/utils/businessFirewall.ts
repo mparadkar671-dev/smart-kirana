@@ -1,22 +1,28 @@
 export type BusinessMode = 'KIRANA_RETAIL' | 'HOMEMADE_FOOD';
 
 export const HOMEMADE_CATEGORIES = new Set([
+  'All Homemade Items',
   'Homemade Laddus & Sweets',
   'Homemade Laddus & Vadi',
+  'Homemade Laddus & Vadi (लाडू, खोबऱ्याची वडी / कापा)',
   'Traditional Laddus',
   'Traditional Laddus (लाडू)',
   'Modak & Festive Specials',
   'Modak & Festive Specials (मोदक / पुरणपोळी)',
+  'Modak & Festive Specials (उकडीचे मोदक, तळणीचे मोदक)',
   'Festival Specials',
   'Konkani Breakfast & Tiffin',
   'Konkani Fresh Tiffin & Breakfast',
+  'Konkani Breakfast & Tiffin (घावणे, आंबोळी, पोहे, उपमा)',
   'Konkani Breakfast (घावणे / आंबोळी)',
   'Konkani Breakfast',
   'Fresh Bhakri & Chapati',
   'Fresh Bhakri & Chapati (भाकरी / चपाती)',
+  'Fresh Bhakri & Chapati (भाकरी, चपाती, पुरणपोळी)',
   'Homemade Vadi & Kapa',
   'Homemade Vadi & Kapa (खोबऱ्याच्या कापा)',
   'Homemade Pickles & Chutney',
+  'Homemade Pickles, Chutney & Papad (लोणचे, चटणी, पापड)',
   'Homemade Food / Gruh Udyog',
 ]);
 
@@ -54,7 +60,17 @@ export const HOMEMADE_NAME_KEYWORDS = [
   'भाकरी', 'bhakri',
   'चपाती', 'chapati', 'poli',
   'पुरणपोळी', 'puran poli',
-  'खोबऱ्याची वडी', 'खोबऱ्याच्या वड्या', 'खोबऱ्याच्या कापा', 'कापा', 'khobryachi kapa', 'khobryachi vadi', 'vadi'
+  'खोबऱ्याची वडी', 'खोबऱ्याच्या वड्या', 'खोबऱ्याच्या कापा', 'कापा', 'khobryachi kapa', 'khobryachi vadi', 'vadi',
+  'पोहे', 'pohe',
+  'उपमा', 'upma',
+  'चकली', 'chakali', 'chakli',
+  'करंजी', 'karanji',
+  'शेव', 'shev',
+  'चिवडा', 'chivda',
+  'लोणचे', 'lonche', 'pickle',
+  'पापड', 'papad',
+  'चटणी', 'chutney',
+  'कुरडई', 'kurdai'
 ];
 
 export function getBaseKiranaShopId(shopId?: string | null): string {
@@ -163,14 +179,14 @@ export function resolveProductBusinessType(product: {
   const cat = (product.category || '').trim();
   const nameLower = `${product.name || ''} ${product.marathi_name || ''}`.toLowerCase();
 
-  // 1. Physical tenant shop_id check
-  if (product.shop_id && isHomemadeShopId(product.shop_id)) {
-    return 'HOMEMADE_FOOD';
-  }
-
-  // 2. Hard rule: Any standard Kirana category (like "Grains & Pulses") is ALWAYS KIRANA_RETAIL
+  // 1. Hard rule: Any standard Kirana category (like "Grains & Pulses") is ALWAYS KIRANA_RETAIL
   if (KIRANA_CATEGORIES.has(cat)) {
     return 'KIRANA_RETAIL';
+  }
+
+  // 2. Physical tenant shop_id check
+  if (product.shop_id && isHomemadeShopId(product.shop_id)) {
+    return 'HOMEMADE_FOOD';
   }
 
   // 3. Hard rule: Any Homemade category or Homemade food name is ALWAYS HOMEMADE_FOOD
@@ -185,6 +201,7 @@ export function resolveProductBusinessType(product: {
   if (product.business_type === 'HOMEMADE_FOOD') {
     return 'HOMEMADE_FOOD';
   }
+
   return 'KIRANA_RETAIL';
 }
 
@@ -202,7 +219,14 @@ export function filterProductsForBusiness<
 >(products: T[], activeMode: BusinessMode, activeShopId?: string): T[] {
   return products.filter((p) => {
     if (activeShopId && p.shop_id && p.shop_id !== activeShopId) {
-      return false;
+      const isProductHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD';
+      const isActiveHmf = isHomemadeShopId(activeShopId) || activeMode === 'HOMEMADE_FOOD';
+      // If both represent HOMEMADE_FOOD, permit the product
+      if (isProductHmf && isActiveHmf) {
+        // Allow
+      } else {
+        return false;
+      }
     }
     return resolveProductBusinessType(p) === activeMode;
   });

@@ -23,6 +23,7 @@ import {
   getBaseKiranaShopId,
   getHomemadeShopId,
   isHomemadeShopId,
+  getActiveBusinessType,
 } from '../utils/businessFirewall';
 
 export interface CloudSyncStatus {
@@ -523,6 +524,34 @@ class CloudSyncService {
   }
 
   /**
+   * Ensures that the target shop_profile row exists in Supabase so foreign key constraints on products.shop_id succeed.
+   */
+  async ensureShopProfileExistsInCloud(shopId: string, bizType: BusinessType = 'HOMEMADE_FOOD'): Promise<void> {
+    if (!supabase || this.isTestEnv) return;
+    try {
+      const userId = await this.getUserId();
+      const isHmf = bizType === 'HOMEMADE_FOOD' || isHomemadeShopId(shopId);
+      const payload: Record<string, unknown> = {
+        id: shopId,
+        shop_id: shopId,
+        shop_name: isHmf ? 'Shree Ganesh Gruh Udyog' : 'Shree Ganesh Kirana',
+        owner_name: 'Store Owner',
+        phone: '9876543210',
+        upi_vpa: 'kirana@upi',
+        business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
+        invoice_prefix: isHmf ? 'HMF' : 'KRN',
+        invite_code: 'KRN-4829',
+        reset_epoch: 1,
+        updated_at: new Date().toISOString(),
+      };
+      if (userId) payload.user_id = userId;
+      await supabase.from('shop_profile').upsert(payload, { onConflict: 'id' });
+    } catch {
+      // Ignore in offline
+    }
+  }
+
+  /**
    * Syncs a single product to Supabase cloud
    */
   async syncProduct(product: Product): Promise<void> {
@@ -531,6 +560,9 @@ class CloudSyncService {
       const isHmf = product.business_type === 'HOMEMADE_FOOD' || isHomemadeShopId(product.shop_id);
       const baseShopId = getBaseKiranaShopId(product.shop_id);
       const shopIdToUse = isHmf ? getHomemadeShopId(baseShopId) : (product.shop_id || baseShopId);
+
+      // Ensure parent shop_profile exists in Supabase to satisfy foreign key constraint
+      await this.ensureShopProfileExistsInCloud(shopIdToUse, isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL');
 
       const userId = await this.getUserId();
       const payload: Record<string, unknown> = {
@@ -983,29 +1015,48 @@ class CloudSyncService {
         console.warn('Could not check remote reset_epoch:', checkErr);
       }
 
-      // 1. Sync Shop Profile
+      // 1. Sync Shop Profile for both stores
+      const primaryShopId = getBaseKiranaShopId(shopId);
+      const hmfShopId = getHomemadeShopId(primaryShopId);
       try {
         const profile = await db.getShopProfile();
         if (profile) {
-          const payload: Record<string, unknown> = {
-            id: shopId,
-            shop_name: profile.shop_name,
+          const kiranaPayload: Record<string, unknown> = {
+            id: primaryShopId,
+            shop_name: profile.business_type === 'HOMEMADE_FOOD' ? (profile.shop_name.replace(/Gruh Udyog|Homemade Food/i, 'Kirana Store') || 'Smart Kirana Store') : profile.shop_name,
             owner_name: profile.owner_name,
             phone: profile.phone,
             upi_vpa: profile.upi_vpa,
             address: profile.address || '',
             gst_footer_note: profile.gst_footer_note || '',
-            business_type: profile.business_type || 'KIRANA_RETAIL',
-            invoice_prefix: profile.invoice_prefix || 'KRN',
+            business_type: 'KIRANA_RETAIL',
+            invoice_prefix: 'KRN',
             invite_code: profile.invite_code,
             reset_epoch: profile.reset_epoch || 1,
             last_wiped_at: profile.last_wiped_at,
             updated_at: new Date().toISOString(),
           };
-          if (userId) payload.user_id = userId;
-          const { error } = await supabase.from('shop_profile').upsert(payload, { onConflict: 'id' });
-          if (error) throw new Error(error.message);
-          pushedCount++;
+          if (userId) kiranaPayload.user_id = userId;
+          await supabase.from('shop_profile').upsert(kiranaPayload, { onConflict: 'id' });
+
+          const hmfPayload: Record<string, unknown> = {
+            id: hmfShopId,
+            shop_name: profile.business_type === 'HOMEMADE_FOOD' ? profile.shop_name : `${profile.shop_name} (Gruh Udyog)`,
+            owner_name: profile.owner_name,
+            phone: profile.phone,
+            upi_vpa: profile.upi_vpa,
+            address: profile.address || '',
+            gst_footer_note: profile.gst_footer_note || '',
+            business_type: 'HOMEMADE_FOOD',
+            invoice_prefix: 'HMF',
+            invite_code: profile.invite_code,
+            reset_epoch: profile.reset_epoch || 1,
+            last_wiped_at: profile.last_wiped_at,
+            updated_at: new Date().toISOString(),
+          };
+          if (userId) hmfPayload.user_id = userId;
+          await supabase.from('shop_profile').upsert(hmfPayload, { onConflict: 'id' });
+          pushedCount += 2;
         }
       } catch (e: unknown) {
         errors.push(`Shop Profile: ${e instanceof Error ? e.message : String(e)}`);
@@ -1057,15 +1108,25 @@ class CloudSyncService {
         console.warn('Wholesalers sync notice:', e);
       }
 
-      // 3. Sync Products
+      // 3. Sync Products from BOTH kiranaDb and homemadeDb
       try {
-        const prods = await db.products.toArray();
+        const [kiranaProds, homemadeProds] = await Promise.all([
+          kiranaDb.products.toArray(),
+          homemadeDb.products.toArray(),
+        ]);
+        const prodMap = new Map<string, Product>();
+        for (const p of kiranaProds) prodMap.set(p.id, p);
+        for (const p of homemadeProds) prodMap.set(p.id, p);
+        const prods = Array.from(prodMap.values());
+
         if (prods.length > 0) {
           const rows = prods.map((p) => {
+            const isHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD' || isHomemadeFoodCategoryOrName(p);
+            const targetShopId = isHmf ? hmfShopId : (p.shop_id || primaryShopId);
             const r: Record<string, unknown> = {
               id: p.id,
-              shop_id: p.shop_id || shopId,
-              business_type: resolveProductBusinessType(p),
+              shop_id: targetShopId,
+              business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
               name: p.name,
               marathi_name: p.marathi_name || null,
               search_keywords: p.search_keywords || null,
@@ -1341,26 +1402,8 @@ class CloudSyncService {
 
         if (error) throw new Error(error.message);
         if (prods) {
-          // Reconcile deletions: remove stale local products that no longer exist in remote Supabase
-          const remoteIds = new Set(prods.map((p) => p.id));
-          const localProds = await db.products.toArray();
-          const pendingOutbox = await db.sync_outbox.where('table_name').equals('products').toArray();
-          const pendingIds = new Set(pendingOutbox.map((o) => (o.payload?.id as string) || o.id));
-
-          const staleLocalIds: string[] = [];
-          for (const lp of localProds) {
-            const matchesShop = shopIdsToPull.includes(lp.shop_id || '') || 
-              (isHomemadeShopId(lp.shop_id) && shopIdsToPull.includes(hmfShopId));
-            if (matchesShop && !remoteIds.has(lp.id) && !pendingIds.has(lp.id)) {
-              staleLocalIds.push(lp.id);
-            }
-          }
-          if (staleLocalIds.length > 0) {
-            await db.products.bulkDelete(staleLocalIds);
-          }
-
           for (const p of prods) {
-            const isHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD';
+            const isHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD' || isHomemadeFoodCategoryOrName(p);
             const itemShopId = p.shop_id || (isHmf ? hmfShopId : primaryShopId);
             const productRecord: Product = {
               id: p.id,
@@ -1387,7 +1430,15 @@ class CloudSyncService {
               is_quick_tap: Boolean(p.is_quick_tap),
               updated_at: p.updated_at || new Date().toISOString(),
             };
-            await db.products.put(productRecord);
+
+            if (isHmf) {
+              await homemadeDb.products.put(productRecord);
+            } else {
+              await kiranaDb.products.put(productRecord);
+            }
+            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
+              await db.products.put(productRecord).catch(() => {});
+            }
             pulledCount++;
           }
         }
@@ -1436,10 +1487,11 @@ class CloudSyncService {
         if (error) throw new Error(error.message);
         if (custs && custs.length > 0) {
           for (const c of custs) {
+            const isHmf = isHomemadeShopId(c.shop_id) || c.business_type === 'HOMEMADE_FOOD';
             const customerRecord: Customer = {
               id: c.id,
-              shop_id: c.shop_id || shopId,
-              business_type: c.business_type || 'KIRANA_RETAIL',
+              shop_id: c.shop_id || (isHmf ? hmfShopId : primaryShopId),
+              business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
               name: c.name,
               phone: c.phone,
               address_landmark: c.address_landmark || null,
@@ -1449,7 +1501,14 @@ class CloudSyncService {
               last_reminder_sent_at: c.last_reminder_sent_at || null,
               created_at: c.created_at || new Date().toISOString(),
             };
-            await db.customers.put(customerRecord);
+            if (isHmf) {
+              await homemadeDb.customers.put(customerRecord);
+            } else {
+              await kiranaDb.customers.put(customerRecord);
+            }
+            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
+              await db.customers.put(customerRecord).catch(() => {});
+            }
             pulledCount++;
           }
         }
@@ -1497,10 +1556,11 @@ class CloudSyncService {
         if (error) throw new Error(error.message);
         if (logs && logs.length > 0) {
           for (const l of logs) {
-            await db.inventory_logs.put({
+            const isHmf = isHomemadeShopId(l.shop_id) || l.business_type === 'HOMEMADE_FOOD';
+            const logRecord: InventoryLog = {
               id: l.id,
-              shop_id: l.shop_id || shopId,
-              business_type: l.business_type || 'KIRANA_RETAIL',
+              shop_id: l.shop_id || (isHmf ? hmfShopId : primaryShopId),
+              business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
               product_id: l.product_id,
               change_qty: Number(l.change_qty) || 0,
               reason_type: l.reason_type,
@@ -1508,7 +1568,15 @@ class CloudSyncService {
               reference_id: l.reference_id || null,
               notes: l.notes || '',
               created_at: l.created_at || new Date().toISOString(),
-            });
+            };
+            if (isHmf) {
+              await homemadeDb.inventory_logs.put(logRecord);
+            } else {
+              await kiranaDb.inventory_logs.put(logRecord);
+            }
+            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
+              await db.inventory_logs.put(logRecord).catch(() => {});
+            }
             pulledCount++;
           }
         }
@@ -1526,10 +1594,11 @@ class CloudSyncService {
         if (error) throw new Error(error.message);
         if (txs && txs.length > 0) {
           for (const t of txs) {
-            await db.khata_transactions.put({
+            const isHmf = isHomemadeShopId(t.shop_id) || t.business_type === 'HOMEMADE_FOOD';
+            const txRecord: KhataTransaction = {
               id: t.id,
-              shop_id: t.shop_id || shopId,
-              business_type: t.business_type || 'KIRANA_RETAIL',
+              shop_id: t.shop_id || (isHmf ? hmfShopId : primaryShopId),
+              business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
               customer_id: t.customer_id,
               entry_type: t.entry_type,
               amount: Number(t.amount) || 0,
@@ -1538,7 +1607,15 @@ class CloudSyncService {
               running_balance_after: Number(t.running_balance_after) || 0,
               notes: t.notes || '',
               created_at: t.created_at || new Date().toISOString(),
-            });
+            };
+            if (isHmf) {
+              await homemadeDb.khata_transactions.put(txRecord);
+            } else {
+              await kiranaDb.khata_transactions.put(txRecord);
+            }
+            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
+              await db.khata_transactions.put(txRecord).catch(() => {});
+            }
             pulledCount++;
           }
         }
@@ -1556,10 +1633,11 @@ class CloudSyncService {
         if (error) throw new Error(error.message);
         if (invoices && invoices.length > 0) {
           for (const inv of invoices) {
-            await db.sales_invoices.put({
+            const isHmf = isHomemadeShopId(inv.shop_id) || inv.business_type === 'HOMEMADE_FOOD';
+            const invoiceRecord: SalesInvoice = {
               id: inv.id,
-              shop_id: inv.shop_id || shopId,
-              business_type: inv.business_type || 'KIRANA_RETAIL',
+              shop_id: inv.shop_id || (isHmf ? hmfShopId : primaryShopId),
+              business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
               invoice_number: inv.invoice_number,
               customer_id: inv.customer_id,
               subtotal_amount: Number(inv.subtotal_amount) || 0,
@@ -1571,7 +1649,15 @@ class CloudSyncService {
               udhari_added: Number(inv.udhari_added) || 0,
               status: inv.status,
               created_at: inv.created_at || new Date().toISOString(),
-            });
+            };
+            if (isHmf) {
+              await homemadeDb.sales_invoices.put(invoiceRecord);
+            } else {
+              await kiranaDb.sales_invoices.put(invoiceRecord);
+            }
+            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
+              await db.sales_invoices.put(invoiceRecord).catch(() => {});
+            }
             pulledCount++;
           }
         }
@@ -1589,10 +1675,11 @@ class CloudSyncService {
         if (error) throw new Error(error.message);
         if (saleItems && saleItems.length > 0) {
           for (const item of saleItems) {
-            await db.sale_items.put({
+            const isHmf = isHomemadeShopId(item.shop_id) || item.business_type === 'HOMEMADE_FOOD';
+            const itemRecord: SaleItem = {
               id: item.id,
-              shop_id: item.shop_id || shopId,
-              business_type: item.business_type || 'KIRANA_RETAIL',
+              shop_id: item.shop_id || (isHmf ? hmfShopId : primaryShopId),
+              business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
               invoice_id: item.invoice_id,
               product_id: item.product_id,
               product_name_snapshot: item.product_name_snapshot,
@@ -1600,7 +1687,15 @@ class CloudSyncService {
               unit_selling_price: Number(item.unit_selling_price) || 0,
               unit_purchase_cost: Number(item.unit_purchase_cost || (item as any).unit_cost_price) || 0,
               line_total: Number(item.line_total) || 0,
-            });
+            };
+            if (isHmf) {
+              await homemadeDb.sale_items.put(itemRecord);
+            } else {
+              await kiranaDb.sale_items.put(itemRecord);
+            }
+            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
+              await db.sale_items.put(itemRecord).catch(() => {});
+            }
             pulledCount++;
           }
         }
@@ -1608,8 +1703,11 @@ class CloudSyncService {
         console.warn('Pull sale items failed:', e);
       }
 
-      // 9. ACID Reconciliation: Recompute stock & udhari deterministically from deltas
-      await db.reconcileAllStockAndBalances();
+      // 9. ACID Reconciliation: Recompute stock & udhari deterministically from deltas across both databases
+      await Promise.all([
+        kiranaDb.reconcileAllStockAndBalances().catch(() => {}),
+        homemadeDb.reconcileAllStockAndBalances().catch(() => {}),
+      ]);
       await HomemadeFoodService.repairMixedBusinessProducts();
 
       const now = new Date().toISOString();
@@ -1755,21 +1853,33 @@ class CloudSyncService {
       return { processedCount: 0, errors: ['Supabase client not configured'] };
     }
 
-    const pendingItems = await db.sync_outbox
-      .where('status')
-      .equals('PENDING')
-      .sortBy('created_at');
+    const [kiranaItems, hmfItems] = await Promise.all([
+      kiranaDb.sync_outbox.where('status').equals('PENDING').sortBy('created_at'),
+      homemadeDb.sync_outbox.where('status').equals('PENDING').sortBy('created_at'),
+    ]);
 
-    if (pendingItems.length === 0) {
+    const combined = [
+      ...kiranaItems.map((item) => ({ item, targetDb: kiranaDb })),
+      ...hmfItems.map((item) => ({ item, targetDb: homemadeDb })),
+    ];
+
+    if (combined.length === 0) {
       return { processedCount: 0, errors: [] };
     }
 
     let processedCount = 0;
     const errors: string[] = [];
 
-    for (const item of pendingItems) {
+    for (const { item, targetDb } of combined) {
       try {
         if (item.operation === 'INSERT' || item.operation === 'UPDATE') {
+          if (item.table_name === 'products') {
+            const prodShopId = (item.payload?.shop_id as string) || (item.shop_id as string);
+            await this.ensureShopProfileExistsInCloud(
+              prodShopId,
+              isHomemadeShopId(prodShopId) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL'
+            );
+          }
           const { error } = await supabase.from(item.table_name).upsert(item.payload, { onConflict: 'id' });
           if (error) throw new Error(error.message);
         } else if (item.operation === 'DELETE') {
@@ -1781,7 +1891,7 @@ class CloudSyncService {
         }
 
         // Mark as SYNCED
-        await db.sync_outbox.update(item.id, {
+        await targetDb.sync_outbox.update(item.id, {
           status: 'SYNCED',
           error_message: null,
         });
@@ -1790,7 +1900,7 @@ class CloudSyncService {
         const msg = err instanceof Error ? err.message : String(err);
         errors.push(`Table ${item.table_name} (${item.id}): ${msg}`);
         const nextRetries = (item.retry_count || 0) + 1;
-        await db.sync_outbox.update(item.id, {
+        await targetDb.sync_outbox.update(item.id, {
           retry_count: nextRetries,
           error_message: msg,
           status: nextRetries >= 10 ? 'FAILED' : 'PENDING',

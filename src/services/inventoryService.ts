@@ -1,7 +1,8 @@
-import { db } from '../db/db';
+import { db, kiranaDb, homemadeDb } from '../db/db';
 import { Product, InventoryLog, ExpenseAndDrawing, UnitType, InventoryReason, BusinessType } from '../types';
 import { roundQty, roundCurrency, calculateProfitMarginPercent } from '../utils/math';
 import { generateUniqueStoreBarcode } from '../utils/barcodeGenerator';
+import { getHomemadeShopId, getBaseKiranaShopId, getActiveBusinessType, isHomemadeShopId } from '../utils/businessFirewall';
 import { cloudSyncService } from './cloudSyncService';
 
 export interface CreateProductInput {
@@ -48,15 +49,16 @@ export class InventoryService {
       barcode = generateUniqueStoreBarcode(existingSet);
     }
 
-    const shopProfile = await db.getShopProfile();
-    const defaultBiz: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
-    const resolvedBiz: BusinessType = input.business_type || defaultBiz;
-    const activeShopId =
+    const currentActiveBiz = getActiveBusinessType();
+    const shopProfile = await db.getShopProfile().catch(() => null);
+    const resolvedBiz: BusinessType = input.business_type || (currentActiveBiz === 'HOMEMADE_FOOD' ? 'HOMEMADE_FOOD' : (shopProfile?.business_type || 'KIRANA_RETAIL'));
+    const rawShopId =
       input.shop_id ||
       (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) ||
       shopProfile?.shop_id ||
       shopProfile?.id ||
       'current_shop';
+    const activeShopId = resolvedBiz === 'HOMEMADE_FOOD' ? getHomemadeShopId(rawShopId) : getBaseKiranaShopId(rawShopId);
 
     const newProduct: Product = {
       id,
@@ -67,14 +69,14 @@ export class InventoryService {
       search_keywords: input.search_keywords?.trim() || undefined,
       short_code: input.short_code.trim().toUpperCase(),
       barcode,
-      category: input.category.trim() || 'General',
+      category: input.category.trim() || (resolvedBiz === 'HOMEMADE_FOOD' ? 'Konkani Breakfast & Tiffin' : 'General'),
       unit_type: input.unit_type,
       purchase_price: roundCurrency(input.purchase_price),
       selling_price: roundCurrency(input.selling_price),
       mrp: roundCurrency(input.mrp || input.selling_price),
       current_stock: roundQty(input.current_stock || 0),
       low_stock_threshold: roundQty(input.low_stock_threshold ?? 5),
-      last_supplier_name: input.last_supplier_name?.trim() || 'General Wholesaler',
+      last_supplier_name: input.last_supplier_name?.trim() || (resolvedBiz === 'HOMEMADE_FOOD' ? 'In-House Kitchen' : 'General Wholesaler'),
       supplier_phone: input.supplier_phone?.trim() || undefined,
       wholesaler_id: input.wholesaler_id || null,
       loan_account_id: input.loan_account_id || null,
@@ -91,17 +93,19 @@ export class InventoryService {
       updated_at: new Date().toISOString(),
     };
 
-    await db.transaction('rw', [db.products, db.inventory_logs], async () => {
-      await db.products.add(newProduct);
+    const targetDb = resolvedBiz === 'HOMEMADE_FOOD' ? homemadeDb : kiranaDb;
+
+    await targetDb.transaction('rw', [targetDb.products, targetDb.inventory_logs], async () => {
+      await targetDb.products.put(newProduct);
 
       if (newProduct.current_stock > 0) {
         const log: InventoryLog = {
           id: `log-${Date.now()}-init`,
-          shop_id: newProduct.shop_id || 'current_shop',
+          shop_id: newProduct.shop_id || activeShopId,
           business_type: resolvedBiz,
           product_id: newProduct.id,
           change_qty: newProduct.current_stock,
-          reason_type: 'PURCHASE_IN',
+          reason_type: resolvedBiz === 'HOMEMADE_FOOD' ? 'BATCH_MADE_IN' : 'PURCHASE_IN',
           unit_cost_at_time: newProduct.purchase_price,
           reference_id: null,
           loan_account_id: newProduct.loan_account_id || null,
@@ -110,10 +114,25 @@ export class InventoryService {
             : 'Opening stock on product creation',
           created_at: new Date().toISOString(),
         };
-        await db.inventory_logs.add(log);
+        await targetDb.inventory_logs.put(log);
       }
     });
 
+    // Also place in active db proxy so UI updates immediately
+    await db.products.put(newProduct).catch(() => {});
+
+    // Queue sync in outbox so it is NEVER purged as stale
+    await targetDb.queueSync(
+      {
+        table_name: 'products',
+        operation: 'INSERT',
+        payload: newProduct as unknown as Record<string, unknown>,
+        shop_id: activeShopId,
+      },
+      targetDb.sync_outbox
+    ).catch(() => {});
+
+    // Sync to Supabase cloud
     cloudSyncService.syncProduct(newProduct);
     return newProduct;
   }
@@ -179,10 +198,14 @@ export class InventoryService {
         }
       }
 
-      await db.products.update(productId, patched);
+      const isHmf = existing.business_type === 'HOMEMADE_FOOD' || (existing.shop_id && isHomemadeShopId(existing.shop_id));
+      const targetDb = isHmf ? homemadeDb : kiranaDb;
+      await targetDb.products.update(productId, patched);
+      await db.products.update(productId, patched).catch(() => {});
     });
 
-    db.products.get(productId).then((p) => {
+    const activeDb = getActiveBusinessType() === 'HOMEMADE_FOOD' ? homemadeDb : kiranaDb;
+    activeDb.products.get(productId).then((p) => {
       if (p) cloudSyncService.syncProduct(p);
     });
   }
@@ -191,13 +214,16 @@ export class InventoryService {
    * Deletes a product
    */
   static async deleteProduct(productId: string): Promise<void> {
-    await db.transaction('rw', [db.products, db.inventory_logs, db.sync_outbox], async () => {
-      await db.products.delete(productId);
-      await db.queueSync(
-        { table_name: 'products', operation: 'DELETE', payload: { id: productId } },
-        db.sync_outbox
-      );
-    });
+    await Promise.all([
+      kiranaDb.products.delete(productId).catch(() => {}),
+      homemadeDb.products.delete(productId).catch(() => {}),
+      db.products.delete(productId).catch(() => {}),
+    ]);
+    const shopId = (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) || 'current_shop';
+    await db.queueSync(
+      { table_name: 'products', operation: 'DELETE', payload: { id: productId }, shop_id: shopId },
+      db.sync_outbox
+    ).catch(() => {});
     cloudSyncService.deleteProduct(productId);
   }
 
