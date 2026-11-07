@@ -996,9 +996,9 @@ export class KiranaDatabase extends Dexie {
 export const SmartKiranaDB = KiranaDatabase;
 export type SmartKiranaDB = KiranaDatabase;
 
-// Physical Two-Database Partitioning (REQ: Step 1)
-export const kiranaDb = new KiranaDatabase('SmartKiranaDB_Retail_v3');
-export const homemadeDb = new KiranaDatabase('SmartKiranaDB_Homemade_v3');
+// Physical Standalone Production Database for Pure Kirana Retail POS
+export const kiranaDb = new KiranaDatabase('SmartKirana_Retail_Production_DB');
+export const homemadeDb = new KiranaDatabase('SmartKirana_Isolated_Scratch_DB');
 
 /**
  * Returns the physically isolated database according to the active business type
@@ -1009,7 +1009,7 @@ export function getActiveDb(activeBusinessType?: BusinessType): KiranaDatabase {
 }
 
 /**
- * Transparent Proxy delegating all operations to the currently active database
+ * Clean delegation to the active isolated database with safe product fallback
  */
 export const db = new Proxy(kiranaDb, {
   get(_target, prop, receiver) {
@@ -1048,7 +1048,7 @@ export const db = new Proxy(kiranaDb, {
  */
 export async function performCleanSlateV3IfNeeded(): Promise<void> {
   if (typeof localStorage === 'undefined') return;
-  if (localStorage.getItem('clean_slate_v3_done') === 'true') return;
+  if (localStorage.getItem('clean_slate_kirana_pure_done') === 'true') return;
 
   try {
     if (await Dexie.exists('SmartKiranaDB')) {
@@ -1057,21 +1057,13 @@ export async function performCleanSlateV3IfNeeded(): Promise<void> {
     }
 
     await kiranaDb.clearAllRecordsToEmpty().catch(() => {});
-    await homemadeDb.clearAllRecordsToEmpty().catch(() => {});
-
     await kiranaDb.initializeDatabase({ seedDemo: true }).catch(() => {});
-    await homemadeDb.initializeDatabase({ seedDemo: false }).catch(() => {});
-    await homemadeDb.updateShopProfile({
-      business_type: 'HOMEMADE_FOOD',
-      invoice_prefix: 'HMF',
-      shop_name: 'Shree Ganesh Gruh Udyog',
-    }).catch(() => {});
 
-    localStorage.setItem('clean_slate_v3_done', 'true');
-    console.log('Clean Slate v3: Two physically isolated databases initialized.');
+    localStorage.setItem('clean_slate_kirana_pure_done', 'true');
+    console.log('Clean Slate: Standalone Pure Kirana Retail Database initialized.');
   } catch (err) {
-    console.warn('Clean slate v3 initialization error:', err);
-    localStorage.setItem('clean_slate_v3_done', 'true');
+    console.warn('Clean slate initialization error:', err);
+    localStorage.setItem('clean_slate_kirana_pure_done', 'true');
   }
 }
 
