@@ -5,7 +5,6 @@ import { BackupService } from '../../services/backupService';
 import { cloudSyncService, CloudSyncStatus } from '../../services/cloudSyncService';
 import { authService } from '../../services/authService';
 import { notificationService } from '../../services/notificationService';
-import { HomemadeFoodService } from '../../services/homemadeFoodService';
 import { SecurityAuditService } from '../../services/securityAuditService';
 import { getActiveShopId } from '../../utils/businessFirewall';
 import { useAuth } from '../../context/AuthContext';
@@ -388,46 +387,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
     }
   };
 
-  const handleSeedHomemadeFoodCatalog = async () => {
-    try {
-      const res = await HomemadeFoodService.seedHomemadeFoodCatalog();
-      await cloudSyncService.syncAllToCloud();
-      const updatedProfile = await db.getShopProfile();
-      setProfile(updatedProfile);
-      setStatusMsg({
-        type: 'success',
-        text: `🍲 Homemade Food Menu loaded (${res.seededCount} new items added, ${res.totalHomemadeCount} total items ready with HMF- billing)!`,
-      });
-      if (onDataReset) onDataReset();
-    } catch (e: unknown) {
-      setStatusMsg({
-        type: 'error',
-        text: 'Failed to load Homemade Food menu: ' + (e instanceof Error ? e.message : String(e)),
-      });
-    }
-  };
-
-  const handleSwitchBusinessFromSettings = async (targetType: BusinessType) => {
-    try {
-      const res = await HomemadeFoodService.switchBusinessWorkspace(targetType, {
-        seedCatalogIfEmpty: targetType === 'HOMEMADE_FOOD',
-      });
-      setProfile(res.activeProfile);
-      setStatusMsg({
-        type: 'success',
-        text:
-          targetType === 'HOMEMADE_FOOD'
-            ? `🍲 Switched active workspace to Homemade Food & Gruh Udyog (${res.productCount} products, Prefix: ${res.activeProfile.invoice_prefix || 'HMF'})!`
-            : `🏪 Switched active workspace to Kirana Retail Store (${res.productCount} products, Prefix: ${res.activeProfile.invoice_prefix || 'KRN'})!`,
-      });
-      if (onDataReset) onDataReset();
-    } catch (e: unknown) {
-      setStatusMsg({
-        type: 'error',
-        text: 'Failed switching business: ' + (e instanceof Error ? e.message : String(e)),
-      });
-    }
-  };
 
   const handleExecuteDangerAction = async () => {
     if (!pendingDangerAction) return;
@@ -477,7 +436,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
-          text: `Emergency JSON backup downloaded. Sales & khata transactions for ${activeBiz === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Retail'} permanently cleared in local Dexie & Supabase. Catalog preserved.`,
+          text: `Emergency JSON backup downloaded. Sales & khata transactions for Kirana Retail permanently cleared in local Dexie & Supabase. Catalog preserved.`,
         });
       } else if (pendingDangerAction === 'WIPE_ACTIVE_BUSINESS') {
         await cloudSyncService.executeStoreVaultReset('WIPE_ACTIVE_BUSINESS', true, activeBiz, activeShopId);
@@ -486,7 +445,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
-          text: `Emergency JSON backup downloaded. All ${activeBiz === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Retail'} products & operational records wiped! Other business records remain 100% intact.`,
+          text: `Emergency JSON backup downloaded. All Kirana Retail products & operational records wiped!`,
         });
       } else if (pendingDangerAction === 'WIPE_EMPTY') {
         await cloudSyncService.executeStoreVaultReset('WIPE_ACTIVE_BUSINESS', true, activeBiz, activeShopId);
@@ -495,7 +454,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         await refreshRealSalesCount();
         setStatusMsg({
           type: 'info',
-          text: `Emergency JSON backup downloaded. All ${activeBiz === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Retail'} products & operational records wiped! Other business records remain 100% intact.`,
+          text: `Emergency JSON backup downloaded. All Kirana Retail products & operational records wiped!`,
         });
       } else if (pendingDangerAction === 'RESET_DEMO') {
         await cloudSyncService.executeStoreVaultReset('WIPE_ALL_FRESH_STORE', true);
@@ -983,95 +942,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
           <h2 className="text-lg font-semibold text-slate-800 dark:text-white flex items-center gap-2">
             <Store className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            Shop Identity, Business Category &amp; Contact
+            Shop Identity, Kirana Retail &amp; Contact
           </h2>
-
-          {profile.business_type === 'HOMEMADE_FOOD' && (
-            <button
-              type="button"
-              data-testid="settings-seed-homemade-btn"
-              onClick={handleSeedHomemadeFoodCatalog}
-              className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95"
-            >
-              <span>🍲 Load Homemade Food Menu (Laddus, Modak, Ghavane, Bhakri...)</span>
-            </button>
-          )}
         </div>
 
-        {/* Multi-Business Category & Workspace Switcher */}
-        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <label className="block text-xs font-bold uppercase text-slate-700 dark:text-slate-200">
-                Active Business Category &amp; Workspace Isolation
-              </label>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Switch between your Kirana Retail Store and Homemade Food (Gruh Udyog) business with 100% separate products, bills &amp; P&amp;L reports.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                data-testid="settings-switch-kirana-btn"
-                onClick={() => handleSwitchBusinessFromSettings('KIRANA_RETAIL')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-                  (profile.business_type || 'KIRANA_RETAIL') === 'KIRANA_RETAIL'
-                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
-                }`}
-              >
-                🏪 Kirana Store
-              </button>
-              <button
-                type="button"
-                data-testid="settings-switch-homemade-btn"
-                onClick={() => handleSwitchBusinessFromSettings('HOMEMADE_FOOD')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-                  profile.business_type === 'HOMEMADE_FOOD'
-                    ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
-                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700'
-                }`}
-              >
-                🍲 Homemade Food / Gruh Udyog
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-            <div>
-              <label className="block text-[11px] font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
-                Business Type (`business_type`)
-              </label>
-              <select
-                value={profile.business_type || 'KIRANA_RETAIL'}
-                onChange={(e) => {
-                  const nextType = e.target.value as BusinessType;
-                  setProfile({
-                    ...profile,
-                    business_type: nextType,
-                    invoice_prefix: nextType === 'HOMEMADE_FOOD' ? 'HMF' : profile.invoice_prefix === 'HMF' ? 'KRN' : profile.invoice_prefix || 'KRN',
-                  });
-                }}
-                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg text-xs font-bold"
-              >
-                <option value="KIRANA_RETAIL">🏪 General / Kirana Store (KIRANA_RETAIL)</option>
-                <option value="HOMEMADE_FOOD">🍲 Homemade Food &amp; Gruh Udyog (HOMEMADE_FOOD)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-semibold uppercase text-slate-600 dark:text-slate-300 mb-1">
-                Invoice Number Prefix (`invoice_prefix`)
-              </label>
-              <input
-                type="text"
-                value={profile.invoice_prefix || (profile.business_type === 'HOMEMADE_FOOD' ? 'HMF' : 'KRN')}
-                onChange={(e) => setProfile({ ...profile, invoice_prefix: e.target.value.toUpperCase() })}
-                placeholder="e.g. KRN or HMF"
-                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg text-xs font-mono font-bold uppercase"
-              />
-            </div>
-          </div>
+        <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-2">
+          <label className="block text-[11px] font-semibold uppercase text-slate-600 dark:text-slate-300">
+            Invoice Number Prefix (`invoice_prefix`)
+          </label>
+          <input
+            type="text"
+            value={profile.invoice_prefix || 'KRN'}
+            onChange={(e) => setProfile({ ...profile, invoice_prefix: e.target.value.toUpperCase() })}
+            placeholder="e.g. KRN"
+            className="w-full max-w-xs px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-lg text-xs font-mono font-bold uppercase"
+          />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1502,74 +1387,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
           </button>
         </div>
 
-        {/* Action Buttons - Tailored per active business category */}
+        {/* Action Buttons - Kirana retail database actions */}
         <div className="space-y-4">
           <div className="flex flex-wrap gap-3 pt-1">
-            {profile?.business_type === 'HOMEMADE_FOOD' ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleClearTransactions}
-                  disabled={!hasPermission('DATA_WIPE')}
-                  className="px-4 py-2.5 border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-900 dark:text-amber-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
-                >
-                  <Trash2 className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-                  Clear Sales &amp; Transactions (Keep Food Menu)
-                </button>
+            <button
+              type="button"
+              onClick={handleClearTransactions}
+              disabled={!hasPermission('DATA_WIPE')}
+              className="px-4 py-2.5 border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-900 dark:text-amber-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
+            >
+              <Trash2 className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+              Clear Sales &amp; Transactions (Keep Products)
+            </button>
 
-                <button
-                  type="button"
-                  data-testid="wipe-active-business-btn"
-                  onClick={handleWipeActiveBusiness}
-                  disabled={!hasPermission('DATA_WIPE')}
-                  className="px-4 py-2.5 border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-900 dark:text-red-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
-                >
-                  <Trash2 className="w-4 h-4 text-red-600" />
-                  ⚠️ Wipe Homemade Business Data
-                </button>
+            <button
+              type="button"
+              data-testid="wipe-active-business-btn"
+              onClick={handleWipeActiveBusiness}
+              disabled={!hasPermission('DATA_WIPE')}
+              className="px-4 py-2.5 border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-900 dark:text-red-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
+            >
+              <Trash2 className="w-4 h-4 text-red-600" />
+              ⚠️ Wipe Kirana Store Data
+            </button>
 
-                <button
-                  type="button"
-                  data-testid="danger-load-homemade-menu-btn"
-                  onClick={handleSeedHomemadeFoodCatalog}
-                  className="px-4 py-2.5 border border-amber-400 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition shadow-xs"
-                >
-                  <span>🍲 Load 8-Item Homemade Food Menu</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={handleClearTransactions}
-                  disabled={!hasPermission('DATA_WIPE')}
-                  className="px-4 py-2.5 border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-900 dark:text-amber-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
-                >
-                  <Trash2 className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-                  Clear Sales &amp; Transactions (Keep Products)
-                </button>
-
-                <button
-                  type="button"
-                  data-testid="wipe-active-business-btn"
-                  onClick={handleWipeActiveBusiness}
-                  disabled={!hasPermission('DATA_WIPE')}
-                  className="px-4 py-2.5 border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 text-red-900 dark:text-red-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-40"
-                >
-                  <Trash2 className="w-4 h-4 text-red-600" />
-                  ⚠️ Wipe Kirana Store Data
-                </button>
-
-                <button
-                  type="button"
-                  data-testid="danger-import-kirana-catalog-btn"
-                  onClick={handleSeedDemoProducts}
-                  className="px-4 py-2.5 border border-emerald-400 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition shadow-xs"
-                >
-                  <span>🛒 Import Kirana Catalog</span>
-                </button>
-              </>
-            )}
+            <button
+              type="button"
+              data-testid="danger-import-kirana-catalog-btn"
+              onClick={handleSeedDemoProducts}
+              className="px-4 py-2.5 border border-emerald-400 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition shadow-xs"
+            >
+              <span>🛒 Import Kirana Catalog</span>
+            </button>
           </div>
 
           {/* Expanded PIN & "CONFIRM" Guardrail (Iteration 6) */}
@@ -1585,7 +1434,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
                   </span>
                   <p className="text-sm font-extrabold text-slate-900 dark:text-white">
                     {pendingDangerAction === 'CLEAR_TRANSACTIONS' && 'Clear Sales, Invoices & Khata Transactions (Preserve Products)'}
-                    {pendingDangerAction === 'WIPE_ACTIVE_BUSINESS' && `Wipe Only Active Business (${profile?.business_type === 'HOMEMADE_FOOD' ? 'Homemade Food' : 'Kirana Retail'})`}
+                    {pendingDangerAction === 'WIPE_ACTIVE_BUSINESS' && 'Wipe Kirana Store Data'}
                     {pendingDangerAction === 'WIPE_EMPTY' && 'Wipe All Records (100% Empty Fresh Store)'}
                     {pendingDangerAction === 'RESET_DEMO' && 'Reset Entire Database to 25 Sample Kirana Products'}
                   </p>

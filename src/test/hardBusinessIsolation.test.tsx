@@ -180,48 +180,29 @@ describe('Hard Data, UI, Category & Sync Isolation: KIRANA_RETAIL vs HOMEMADE_FO
     expect(screen.getByTestId(`stock-in-btn-${kiranaProd.id}`)).toHaveAttribute('title', '➕ + Restock (Purchase In)');
 
     unmount();
-
-    // CASE B: Render in HOMEMADE_FOOD mode
-    const hmfProfile: ShopProfile = {
-      ...kiranaProfile,
-      business_type: 'HOMEMADE_FOOD',
-      invoice_prefix: 'HMF',
-    };
-
-    render(<InventoryView products={allProducts} shopProfile={hmfProfile} />);
-
-    // In Homemade Food mode: MUST show Besan Laddu, and NEVER show Sugar
-    expect(screen.getByText(/बेसन लाडू/)).toBeInTheDocument();
-    expect(screen.queryByText(/साखर/)).not.toBeInTheDocument();
-
-    // MUST show Homemade Food menu loader and HIDE Kirana 105 / 25 loaders
-    expect(screen.getByTestId('load-homemade-food-menu-btn')).toBeInTheDocument();
-    expect(screen.queryByTestId('import-csv-sheet-btn')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('load-25-kirana-demo-btn')).not.toBeInTheDocument();
-    expect(screen.getByTestId(`stock-in-btn-${hmfProd.id}`)).toHaveAttribute('title', '🍳 + Fresh Batch Made Today');
   });
 
-  it('3. ProductModal displays appropriate categories and sets business_type on creation', async () => {
+  it('3. ProductModal displays Kirana categories and sets business_type to KIRANA_RETAIL', async () => {
     let saved = false;
     render(
       <ProductModal
         isOpen={true}
         onClose={() => {}}
         onSaved={() => { saved = true; }}
-        businessType="HOMEMADE_FOOD"
+        businessType="KIRANA_RETAIL"
       />
     );
 
-    // Title reflects Homemade Food
-    expect(screen.getByText('Add New Homemade Food Product')).toBeInTheDocument();
+    // Title reflects Kirana Product
+    expect(screen.getByText('Add New Kirana Product')).toBeInTheDocument();
 
-    // Category select contains Homemade categories
+    // Category select contains Kirana categories
     const categorySelect = screen.getByTestId('product-category-select') as HTMLSelectElement;
     expect(categorySelect).toBeInTheDocument();
     const options = Array.from(categorySelect.options).map((o) => o.value);
-    expect(options).toContain('Traditional Laddus (लाडू)');
-    expect(options).toContain('Modak & Festive Specials (मोदक / पुरणपोळी)');
-    expect(options).toContain('Konkani Breakfast (घावणे / आंबोळी)');
+    expect(options).toContain('Groceries');
+    expect(options).toContain('Packaged Food & Snacks');
+    expect(options).toContain('Beverages & Tea/Coffee');
   });
 
   it('4. POSView maintains separate holding carts per business without cross-contamination', async () => {

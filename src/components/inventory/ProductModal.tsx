@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Product, UnitType, Wholesaler, LoanAccount, BusinessType, KIRANA_CATEGORIES, HOMEMADE_FOOD_CATEGORIES } from '../../types';
+import { Product, UnitType, Wholesaler, LoanAccount, BusinessType, KIRANA_CATEGORIES } from '../../types';
 import { CreateProductInput, InventoryService } from '../../services/inventoryService';
 import { WholesalerService } from '../../services/wholesalerService';
 import { LoanAccountService } from '../../services/loanAccountService';
@@ -8,7 +8,6 @@ import { generateUniqueStoreBarcode, getBarcodePatternBars } from '../../utils/b
 import { compressProductImage } from '../../utils/imageCompressor';
 import { generateSmartProductThumbnail, normalizeProductImageToSquare } from '../../utils/productImageEngine';
 import { db } from '../../db/db';
-import { getActiveBusinessType } from '../../utils/businessFirewall';
 import {
   X,
   Sparkles,
@@ -38,10 +37,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   onSaved,
   businessType,
 }) => {
-  const effectiveBusinessType: BusinessType =
-    productToEdit?.business_type || businessType || getActiveBusinessType();
-  const isHomemade = effectiveBusinessType === 'HOMEMADE_FOOD';
-  const activeCategories = isHomemade ? HOMEMADE_FOOD_CATEGORIES : KIRANA_CATEGORIES;
+  const effectiveBusinessType: BusinessType = productToEdit?.business_type || businessType || 'KIRANA_RETAIL';
+  const activeCategories = KIRANA_CATEGORIES;
 
   const [formData, setFormData] = useState<CreateProductInput>({
     name: '',
@@ -49,7 +46,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     search_keywords: '',
     short_code: '',
     barcode: '',
-    category: isHomemade ? HOMEMADE_FOOD_CATEGORIES[0] : 'Groceries',
+    category: 'Groceries',
     unit_type: 'PCS',
     purchase_price: 0,
     selling_price: 0,
@@ -70,7 +67,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     image_url: null,
     expiry_date: null,
     is_quick_tap: false,
-    business_type: effectiveBusinessType,
+    business_type: 'KIRANA_RETAIL',
   });
 
   const [wholesalers, setWholesalers] = useState<Wholesaler[]>([]);
@@ -178,16 +175,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         wholesaler_id: productToEdit.wholesaler_id || null,
         loan_account_id: productToEdit.loan_account_id || null,
         is_loan_funded: Boolean(productToEdit.is_loan_funded || productToEdit.loan_account_id),
-        raw_material_cost: productToEdit.raw_material_cost || 0,
-        equipment_fuel_cost: productToEdit.equipment_fuel_cost || 0,
-        labour_cost: productToEdit.labour_cost || 0,
-        wholesale_price: productToEdit.wholesale_price || 0,
-        shelf_life_days: productToEdit.shelf_life_days,
-        batch_notes: productToEdit.batch_notes || '',
+        raw_material_cost: 0,
+        equipment_fuel_cost: 0,
+        labour_cost: 0,
+        wholesale_price: 0,
+        shelf_life_days: undefined,
+        batch_notes: '',
         image_url: productToEdit.image_url || null,
         expiry_date: productToEdit.expiry_date || null,
         is_quick_tap: productToEdit.is_quick_tap,
-        business_type: productToEdit.business_type || effectiveBusinessType,
+        business_type: 'KIRANA_RETAIL',
       });
     } else {
       setIsFromLoan(false);
@@ -199,7 +196,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         search_keywords: '',
         short_code: '',
         barcode: initialBarcode,
-        category: isHomemade ? HOMEMADE_FOOD_CATEGORIES[0] : 'Groceries',
+        category: 'Groceries',
         unit_type: 'PCS',
         purchase_price: 0,
         selling_price: 0,
@@ -220,7 +217,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         image_url: null,
         expiry_date: null,
         is_quick_tap: false,
-        business_type: effectiveBusinessType,
+        business_type: 'KIRANA_RETAIL',
       });
       generateFreshBarcode().then((uniqueCode) => {
         setFormData((prev) => ({
@@ -229,15 +226,11 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         }));
       });
     }
-  }, [productToEdit, isOpen, effectiveBusinessType, isHomemade]);
+  }, [productToEdit, isOpen]);
 
   if (!isOpen) return null;
 
   const margin = calculateProfitMarginPercent(formData.purchase_price, formData.selling_price);
-  const wholesaleMargin = calculateProfitMarginPercent(formData.purchase_price, formData.wholesale_price || 0);
-  const wholesaleProfit = (formData.wholesale_price || 0) > formData.purchase_price ? (formData.wholesale_price || 0) - formData.purchase_price : 0;
-  const directMargin = calculateProfitMarginPercent(formData.purchase_price, formData.selling_price);
-  const directProfit = formData.selling_price > formData.purchase_price ? formData.selling_price - formData.purchase_price : 0;
   const isLoose = formData.unit_type === 'KG_LOOSE' || formData.unit_type === 'LTR';
   const barcodeBars = getBarcodePatternBars(formData.barcode || '2000000000000');
 
@@ -425,17 +418,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60">
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-              {isHomemade && <span>🍲</span>}
-              <span>
-                {productToEdit
-                  ? (isHomemade ? 'Edit Homemade Food Product' : 'Edit Kirana Product')
-                  : (isHomemade ? 'Add New Homemade Food Product' : 'Add New Kirana Product')}
-              </span>
+              <span>{productToEdit ? 'Edit Kirana Product' : 'Add New Kirana Product'}</span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {isHomemade
-                ? 'Configure production cost breakdown, retailer wholesale rate, customer MRP, and batch stock'
-                : 'Configure inventory item, GS1 barcode, wholesaler link, and image'}
+              Configure inventory item, GS1 barcode, wholesaler link, and image
             </p>
           </div>
           <button
@@ -619,29 +605,15 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 }}
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium"
               >
-                {isHomemade ? (
-                  <>
-                    <option value="PCS">PCS (Per Piece - Chapati, Bhakri, Modak)</option>
-                    <option value="PLATE">PLATE (Per Plate - Ghavane, Amboli, Kande Pohe, Upma)</option>
-                    <option value="KG_LOOSE">KG_LOOSE (By Weight Kg/Gm - Laddus, Khobryachi Vadi)</option>
-                    <option value="DOZEN">DOZEN (Per Dozen / 12 Pcs Box)</option>
-                    <option value="PACK">PACK (Fixed Box / Packet)</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="PCS">PCS (Per Packet / Piece)</option>
-                    <option value="KG_LOOSE">KG_LOOSE (Loose Weight Kg / Grams)</option>
-                    <option value="LTR">LTR (Liquid Liter / ml)</option>
-                    <option value="PACK">PACK (Box / Multipack)</option>
-                  </>
-                )}
+                <option value="PCS">PCS (Per Packet / Piece)</option>
+                <option value="KG_LOOSE">KG_LOOSE (Loose Weight Kg / Grams)</option>
+                <option value="LTR">LTR (Liquid Liter / ml)</option>
+                <option value="PACK">PACK (Box / Multipack)</option>
               </select>
             </div>
 
-            {/* Mode A: Kirana Pricing Fields */}
-            {!isHomemade && (
-              <>
-                {/* Purchase Price */}
+            {/* Kirana Pricing Fields */}
+            {/* Purchase Price */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wide">
                     Purchase Price (₹ Wholesale Cost) *
@@ -729,192 +701,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                     className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   />
                 </div>
-              </>
-            )}
 
-            {/* Mode B: Homemade Food Cost Breakdown & Dual Pricing */}
-            {isHomemade && (
-              <>
-                {/* Production Cost Breakdown Card (Full Width) */}
-                <div
-                  className="sm:col-span-2 p-4 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl space-y-3"
-                  data-testid="making-cost-breakdown-card"
-                >
-                  <div className="flex items-center justify-between border-b border-amber-200/80 dark:border-amber-800/80 pb-2">
-                    <label className="flex items-center gap-1.5 text-xs font-bold text-amber-900 dark:text-amber-200 uppercase tracking-wide">
-                      <span>🍳 Making / Production Cost Breakdown (Per Unit / Kg)</span>
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-amber-800 dark:text-amber-300 font-medium">Total Making Cost:</span>
-                      <span className="text-sm font-extrabold text-amber-950 dark:text-amber-100 bg-amber-200/80 dark:bg-amber-900/80 px-2.5 py-0.5 rounded-lg font-mono">
-                        ₹{(Number(formData.purchase_price) || 0).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-amber-950 dark:text-amber-200 mb-1">
-                        1. Raw Material Cost (₹) *
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        data-testid="raw-material-cost-input"
-                        value={formData.raw_material_cost || ''}
-                        onChange={(e) => {
-                          const raw = parseFloat(e.target.value) || 0;
-                          const equip = formData.equipment_fuel_cost || 0;
-                          const labour = formData.labour_cost || 0;
-                          const total = Math.round((raw + equip + labour) * 100) / 100;
-                          setFormData((prev) => ({
-                            ...prev,
-                            raw_material_cost: raw,
-                            purchase_price: total,
-                          }));
-                        }}
-                        placeholder="Flour, Jaggery, Sugar, Oil"
-                        className="w-full px-3 py-2 border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-semibold text-amber-950 dark:text-amber-200 mb-1">
-                        2. Equipment / Gas / Packaging (₹) *
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        data-testid="equipment-fuel-cost-input"
-                        value={formData.equipment_fuel_cost || ''}
-                        onChange={(e) => {
-                          const equip = parseFloat(e.target.value) || 0;
-                          const raw = formData.raw_material_cost || 0;
-                          const labour = formData.labour_cost || 0;
-                          const total = Math.round((raw + equip + labour) * 100) / 100;
-                          setFormData((prev) => ({
-                            ...prev,
-                            equipment_fuel_cost: equip,
-                            purchase_price: total,
-                          }));
-                        }}
-                        placeholder="LPG, Boxes, Wear &amp; Tear"
-                        className="w-full px-3 py-2 border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-semibold text-amber-950 dark:text-amber-200 mb-1">
-                        3. Labour / Making Effort (₹) *
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        data-testid="labour-cost-input"
-                        value={formData.labour_cost || ''}
-                        onChange={(e) => {
-                          const labour = parseFloat(e.target.value) || 0;
-                          const raw = formData.raw_material_cost || 0;
-                          const equip = formData.equipment_fuel_cost || 0;
-                          const total = Math.round((raw + equip + labour) * 100) / 100;
-                          setFormData((prev) => ({
-                            ...prev,
-                            labour_cost: labour,
-                            purchase_price: total,
-                          }));
-                        }}
-                        placeholder="Cooking labour effort"
-                        className="w-full px-3 py-2 border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-900 dark:text-white"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[11px] text-amber-900 dark:text-amber-300 pt-1 border-t border-amber-200/60 dark:border-amber-800/60 gap-1">
-                    <span>Formula: Raw Material (₹{formData.raw_material_cost || 0}) + Gas/Pack (₹{formData.equipment_fuel_cost || 0}) + Labour (₹{formData.labour_cost || 0})</span>
-                    <span className="font-bold">Total Making Cost = ₹{(Number(formData.purchase_price) || 0).toFixed(2)}</span>
-                  </div>
-                </div>
-
-                {/* Dual Selling Prices for Homemade Food: 1. Wholesale Rate for Retailers */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
-                      🏪 Wholesale Price (₹ For Retailers) *
-                    </label>
-                    {wholesaleMargin > 0 && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
-                        +{formatINR(wholesaleProfit)} ({wholesaleMargin.toFixed(1)}%)
-                      </span>
-                    )}
-                  </div>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-2.5 text-slate-400 dark:text-slate-500 font-semibold text-sm">₹</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      data-testid="wholesale-price-input"
-                      value={formData.wholesale_price || ''}
-                      onChange={(e) => setFormData({ ...formData, wholesale_price: parseFloat(e.target.value) || 0 })}
-                      className="w-full pl-8 pr-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm font-semibold text-blue-900 dark:text-blue-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
-
-                {/* 2. Direct Customer Retail Price */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
-                      👤 Direct Customer Price (₹ Retail) *
-                    </label>
-                    {directMargin > 0 && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                        +{formatINR(directProfit)} ({directMargin.toFixed(1)}%)
-                      </span>
-                    )}
-                  </div>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-2.5 text-slate-400 dark:text-slate-500 font-semibold text-sm">₹</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      data-testid="selling-price-input"
-                      value={formData.selling_price || ''}
-                      onChange={(e) => setFormData({ ...formData, selling_price: parseFloat(e.target.value) || 0 })}
-                      className="w-full pl-8 pr-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm font-semibold text-emerald-900 dark:text-emerald-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
-
-                {/* 3. MRP / Printed Box Price */}
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 uppercase tracking-wide">
-                    🏷️ MRP / Printed Box Price (₹)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-2.5 text-slate-400 dark:text-slate-500 font-semibold text-sm">₹</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      data-testid="mrp-input"
-                      value={formData.mrp || ''}
-                      onChange={(e) => setFormData({ ...formData, mrp: parseFloat(e.target.value) || 0 })}
-                      className="w-full pl-8 pr-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
-              </>
-            )}
 
             {/* Current Stock (Supports 5.250 kg, 3.500 kg, 0.500 kg) */}
             <div>
@@ -995,9 +783,8 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               )}
             </div>
 
-            {/* Wholesaler / Distributor Dropdown + Inline Quick-Add (Kirana Mode Only) */}
-            {!isHomemade && (
-              <div className="sm:col-span-2 p-3.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl space-y-3" data-testid="wholesaler-section">
+            {/* Wholesaler / Distributor Dropdown + Inline Quick-Add */}
+            <div className="sm:col-span-2 p-3.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl space-y-3" data-testid="wholesaler-section">
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wide">
                     <Truck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
@@ -1089,55 +876,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                   </div>
                 )}
               </div>
-            )}
-
-            {/* Homemade Food: Freshness Duration & Batch Recipe Notes (Replaces Wholesaler) */}
-            {isHomemade && (
-              <div
-                className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-orange-50/50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/60 rounded-xl"
-                data-testid="homemade-freshness-section"
-              >
-                <div>
-                  <label className="block text-xs font-bold text-orange-950 dark:text-orange-200 mb-1 uppercase tracking-wide">
-                    Shelf Life / Freshness (Days)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    data-testid="shelf-life-days-input"
-                    value={formData.shelf_life_days || ''}
-                    onChange={(e) => setFormData({ ...formData, shelf_life_days: parseInt(e.target.value) || undefined })}
-                    placeholder="e.g. 1 day (Chapati/Amboli), 15 days (Laddus)"
-                    className="w-full px-3 py-2 border border-orange-300 dark:border-orange-700 bg-white dark:bg-slate-800 rounded-lg text-xs font-medium text-slate-900 dark:text-white placeholder-slate-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-orange-950 dark:text-orange-200 mb-1 uppercase tracking-wide">
-                    Fresh Batch / Recipe Notes
-                  </label>
-                  <input
-                    type="text"
-                    data-testid="batch-notes-input"
-                    value={formData.batch_notes || ''}
-                    onChange={(e) => setFormData({ ...formData, batch_notes: e.target.value })}
-                    placeholder="e.g. 100% Pure Ghee, Dry Fruit Filling, Fresh Coconut"
-                    className="w-full px-3 py-2 border border-orange-300 dark:border-orange-700 bg-white dark:bg-slate-800 rounded-lg text-xs font-medium text-slate-900 dark:text-white placeholder-slate-400"
-                  />
-                </div>
-              </div>
-            )}
 
             {/* Loan Amount Capital Tracking Selector + Inline Quick-Add */}
             <div className="sm:col-span-2 p-3.5 bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-xl space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <label className="flex items-center gap-1.5 text-xs font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wide">
                   <Landmark className="w-4 h-4 text-purple-600 dark:text-purple-400" />
-                  <span>
-                    {isHomemade
-                      ? 'Funded from Loan Amount? (Separate Loan P&L & Daily Set-Aside)'
-                      : 'Purchased from Loan Amount? (Separate Loan P&L & Daily Set-Aside)'}
-                  </span>
+                  <span>Purchased from Loan Amount? (Separate Loan P&L &amp; Daily Set-Aside)</span>
                 </label>
 
                 <div className="flex items-center gap-2">
@@ -1154,7 +899,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                         : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700'
                     }`}
                   >
-                    No ({isHomemade ? 'Own Capital' : 'Own Shop Capital'})
+                    No (Own Shop Capital)
                   </button>
                   <button
                     type="button"

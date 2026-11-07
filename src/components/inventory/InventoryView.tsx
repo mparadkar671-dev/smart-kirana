@@ -1,13 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Product, ShopProfile, BusinessType, Wholesaler, KIRANA_CATEGORIES, HOMEMADE_FOOD_CATEGORIES } from '../../types';
+import { Product, ShopProfile, BusinessType, Wholesaler, KIRANA_CATEGORIES } from '../../types';
 import { ProductModal } from './ProductModal';
 import { StockAdjustmentModal } from './StockAdjustmentModal';
 import { RestockAlertsView } from './RestockAlertsView';
-import { InterBusinessTransferModal } from './InterBusinessTransferModal';
-import { BatchSpoilageModal } from './BatchSpoilageModal';
 import { WholesalerPurchaseModal } from './WholesalerPurchaseModal';
 import { InventoryService } from '../../services/inventoryService';
-import { HomemadeFoodService, isHomemadeFoodCategoryOrName } from '../../services/homemadeFoodService';
 import { filterProductsForBusiness, getActiveBusinessType } from '../../utils/businessFirewall';
 import {
   MAHARASHTRA_105_KIRANA_CATALOG,
@@ -51,8 +48,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   shopProfile,
   onRefresh,
 }) => {
-  const activeBusinessType: BusinessType = shopProfile?.business_type || getActiveBusinessType();
-  const isHomemade = activeBusinessType === 'HOMEMADE_FOOD';
+  const activeBusinessType: BusinessType = 'KIRANA_RETAIL';
 
   // Strict business isolation defense-in-depth:
   const businessProducts = useMemo(
@@ -72,11 +68,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [adjustmentMode, setAdjustmentMode] = useState<'STOCK_IN' | 'STOCK_OUT'>('STOCK_IN');
 
-  // v4.0.0 Enterprise Modals
-  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
-  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
-  const [selectedBatchProduct, setSelectedBatchProduct] = useState<Product | null>(null);
   const [wholesalers, setWholesalers] = useState<Wholesaler[]>([]);
 
   useEffect(() => {
@@ -133,7 +125,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     return matchesSearch && matchesCat;
   });
 
-  const standardCategories = isHomemade ? HOMEMADE_FOOD_CATEGORIES : KIRANA_CATEGORIES;
+  const standardCategories = KIRANA_CATEGORIES;
   const categories = Array.from(
     new Set([...standardCategories, ...businessProducts.map((p) => p.category)])
   ).sort();
@@ -254,23 +246,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
-  // Handle 1-Click Load of 12 Homemade Konkani/Maharashtrian Food Products
-  const handleLoadHomemadeFoodMenu = async () => {
-    setIsImportingCsv(true);
-    setImportFeedback(null);
-    try {
-      const res = await HomemadeFoodService.seedHomemadeFoodCatalog();
-      setImportFeedback(
-        `🍲 Loaded ${res.seededCount} new Homemade Food items (${res.totalHomemadeCount} total items ready with HMF- billing & 160x160px warm saffron thumbnails)!`
-      );
-      if (onRefresh) onRefresh();
-    } catch (err: any) {
-      alert(`Homemade Food Menu load failed: ${err.message}`);
-    } finally {
-      setIsImportingCsv(false);
-    }
-  };
-
   // Handle 1-Click Load of 25 Standard Indian Kirana Products
   const handleLoad25SampleProducts = async () => {
     setIsImportingCsv(true);
@@ -288,12 +263,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
   // Handle 1-Click Built-in 105 Maharashtra Kirana Catalog Import
   const handleImport105BuiltInCatalog = async () => {
-    if (isHomemade) {
-      alert(
-        '⚠️ You are currently in Homemade Food / Gruh Udyog mode! Please switch to Kirana Retail Store from the sidebar before importing the Kirana grocery catalog, to keep your food products completely separate.'
-      );
-      return;
-    }
     setIsImportingCsv(true);
     setImportFeedback(null);
     try {
@@ -346,123 +315,66 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             Inventory Master &amp; Stock Ledger
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            {isHomemade ? '🍲 Homemade Food Catalog' : '🏪 Kirana Retail Catalog'} | Total {businessProducts.length} Products
+            🏪 Kirana Retail Catalog | Total {businessProducts.length} Products
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
-          {isHomemade ? (
-            <>
-              <button
-                type="button"
-                data-testid="load-homemade-food-menu-btn"
-                disabled={isImportingCsv}
-                onClick={handleLoadHomemadeFoodMenu}
-                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50"
-              >
-                <span>🍲 Load Homemade Food Menu (12 Authentic Items)</span>
-              </button>
+          <button
+            type="button"
+            data-testid="import-csv-sheet-btn"
+            onClick={() => {
+              setImportFeedback(null);
+              setIsImportModalOpen(true);
+            }}
+            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+          >
+            <Upload className="w-4 h-4" />
+            <span>📥 Import 105 Kirana Catalog</span>
+          </button>
 
-              <button
-                type="button"
-                data-testid="open-batches-btn"
-                onClick={() => {
-                  setSelectedBatchProduct(businessProducts[0] || null);
-                  setIsBatchModalOpen(true);
-                }}
-                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-              >
-                <span>📦 Batches &amp; Spoilage</span>
-              </button>
+          <button
+            type="button"
+            data-testid="load-25-kirana-demo-btn"
+            disabled={isImportingCsv}
+            onClick={handleLoad25SampleProducts}
+            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>✨ Load 25 Sample Kirana Products</span>
+          </button>
 
-              <button
-                type="button"
-                data-testid="open-wholesalers-reorder-btn"
-                onClick={() => setActiveTab('restock')}
-                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-              >
-                <Truck className="w-4 h-4" />
-                <span>🚛 Wholesalers &amp; Reorder</span>
-              </button>
+          <button
+            type="button"
+            data-testid="open-wholesaler-purchase-btn"
+            onClick={() => setIsPurchaseModalOpen(true)}
+            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+          >
+            <Truck className="w-4 h-4" />
+            <span>📥 Wholesaler Inward (GRN)</span>
+          </button>
 
-              <button
-                onClick={handleOpenAdd}
-                data-testid="add-homemade-product-btn"
-                className="flex-1 sm:flex-initial px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-              >
-                <Plus className="w-4 h-4" />
-                <span>➕ Add New Product [N]</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                data-testid="import-csv-sheet-btn"
-                onClick={() => {
-                  setImportFeedback(null);
-                  setIsImportModalOpen(true);
-                }}
-                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-              >
-                <Upload className="w-4 h-4" />
-                <span>📥 Import 105 Kirana Catalog</span>
-              </button>
+          <button
+            type="button"
+            data-testid="open-wholesalers-reorder-btn"
+            onClick={() => setActiveTab('restock')}
+            className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+          >
+            <Truck className="w-4 h-4" />
+            <span>🚛 Wholesalers &amp; Reorder</span>
+          </button>
 
-              <button
-                type="button"
-                data-testid="load-25-kirana-demo-btn"
-                disabled={isImportingCsv}
-                onClick={handleLoad25SampleProducts}
-                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>✨ Load 25 Sample Kirana Products</span>
-              </button>
-
-              <button
-                type="button"
-                data-testid="open-wholesaler-purchase-btn"
-                onClick={() => setIsPurchaseModalOpen(true)}
-                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-              >
-                <span>📥 Wholesaler Inward (GRN)</span>
-              </button>
-
-              <button
-                type="button"
-                data-testid="open-stock-transfer-btn"
-                onClick={() => {
-                  setSelectedProduct(businessProducts[0] || null);
-                  setIsTransferModalOpen(true);
-                }}
-                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-              >
-                <span>🚚 Transfer to Gruh Udyog</span>
-              </button>
-
-              <button
-                type="button"
-                data-testid="open-wholesalers-reorder-btn"
-                onClick={() => setActiveTab('restock')}
-                className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-              >
-                <Truck className="w-4 h-4" />
-                <span>🚛 Wholesalers &amp; Reorder</span>
-              </button>
-
-              <button
-                onClick={handleOpenAdd}
-                data-testid="add-kirana-product-btn"
-                className="flex-1 sm:flex-initial px-4 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
-              >
-                <Plus className="w-4 h-4" />
-                <span>➕ Add Product [N]</span>
-              </button>
-            </>
-          )}
+          <button
+            onClick={handleOpenAdd}
+            data-testid="add-kirana-product-btn"
+            className="flex-1 sm:flex-initial px-4 py-2.5 bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>➕ Add New Product [N]</span>
+          </button>
         </div>
       </div>
+
 
       {/* 1-Click CSV / 105-Product Sheet Importer Modal */}
       {isImportModalOpen && (
@@ -734,14 +646,11 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     <th className="p-3">Product Name &amp; Code</th>
                     <th className="p-3">Category</th>
                     <th className="p-3">Unit</th>
-                    <th className="p-3 text-right">{isHomemade ? 'Making Cost' : 'Cost Price'}</th>
-                    {isHomemade && (
-                      <th className="p-3 text-right">Wholesale Rate</th>
-                    )}
-                    <th className="p-3 text-right">{isHomemade ? 'Retail MRP / Sell' : 'Selling Price'}</th>
+                    <th className="p-3 text-right">Cost Price</th>
+                    <th className="p-3 text-right">Selling Price</th>
                     <th className="p-3 text-center">Margin %</th>
                     <th className="p-3 text-right">Stock</th>
-                    <th className="p-3 text-center">{isHomemade ? 'Daily Batch Made' : 'Quick Stock'}</th>
+                    <th className="p-3 text-center">Quick Stock</th>
                     <th className="p-3 text-center">Actions</th>
                   </tr>
                 </thead>
@@ -849,24 +758,14 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         {/* Unit */}
                         <td className="p-3 text-xs font-medium text-slate-500 dark:text-slate-400">{p.unit_type}</td>
 
-                        {/* Cost Price / Making Cost */}
+                        {/* Cost Price */}
                         <td className="p-3 text-right text-xs text-slate-600 dark:text-slate-400">
                           {formatINR(p.purchase_price)}
                         </td>
 
-                        {/* Wholesale Rate (Homemade Food B2B) */}
-                        {isHomemade && (
-                          <td className="p-3 text-right text-xs font-semibold text-blue-700 dark:text-blue-300">
-                            {p.wholesale_price && p.wholesale_price > 0 ? formatINR(p.wholesale_price) : '—'}
-                          </td>
-                        )}
-
                         {/* Selling Price */}
                         <td className="p-3 text-right font-bold text-slate-900 dark:text-white">
                           <div>{formatINR(p.selling_price)}</div>
-                          {isHomemade && p.mrp > p.selling_price && (
-                            <div className="text-[10px] text-slate-400">MRP: ₹{p.mrp}</div>
-                          )}
                         </td>
 
                         {/* Margin % (REQ-04) */}
@@ -909,32 +808,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             <button
                               onClick={() => handleOpenStockIn(p)}
                               data-testid={`stock-in-btn-${p.id}`}
-                              title={
-                                isHomemade
-                                  ? '🍳 + Fresh Batch Made Today'
-                                  : '➕ + Restock (Purchase In)'
-                              }
+                              title="➕ + Restock (Purchase In)"
                               className="px-2 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 transition flex items-center gap-1 text-[11px] font-bold"
                             >
                               <PlusCircle className="w-3.5 h-3.5 shrink-0" />
-                              <span className="hidden xl:inline">
-                                {isHomemade ? '🍳 + Fresh Batch Made' : '➕ + Restock'}
-                              </span>
+                              <span className="hidden xl:inline">➕ + Restock</span>
                             </button>
                             <button
                               onClick={() => handleOpenStockOut(p)}
                               data-testid={`stock-out-btn-${p.id}`}
-                              title={
-                                isHomemade
-                                  ? '🏠 - Home Use / Leftover'
-                                  : '🏠 - Home Use / Damaged'
-                              }
+                              title="🏠 - Home Use / Damaged"
                               className="px-2 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 transition flex items-center gap-1 text-[11px] font-bold"
                             >
                               <MinusCircle className="w-3.5 h-3.5 shrink-0" />
-                              <span className="hidden xl:inline">
-                                {isHomemade ? '🏠 - Home Use / Leftover' : '🏠 - Home Use / Damaged'}
-                              </span>
+                              <span className="hidden xl:inline">🏠 - Home Use / Damaged</span>
                             </button>
                           </div>
                         </td>
@@ -942,17 +829,6 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         {/* Actions */}
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => {
-                                setSelectedBatchProduct(p);
-                                setIsBatchModalOpen(true);
-                              }}
-                              data-testid={`batch-btn-${p.id}`}
-                              title="Batches & Shelf-Life"
-                              className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-xs font-bold"
-                            >
-                              📦
-                            </button>
                             <button
                               onClick={() => handleOpenEdit(p)}
                               title="Edit Product"
@@ -1011,31 +887,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         }}
       />
 
-      {/* v4.0.0 Inter-Business Transfer Modal (Kirana -> Gruh Udyog) */}
-      <InterBusinessTransferModal
-        isOpen={isTransferModalOpen}
-        onClose={() => setIsTransferModalOpen(false)}
-        products={businessProducts}
-        preSelectedProduct={selectedProduct}
-        onSuccess={() => {
-          if (onRefresh) onRefresh();
-        }}
-      />
 
-      {/* v4.0.0 Batch Shelf-Life & Spoilage Modal */}
-      {selectedBatchProduct && (
-        <BatchSpoilageModal
-          isOpen={isBatchModalOpen}
-          onClose={() => {
-            setIsBatchModalOpen(false);
-            setSelectedBatchProduct(null);
-          }}
-          product={selectedBatchProduct}
-          onSuccess={() => {
-            if (onRefresh) onRefresh();
-          }}
-        />
-      )}
 
       {/* v4.0.0 Wholesaler GRN Purchase Inward Modal */}
       <WholesalerPurchaseModal

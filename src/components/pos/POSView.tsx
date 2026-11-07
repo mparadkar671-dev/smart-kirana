@@ -4,13 +4,11 @@ import { LooseItemModal } from './LooseItemModal';
 import { UpiCheckoutModal } from './UpiCheckoutModal';
 import { UdhariCheckoutModal } from './UdhariCheckoutModal';
 import { ReceiptModal } from './ReceiptModal';
-import { AdvanceOrdersModal } from './AdvanceOrdersModal';
 import { usePosKeyboardShortcuts } from '../../hooks/usePosKeyboardShortcuts';
 import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal';
 import { BillingService, CartItemInput } from '../../services/billingService';
 import { GallaService } from '../../services/gallaService';
 import { BatchFifoService, ExpiryAlertItem } from '../../services/batchFifoService';
-import { isHomemadeFoodCategoryOrName } from '../../services/homemadeFoodService';
 import { getActiveShopId } from '../../services/tenantManager';
 import { filterProductsForBusiness } from '../../utils/businessFirewall';
 import { formatINR, roundCurrency, roundQty, toPaise, toRupees } from '../../utils/math';
@@ -84,38 +82,12 @@ export const POSView: React.FC<POSViewProps> = ({
   const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
   const activeShopId = shopProfile?.id || getActiveShopId(activeBusinessType);
 
-  // Multi-Cart State strictly partitioned per Shop / Business
-  const [cartsByShop, setCartsByShop] = useState<Record<string, CartTab[]>>({
-    KIRANA_RETAIL: [
-      { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
-      { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
-      { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
-    ],
-    HOMEMADE_FOOD: [
-      { id: 1, name: 'HMF Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
-      { id: 2, name: 'HMF Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
-      { id: 3, name: 'HMF Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
-    ],
-  });
-
-  const cartKey = activeShopId || activeBusinessType;
-  const carts = cartsByShop[cartKey] || cartsByShop[activeBusinessType] || [
-    { id: 1, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 1' : 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
-    { id: 2, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 2' : 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
-    { id: 3, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 3' : 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
-  ];
-
-  const setCarts = (updater: CartTab[] | ((prev: CartTab[]) => CartTab[])) => {
-    setCartsByShop((prevMap) => {
-      const currentList = prevMap[cartKey] || prevMap[activeBusinessType] || [
-        { id: 1, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 1' : 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
-        { id: 2, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 2' : 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
-        { id: 3, name: activeBusinessType === 'HOMEMADE_FOOD' ? 'HMF Bill 3' : 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
-      ];
-      const nextList = typeof updater === 'function' ? updater(currentList) : updater;
-      return { ...prevMap, [cartKey]: nextList, [activeBusinessType]: nextList };
-    });
-  };
+  // Multi-Cart State (Bill 1, Bill 2, Bill 3)
+  const [carts, setCarts] = useState<CartTab[]>([
+    { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
+    { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
+    { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
+  ]);
 
   const [activeCartId, setActiveCartId] = useState<number>(1);
 
@@ -129,37 +101,10 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const [isUpiModalOpen, setIsUpiModalOpen] = useState(false);
   const [isUdhariModalOpen, setIsUdhariModalOpen] = useState(false);
-  const [isAdvanceOrdersModalOpen, setIsAdvanceOrdersModalOpen] = useState(false);
   const [stockWarningProduct, setStockWarningProduct] = useState<StockWarningInfo | null>(null);
   const [isStockWarningOpen, setIsStockWarningOpen] = useState(false);
   const [searchHighlightIndex, setSearchHighlightIndex] = useState<number>(0);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
-
-  // Homemade Food Dual-Rate Billing Mode (Direct Retail Customer vs Retailer B2B Wholesale)
-  const [saleRateType, setSaleRateType] = useState<'RETAIL_CUSTOMER' | 'WHOLESALE_RETAILER'>('RETAIL_CUSTOMER');
-
-  const handleRateTypeChange = (newRate: 'RETAIL_CUSTOMER' | 'WHOLESALE_RETAILER') => {
-    setSaleRateType(newRate);
-    setCarts((prevCarts) =>
-      prevCarts.map((cart) => {
-        if (cart.id !== activeCartId) return cart;
-        const updatedItems = cart.items.map((item) => {
-          const effectivePrice =
-            newRate === 'WHOLESALE_RETAILER' && item.product.wholesale_price && item.product.wholesale_price > 0
-              ? item.product.wholesale_price
-              : item.product.selling_price;
-          const newLineTotal = toRupees(Math.round(item.qty * toPaise(effectivePrice)));
-          return {
-            ...item,
-            unit_selling_price: effectivePrice,
-            line_total: newLineTotal,
-            sale_rate_type: newRate,
-          };
-        });
-        return { ...cart, items: updatedItems };
-      })
-    );
-  };
 
   // Receipt Modal state
   const [completedInvoice, setCompletedInvoice] = useState<SalesInvoice | null>(null);
@@ -408,10 +353,7 @@ export const POSView: React.FC<POSViewProps> = ({
       return;
     }
 
-    const effectivePrice =
-      activeBusinessType === 'HOMEMADE_FOOD' && saleRateType === 'WHOLESALE_RETAILER' && product.wholesale_price && product.wholesale_price > 0
-        ? product.wholesale_price
-        : product.selling_price;
+    const effectivePrice = product.selling_price;
 
     setCarts((prevCarts) =>
       prevCarts.map((cart) => {
@@ -434,7 +376,7 @@ export const POSView: React.FC<POSViewProps> = ({
             qty: newQty,
             unit_selling_price: effectivePrice,
             line_total: newLineTotal,
-            sale_rate_type: activeBusinessType === 'HOMEMADE_FOOD' ? saleRateType : 'RETAIL_CUSTOMER',
+            sale_rate_type: 'RETAIL_CUSTOMER',
           };
           return { ...cart, items: updatedItems };
         } else {
@@ -450,7 +392,7 @@ export const POSView: React.FC<POSViewProps> = ({
             unit_selling_price: effectivePrice,
             unit_purchase_cost: product.purchase_price,
             line_total: lineTotal,
-            sale_rate_type: activeBusinessType === 'HOMEMADE_FOOD' ? saleRateType : 'RETAIL_CUSTOMER',
+            sale_rate_type: 'RETAIL_CUSTOMER',
           };
           return { ...cart, items: [...cart.items, newItem] };
         }
@@ -537,7 +479,7 @@ export const POSView: React.FC<POSViewProps> = ({
         unit_selling_price: i.unit_selling_price,
         unit_purchase_cost: i.unit_purchase_cost,
         line_total: i.line_total,
-        sale_rate_type: i.sale_rate_type || (activeBusinessType === 'HOMEMADE_FOOD' ? saleRateType : 'RETAIL_CUSTOMER'),
+        sale_rate_type: 'RETAIL_CUSTOMER',
         is_loan_funded: i.product.is_loan_funded,
       }));
 
@@ -591,7 +533,7 @@ export const POSView: React.FC<POSViewProps> = ({
         unit_selling_price: i.unit_selling_price,
         unit_purchase_cost: i.unit_purchase_cost,
         line_total: i.line_total,
-        sale_rate_type: i.sale_rate_type || (activeBusinessType === 'HOMEMADE_FOOD' ? saleRateType : 'RETAIL_CUSTOMER'),
+        sale_rate_type: 'RETAIL_CUSTOMER',
         is_loan_funded: i.product.is_loan_funded,
       }));
 
@@ -641,7 +583,7 @@ export const POSView: React.FC<POSViewProps> = ({
         unit_selling_price: i.unit_selling_price,
         unit_purchase_cost: i.unit_purchase_cost,
         line_total: i.line_total,
-        sale_rate_type: i.sale_rate_type || (activeBusinessType === 'HOMEMADE_FOOD' ? saleRateType : 'RETAIL_CUSTOMER'),
+        sale_rate_type: 'RETAIL_CUSTOMER',
         is_loan_funded: i.product.is_loan_funded,
       }));
 
@@ -780,10 +722,6 @@ export const POSView: React.FC<POSViewProps> = ({
       }
       if (isCustomerSelectorOpen) {
         setIsCustomerSelectorOpen(false);
-        return true;
-      }
-      if (isAdvanceOrdersModalOpen) {
-        setIsAdvanceOrdersModalOpen(false);
         return true;
       }
       if (isShortcutsModalOpen) {
@@ -952,25 +890,10 @@ export const POSView: React.FC<POSViewProps> = ({
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-orange-500" />
-              <span>
-                {shopProfile?.business_type === 'HOMEMADE_FOOD'
-                  ? '🍲 Homemade Food Menu & Fast-Tap Grid (1-Tap Billing)'
-                  : 'Top-24 Fast-Tap Counter Grid (1-Tap Billing)'}
-              </span>
+              <span>Top-24 Fast-Tap Counter Grid (1-Tap Billing)</span>
             </h2>
             <div className="flex items-center gap-2">
-              {activeBusinessType === 'HOMEMADE_FOOD' ? (
-                <button
-                  type="button"
-                  data-testid="open-advance-orders-btn"
-                  onClick={() => setIsAdvanceOrdersModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95"
-                >
-                  <span>📅 Advance Orders &amp; Festival Pre-Booking</span>
-                </button>
-              ) : (
-                <span className="text-[11px] text-slate-400 hidden sm:inline">80/20 Daily Velocity • Fast Retail</span>
-              )}
+              <span className="text-[11px] text-slate-400 hidden sm:inline">80/20 Daily Velocity • Fast Retail</span>
             </div>
           </div>
 
@@ -1264,40 +1187,7 @@ export const POSView: React.FC<POSViewProps> = ({
           )}
         </div>
 
-        {/* HOMEMADE FOOD DUAL-RATE TOGGLE (Retail / MRP vs Retailer B2B Wholesale) */}
-        {activeBusinessType === 'HOMEMADE_FOOD' && (
-          <div className="px-3 py-2 bg-amber-50/70 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-900/60 flex items-center justify-between gap-2">
-            <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
-              Billing Rate:
-            </span>
-            <div className="flex items-center gap-1 bg-amber-100/80 dark:bg-amber-900/50 p-0.5 rounded-xl border border-amber-300 dark:border-amber-700">
-              <button
-                type="button"
-                data-testid="rate-mode-retail"
-                onClick={() => handleRateTypeChange('RETAIL_CUSTOMER')}
-                className={`px-2 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
-                  saleRateType === 'RETAIL_CUSTOMER'
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : 'text-amber-800 dark:text-amber-300 hover:bg-amber-200/50 dark:hover:bg-amber-800/40'
-                }`}
-              >
-                <span>👤 Direct Customer (Retail)</span>
-              </button>
-              <button
-                type="button"
-                data-testid="rate-mode-wholesale"
-                onClick={() => handleRateTypeChange('WHOLESALE_RETAILER')}
-                className={`px-2 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
-                  saleRateType === 'WHOLESALE_RETAILER'
-                    ? 'bg-blue-700 text-white shadow-xs'
-                    : 'text-amber-800 dark:text-amber-300 hover:bg-amber-200/50 dark:hover:bg-amber-800/40'
-                }`}
-              >
-                <span>🏪 Shop / Retailer (B2B)</span>
-              </button>
-            </div>
-          </div>
-        )}
+
 
         {/* Cart Items List */}
         <div
@@ -1523,23 +1413,7 @@ export const POSView: React.FC<POSViewProps> = ({
         customer={receiptCustomer}
       />
 
-      {/* Advance Orders & Festival Pre-Booking Modal */}
-      <AdvanceOrdersModal
-        isOpen={isAdvanceOrdersModalOpen}
-        onClose={() => setIsAdvanceOrdersModalOpen(false)}
-        products={products}
-        shopProfile={shopProfile}
-        onOrderCompletedAndBilled={(res) => {
-          setCompletedInvoice(res.invoice);
-          setCompletedInvoiceItems(res.saleItems);
-          setReceiptCustomer(null);
-          setIsReceiptModalOpen(true);
-          setSuccessBanner(
-            `✅ Advance Order ${res.order.order_number} delivered & billed as Invoice ${res.invoice.invoice_number}!`
-          );
-          if (onCheckoutComplete) onCheckoutComplete();
-        }}
-      />
+
 
       {/* Low / Zero Stock Warning Modal with Offline Physical Stock Permission */}
       {isStockWarningOpen && stockWarningProduct && (
