@@ -314,13 +314,22 @@ export const Shell: React.FC<ShellProps> = ({
                   <div className="text-[9px] text-amber-400 font-medium">Local Database Mode</div>
                 </div>
               </div>
-              <button
-                onClick={() => setIsAuthModalOpen(true)}
-                title="Connect Cloud Account"
-                className="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-[10px] font-bold text-slate-200 rounded-lg transition"
-              >
-                Sign In
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() => setIsAuthModalOpen(true)}
+                  title="Connect Cloud Account"
+                  className="px-2 py-1 bg-slate-700 hover:bg-slate-600 text-[10px] font-bold text-slate-200 rounded-lg transition"
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={() => signOut()}
+                  title="Exit Guest Mode & Return to Login / Register"
+                  className="p-1 text-slate-400 hover:text-red-400 transition"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           ) : (
             <button

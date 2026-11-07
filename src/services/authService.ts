@@ -738,9 +738,40 @@ export const authService = {
   async signOut() {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem('kirana_active_shop_id');
+      localStorage.removeItem('kirana_guest_mode');
     }
     if (!supabase) return;
     await supabase.auth.signOut();
+  },
+
+  /**
+   * Complete local device wipe & logout:
+   * Clears Supabase auth session, resets IndexedDB partitions to empty,
+   * wipes localStorage & sessionStorage, and resets the app to the pristine Auth / Registration screen.
+   */
+  async clearAllLocalDataAndReset(): Promise<void> {
+    try {
+      if (supabase) {
+        await supabase.auth.signOut().catch(() => {});
+      }
+    } catch {}
+
+    try {
+      const { kiranaDb, homemadeDb } = await import('../db/db');
+      await kiranaDb.clearAllRecordsToEmpty().catch(() => {});
+      await homemadeDb.clearAllRecordsToEmpty().catch(() => {});
+    } catch {}
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.clear();
+    }
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.clear();
+    }
+
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
   },
 
   /**

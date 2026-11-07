@@ -28,13 +28,20 @@ import {
   Building2,
   PlusCircle,
   Clock,
+  Trash2,
 } from 'lucide-react';
 
 type Tab = 'signin' | 'signup' | 'forgot' | 'verify_pending';
 
 export const AuthPage: React.FC = () => {
-  const { signIn, signUp, resetPassword, resendConfirmationEmail, continueAsGuest } = useAuth();
+  const { signIn, signUp, resetPassword, resendConfirmationEmail, continueAsGuest, clearAllLocalDataAndReset } = useAuth();
   const { theme, toggleTheme } = useTheme();
+
+  const handleResetDevice = async () => {
+    if (typeof window !== 'undefined' && window.confirm('⚠️ Are you sure you want to completely clear all stored login credentials, registered shop details, and offline data from this browser? This will reset the app to factory fresh.')) {
+      await clearAllLocalDataAndReset();
+    }
+  };
 
   const [tab, setTab] = useState<Tab>('signin');
   const [email, setEmail] = useState('');
@@ -883,6 +890,16 @@ export const AuthPage: React.FC = () => {
                   >
                     <Zap className="w-4 h-4 text-emerald-500" />
                     <span>⚡ Use Counter in Offline / Guest Mode (100% Free)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResetDevice}
+                    data-testid="reset-device-btn"
+                    className="text-[11px] text-slate-400 hover:text-red-500 dark:hover:text-red-400 flex items-center justify-center gap-1.5 mx-auto pt-1 transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>🧹 Clear Stored Device Data &amp; Reset App</span>
                   </button>
                 </div>
               )}
