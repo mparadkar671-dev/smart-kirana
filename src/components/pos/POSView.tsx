@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { Product, Customer, ShopProfile, SalesInvoice, SaleItem, BusinessType, WALK_IN_CUSTOMER_ID } from '../../types';
 import { LooseItemModal } from './LooseItemModal';
 import { UpiCheckoutModal } from './UpiCheckoutModal';
@@ -11,6 +12,7 @@ import { GallaService } from '../../services/gallaService';
 import { BatchFifoService, ExpiryAlertItem } from '../../services/batchFifoService';
 import { getActiveShopId } from '../../services/tenantManager';
 import { filterProductsForBusiness } from '../../utils/businessFirewall';
+import { kiranaDb, getActiveDb } from '../../db/db';
 import { formatINR, roundCurrency, roundQty, toPaise, toRupees } from '../../utils/math';
 import { playBarcodeBeep, playPaymentSuccessChime } from '../../utils/sound';
 import {
@@ -81,6 +83,10 @@ export const POSView: React.FC<POSViewProps> = ({
 }) => {
   const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
   const activeShopId = shopProfile?.id || getActiveShopId(activeBusinessType);
+
+  // Live direct fallback to active database for 100% reactive counter grid
+  const liveDbProducts = useLiveQuery(() => getActiveDb(activeBusinessType).products.toArray(), [activeBusinessType], []);
+  const effectiveProducts = (products && products.length > 0) ? products : (liveDbProducts || []);
 
   // Multi-Cart State (Bill 1, Bill 2, Bill 3)
   const [carts, setCarts] = useState<CartTab[]>([
@@ -186,8 +192,8 @@ export const POSView: React.FC<POSViewProps> = ({
 
   // Strictly filter products to the active business type via bulletproof business firewall
   const businessProducts = useMemo(
-    () => filterProductsForBusiness(products, activeBusinessType),
-    [products, activeBusinessType]
+    () => filterProductsForBusiness(effectiveProducts, activeBusinessType),
+    [effectiveProducts, activeBusinessType]
   );
 
   // Top-24 Fast-Tap Items (REQ-07 / Section 5.1): strictly from businessProducts

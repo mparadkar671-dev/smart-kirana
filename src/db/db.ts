@@ -671,13 +671,20 @@ export class KiranaDatabase extends Dexie {
         await this.wholesalers.clear();
         await this.advance_orders.clear();
 
-        await this.shop_profile.add({
+        await this.shop_profile.put({
           ...DEFAULT_SHOP_PROFILE,
+          business_type: 'KIRANA_RETAIL',
           reset_epoch: existingProfile?.reset_epoch || DEFAULT_SHOP_PROFILE.reset_epoch || 1,
         });
-        await this.customers.bulkAdd(INITIAL_CUSTOMERS);
-        await this.products.bulkAdd(INITIAL_PRODUCTS);
-        await this.wholesalers.bulkAdd(INITIAL_WHOLESALERS);
+        await this.customers.bulkPut(INITIAL_CUSTOMERS.map((c) => ({ ...c, business_type: 'KIRANA_RETAIL' as const, shop_id: 'current_shop' })));
+        const demoItems = INITIAL_PRODUCTS.map((prod) => ({
+          ...prod,
+          shop_id: 'current_shop',
+          business_type: 'KIRANA_RETAIL' as const,
+          updated_at: new Date().toISOString(),
+        }));
+        await this.products.bulkPut(demoItems);
+        await this.wholesalers.bulkPut(INITIAL_WHOLESALERS.map((w) => ({ ...w, shop_id: 'current_shop' })));
 
         const initialLogs: InventoryLog[] = INITIAL_PRODUCTS.map((prod) => ({
           id: `demo-init-log-${prod.id}`,

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from './db/db';
+import { db, kiranaDb, getActiveDb } from './db/db';
 import { BusinessType } from './types';
 import { Shell, ActiveTab } from './components/layout/Shell';
 import { POSView } from './components/pos/POSView';
@@ -16,7 +16,7 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Sparkles, PlusCircle, CloudDownload } from 'lucide-react';
 import { MAHARASHTRA_105_KIRANA_CATALOG, bulkImportKiranaProducts } from './services/csvCatalogImporter';
 import { cloudSyncService } from './services/cloudSyncService';
-import { filterProductsForBusiness } from './utils/businessFirewall';
+import { filterProductsForBusiness, isHomemadeShopId, getBaseKiranaShopId } from './utils/businessFirewall';
 import { getActiveShopId, getActiveBusinessType } from './services/tenantManager';
 
 const MainApp: React.FC = () => {
@@ -98,10 +98,11 @@ const MainApp: React.FC = () => {
     };
   }, [isDbReady, activeShopId]);
 
-  // Live queries strictly filtered by activeShopId and activeBusinessType
+  // Live queries directly tracking active database for 100% instant reactivity
   const products = useLiveQuery(
     async () => {
-      const all = await db.products.toArray();
+      const active = getActiveDb(activeBusinessType);
+      const all = await active.products.toArray();
       return filterProductsForBusiness(all, activeBusinessType, activeShopId);
     },
     [activeBusinessType, activeShopId],
@@ -110,13 +111,19 @@ const MainApp: React.FC = () => {
 
   const customers = useLiveQuery(
     async () => {
-      const all = await db.customers.toArray();
+      const active = getActiveDb(activeBusinessType);
+      const all = await active.customers.toArray();
       return all.filter((c) => {
         if (c.id === '0000-WALK-IN') return true;
         if (c.shop_id && activeShopId) {
-          return c.shop_id === activeShopId;
+          return (
+            c.shop_id === activeShopId ||
+            c.shop_id === 'current_shop' ||
+            activeShopId === 'current_shop' ||
+            getBaseKiranaShopId(c.shop_id) === getBaseKiranaShopId(activeShopId)
+          );
         }
-        return (c.business_type || 'KIRANA_RETAIL') === activeBusinessType;
+        return true;
       });
     },
     [activeBusinessType, activeShopId],

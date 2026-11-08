@@ -11,6 +11,7 @@ export const HOMEMADE_CATEGORIES = new Set([
   'Modak & Festive Specials (मोदक / पुरणपोळी)',
   'Modak & Festive Specials (उकडीचे मोदक, तळणीचे मोदक)',
   'Festival Specials',
+  'Festive Specials',
   'Konkani Breakfast & Tiffin',
   'Konkani Fresh Tiffin & Breakfast',
   'Konkani Breakfast & Tiffin (घावणे, आंबोळी, पोहे, उपमा)',
@@ -163,14 +164,7 @@ export function getActiveBusinessType(): BusinessMode {
 
 /**
  * Deterministically resolves whether a product belongs to KIRANA_RETAIL or HOMEMADE_FOOD.
- * 
- * Rules:
- * 1. Hard Rule: Any standard Kirana category (e.g., "Grains & Pulses", "Groceries") is ALWAYS KIRANA_RETAIL.
- * 2. Hard Rule: Any Homemade category is ALWAYS HOMEMADE_FOOD.
- * 3. Physical shop_id check: If shop_id is the secondary homemadeShopId, return 'HOMEMADE_FOOD'.
- * 4. Explicit business_type check: If business_type is defined, honor it.
- * 5. Hard Rule: Any Homemade food name keyword is HOMEMADE_FOOD.
- * 6. Default: Everything else is 'KIRANA_RETAIL'.
+ * In Smart Kirana, products are KIRANA_RETAIL by default.
  */
 export function resolveProductBusinessType(product: {
   id?: string;
@@ -183,7 +177,7 @@ export function resolveProductBusinessType(product: {
   const cat = (product.category || '').trim();
   const nameLower = `${product.name || ''} ${product.marathi_name || ''}`.toLowerCase();
 
-  // 1. Hard rule: Any standard Kirana category is ALWAYS KIRANA_RETAIL
+  // 1. Hard rule: Any standard Kirana category is ALWAYS KIRANA_RETAIL (recovers corrupted records)
   if (KIRANA_CATEGORIES.has(cat)) {
     return 'KIRANA_RETAIL';
   }
@@ -198,7 +192,7 @@ export function resolveProductBusinessType(product: {
     return 'HOMEMADE_FOOD';
   }
 
-  // 4. Honor explicit business_type if set
+  // 4. Explicit business_type takes precedence for general categories
   if (product.business_type === 'KIRANA_RETAIL') {
     return 'KIRANA_RETAIL';
   }
@@ -211,6 +205,7 @@ export function resolveProductBusinessType(product: {
     return 'HOMEMADE_FOOD';
   }
 
+  // 6. Default in Smart Kirana is ALWAYS KIRANA_RETAIL
   return 'KIRANA_RETAIL';
 }
 

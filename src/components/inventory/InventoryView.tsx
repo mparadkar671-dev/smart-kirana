@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { Product, ShopProfile, BusinessType, Wholesaler, KIRANA_CATEGORIES } from '../../types';
 import { ProductModal } from './ProductModal';
 import { StockAdjustmentModal } from './StockAdjustmentModal';
@@ -14,7 +15,7 @@ import {
 } from '../../services/csvCatalogImporter';
 import { normalizeProductImageToSquare, generateSmartProductThumbnail } from '../../utils/productImageEngine';
 import { formatINR, calculateProfitMarginPercent } from '../../utils/math';
-import { db } from '../../db/db';
+import { db, kiranaDb, getActiveDb } from '../../db/db';
 import {
   Package,
   Plus,
@@ -44,11 +45,15 @@ interface InventoryViewProps {
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
-  products,
+  products: passedProducts,
   shopProfile,
   onRefresh,
 }) => {
-  const activeBusinessType: BusinessType = 'KIRANA_RETAIL';
+  const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+
+  // Instant local-first reactivity: observe active database directly if prop array is empty
+  const liveDbProducts = useLiveQuery(() => getActiveDb(activeBusinessType).products.toArray(), [activeBusinessType], []);
+  const products = (passedProducts && passedProducts.length > 0) ? passedProducts : (liveDbProducts || []);
 
   // Strict business isolation defense-in-depth:
   const businessProducts = useMemo(
