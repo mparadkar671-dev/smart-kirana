@@ -312,19 +312,19 @@ export function parseKiranaCatalogCsv(csvText: string): RawSheetProductRow[] {
 
   const headers = parseCsvLine(cleanLines[0]).map((h) => h.toLowerCase());
 
-  const findColIdx = (patterns: string[], fallbackIdx: number): number => {
-    const idx = headers.findIndex((h) => patterns.some((p) => h.includes(p)));
+  const findColIdx = (patterns: string[], fallbackIdx: number, excludeIndices: number[] = []): number => {
+    const idx = headers.findIndex((h, index) => !excludeIndices.includes(index) && patterns.some((p) => h.includes(p)));
     return idx >= 0 ? idx : fallbackIdx;
   };
 
   const marathiIdx = findColIdx(['marathi', 'मराठी'], 0);
-  const englishIdx = findColIdx(['english', 'product name (english)', 'name'], 1);
-  const categoryIdx = findColIdx(['category', 'विभाग'], 2);
-  const keywordsIdx = findColIdx(['keyword', 'search', 'pos'], 3);
-  const sellIdx = findColIdx(['sell', 'selling', 'rate', 'विक्री'], 4);
-  const purchaseIdx = findColIdx(['purchase', 'cost', 'wholesale', 'खरेदी'], 5);
-  const mrpIdx = findColIdx(['mrp'], 6);
-  const stockIdx = findColIdx(['stock', 'available', 'qty', 'शिल्लक'], 7);
+  const englishIdx = findColIdx(['product name (english)', 'english', 'item name', 'name'], 1, [marathiIdx]);
+  const categoryIdx = findColIdx(['category', 'विभाग'], 2, [marathiIdx, englishIdx]);
+  const keywordsIdx = findColIdx(['keyword', 'search', 'pos'], 3, [marathiIdx, englishIdx]);
+  const sellIdx = findColIdx(['sell', 'selling', 'rate', 'विक्री'], 4, [marathiIdx, englishIdx]);
+  const purchaseIdx = findColIdx(['purchase', 'cost', 'wholesale', 'खरेदी'], 5, [marathiIdx, englishIdx]);
+  const mrpIdx = findColIdx(['mrp'], 6, [marathiIdx, englishIdx]);
+  const stockIdx = findColIdx(['stock', 'available', 'qty', 'शिल्लक'], 7, [marathiIdx, englishIdx]);
 
   const parsedRows: RawSheetProductRow[] = [];
 
@@ -343,7 +343,7 @@ export function parseKiranaCatalogCsv(csvText: string): RawSheetProductRow[] {
       if (!val) return undefined;
       const cleaned = val.replace(/[₹,\s]/g, '');
       const num = parseFloat(cleaned);
-      return Number.isFinite(num) && num > 0 ? num : undefined;
+      return Number.isFinite(num) && num >= 0 ? num : undefined;
     };
 
     parsedRows.push({
@@ -423,6 +423,7 @@ export async function bulkImportKiranaProducts(
   const nowIso = new Date().toISOString();
 
   const productsToSave: Product[] = [];
+  const matchedExistingIds = new Set<string>();
 
   rows.forEach((row, index) => {
     const marathi = row.marathiName.trim();
@@ -434,13 +435,17 @@ export async function bulkImportKiranaProducts(
 
     const inferred = inferUnitAndDefaultPricing(row);
 
-    // Check if this product already exists by name
+    // Check if this product already exists by name without colliding across batch
     const existingMatch = existingProducts.find(
       (p) =>
-        p.name.toLowerCase() === bilingualDisplayName.toLowerCase() ||
-        (english && p.name.toLowerCase() === english.toLowerCase()) ||
-        (marathi && p.marathi_name === marathi)
+        !matchedExistingIds.has(p.id) &&
+        (p.name.toLowerCase() === bilingualDisplayName.toLowerCase() ||
+          (english && p.name.toLowerCase() === english.toLowerCase()) ||
+          (marathi && p.marathi_name === marathi))
     );
+    if (existingMatch) {
+      matchedExistingIds.add(existingMatch.id);
+    }
 
     const barcode =
       existingMatch?.barcode && existingMatch.barcode.length === 13

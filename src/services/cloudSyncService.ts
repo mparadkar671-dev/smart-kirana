@@ -35,6 +35,60 @@ export interface CloudSyncStatus {
 
 type SyncStatusListener = (status: CloudSyncStatus) => void;
 
+/**
+ * Normalizes raw UnitType to match Supabase Postgres enum unit_type_enum: ('PCS', 'KG_LOOSE', 'LTR', 'PACK')
+ */
+export function normalizeUnitForSupabase(rawUnit?: string | null): 'PCS' | 'KG_LOOSE' | 'LTR' | 'PACK' {
+  if (!rawUnit) return 'PCS';
+  const u = String(rawUnit).toUpperCase().trim();
+  if (u === 'KG_LOOSE' || u === 'KG' || u === 'KGS' || u === 'GM' || u === 'GRAM' || u === 'GRAMS') {
+    return 'KG_LOOSE';
+  }
+  if (u === 'LTR' || u === 'L' || u === 'ML' || u === 'LITRE' || u === 'LITER') {
+    return 'LTR';
+  }
+  if (u === 'PACK' || u === 'PACKET' || u === 'PKT' || u === 'BOX' || u === 'BAG' || u === 'POUCH') {
+    return 'PACK';
+  }
+  return 'PCS';
+}
+
+/**
+ * Strips local-only / non-existent columns (like business_type, marathi_name, search_keywords, loan fields)
+ * so that Supabase PostgREST accepts product rows cleanly without schema cache errors (PGRST204).
+ */
+export function sanitizeProductForSupabase(
+  p: Partial<Product> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = p as any;
+  const sanitized: Record<string, unknown> = {
+    id: raw.id,
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    name: raw.name || 'Unnamed Product',
+    short_code: raw.short_code || 'PROD',
+    barcode: raw.barcode || '',
+    category: raw.category || 'General',
+    unit_type: normalizeUnitForSupabase(raw.unit_type || raw.unit),
+    purchase_price: Number(raw.purchase_price) || 0,
+    selling_price: Number(raw.selling_price) || 0,
+    mrp: Number(raw.mrp) || Number(raw.selling_price) || 0,
+    current_stock: Number(raw.current_stock) || 0,
+    low_stock_threshold: Number(raw.low_stock_threshold) || 5,
+    last_supplier_name: raw.last_supplier_name || 'APMC Mandi Wholesaler',
+    expiry_date: raw.expiry_date || null,
+    is_quick_tap: Boolean(raw.is_quick_tap),
+    updated_at: raw.updated_at || new Date().toISOString(),
+  };
+  if (raw.wholesaler_id !== undefined) sanitized.wholesaler_id = raw.wholesaler_id || null;
+  if (raw.supplier_phone !== undefined) sanitized.supplier_phone = raw.supplier_phone || null;
+  if (raw.image_url !== undefined) sanitized.image_url = raw.image_url || null;
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
 class CloudSyncService {
   private status: CloudSyncStatus = {
     isSyncing: false,
@@ -565,52 +619,11 @@ class CloudSyncService {
       await this.ensureShopProfileExistsInCloud(shopIdToUse, isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL');
 
       const userId = await this.getUserId();
-      const payload: Record<string, unknown> = {
-        id: product.id,
-        shop_id: shopIdToUse,
-        business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
-        name: product.name,
-        marathi_name: product.marathi_name || null,
-        search_keywords: product.search_keywords || null,
-        short_code: product.short_code,
-        barcode: product.barcode,
-        category: product.category,
-        unit_type: product.unit_type,
-        unit: product.unit_type,
-        purchase_price: product.purchase_price,
-        raw_material_cost: product.raw_material_cost || null,
-        equipment_fuel_cost: product.equipment_fuel_cost || null,
-        labour_cost: product.labour_cost || null,
-        wholesale_price: product.wholesale_price || null,
-        selling_price: product.selling_price,
-        mrp: product.mrp,
-        current_stock: product.current_stock,
-        low_stock_threshold: product.low_stock_threshold,
-        last_supplier_name: product.last_supplier_name,
-        supplier_phone: product.supplier_phone || null,
-        wholesaler_id: product.wholesaler_id || null,
-        loan_account_id: product.loan_account_id || null,
-        is_loan_funded: product.is_loan_funded ?? false,
-        shelf_life_days: product.shelf_life_days || null,
-        batch_notes: product.batch_notes || null,
-        image_url: product.image_url || null,
-        expiry_date: product.expiry_date || null,
-        is_quick_tap: product.is_quick_tap,
-        updated_at: product.updated_at || new Date().toISOString(),
-      };
-      if (userId) payload.user_id = userId;
+      const payload = sanitizeProductForSupabase(product, shopIdToUse, userId);
 
       const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
       if (error) {
-        const fallbackPayload = { ...payload };
-        delete fallbackPayload.unit;
-        delete fallbackPayload.marathi_name;
-        delete fallbackPayload.search_keywords;
-        delete fallbackPayload.wholesaler_id;
-        delete fallbackPayload.image_url;
-        delete fallbackPayload.supplier_phone;
-        delete fallbackPayload.loan_account_id;
-        await supabase.from('products').upsert(fallbackPayload, { onConflict: 'id' });
+        console.warn('Sync product to Supabase failed:', error.message);
       }
     } catch (err) {
       console.warn('Background sync product to Supabase failed (offline mode):', err);
@@ -1123,50 +1136,15 @@ class CloudSyncService {
           const rows = prods.map((p) => {
             const isHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD' || isHomemadeFoodCategoryOrName(p);
             const targetShopId = isHmf ? hmfShopId : (p.shop_id || primaryShopId);
-            const r: Record<string, unknown> = {
-              id: p.id,
-              shop_id: targetShopId,
-              business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
-              name: p.name,
-              marathi_name: p.marathi_name || null,
-              search_keywords: p.search_keywords || null,
-              short_code: p.short_code,
-              barcode: p.barcode,
-              category: p.category,
-              unit_type: p.unit_type,
-              purchase_price: p.purchase_price,
-              selling_price: p.selling_price,
-              mrp: p.mrp,
-              current_stock: p.current_stock,
-              low_stock_threshold: p.low_stock_threshold,
-              last_supplier_name: p.last_supplier_name,
-              supplier_phone: p.supplier_phone || null,
-              wholesaler_id: p.wholesaler_id || null,
-              image_url: p.image_url || null,
-              expiry_date: p.expiry_date || null,
-              is_quick_tap: p.is_quick_tap,
-              updated_at: p.updated_at,
-            };
-            if (userId) r.user_id = userId;
-            return r;
+            return sanitizeProductForSupabase(p, targetShopId, userId);
           });
-          // Upsert in chunks of 50 with graceful column fallback
+          // Upsert in chunks of 50
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
             const { error } = await supabase.from('products').upsert(chunk, { onConflict: 'id' });
             if (error) {
-              const fallbackChunk = chunk.map((row) => {
-                const copy = { ...row };
-                delete copy.marathi_name;
-                delete copy.search_keywords;
-                delete copy.wholesaler_id;
-                delete copy.image_url;
-                delete copy.supplier_phone;
-                delete copy.loan_account_id;
-                return copy;
-              });
-              const { error: retryErr } = await supabase.from('products').upsert(fallbackChunk, { onConflict: 'id' });
-              if (retryErr) throw new Error(retryErr.message);
+              console.warn('Bulk upsert products chunk error:', error.message);
+              throw new Error(error.message);
             }
             pushedCount += chunk.length;
           }
@@ -1874,9 +1852,14 @@ class CloudSyncService {
               prodShopId,
               isHomemadeShopId(prodShopId) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL'
             );
+            const userId = await this.getUserId();
+            const sanitized = sanitizeProductForSupabase(item.payload, prodShopId, userId);
+            const { error } = await supabase.from('products').upsert(sanitized, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
+          } else {
+            const { error } = await supabase.from(item.table_name).upsert(item.payload, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
           }
-          const { error } = await supabase.from(item.table_name).upsert(item.payload, { onConflict: 'id' });
-          if (error) throw new Error(error.message);
         } else if (item.operation === 'DELETE') {
           const targetId = item.payload.id as string;
           if (targetId) {
