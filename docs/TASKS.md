@@ -34,6 +34,11 @@ All items below are 100% implemented, passing tests, and deployed to production:
 - [x] **Module 3: Inventory Master & Catalog Engine**
   - [x] 105-product authentic Maharashtra Kirana catalog with Marathi/English search keywords.
   - [x] 1-Click CSV / sheet import and export.
+  - [x] Resolved header collision bug in CSV parser (`findColIdx` with `excludeIndices`) preventing English column from overriding with Marathi column.
+  - [x] Preserved 0 stock products on CSV import (`availableStock >= 0`).
+  - [x] Added missing grocery categories (`Tea & Beverages`, `Biscuits & Snacks`, `Soaps & Cleaning`, `Dairy & Bakery`) to `KIRANA_CATEGORIES`.
+  - [x] Implemented `sanitizeProductForSupabase` to strip local-only columns (`business_type`, `marathi_name`, etc.) resolving PostgREST `PGRST204` schema cache errors.
+  - [x] Implemented `normalizeUnitForSupabase` mapping to Supabase's enum `unit_type_enum: ('PCS', 'KG_LOOSE', 'LTR', 'PACK')`.
   - [x] Dynamic gross margin badges (Green $\ge 15\%$, Amber $5-14.9\%$, Red $< 5\%$).
   - [x] Wholesaler inline registration and product linking.
 
