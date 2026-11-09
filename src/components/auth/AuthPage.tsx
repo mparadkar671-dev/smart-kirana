@@ -180,10 +180,10 @@ export const AuthPage: React.FC = () => {
         ownerName: ownerName.trim() || 'Store Member',
         phone: phone.trim() || '',
         role,
-        shopId: verifiedStore?.id || (businessType === 'HOMEMADE_FOOD' ? 'homemade_food_shop' : selectedShopId || 'current_shop'),
+        shopId: verifiedStore?.id || selectedShopId || 'current_shop',
         inviteCode: isJoining ? inviteCode.trim() : undefined,
         isJoiningExisting: isJoining,
-        businessType,
+        businessType: 'KIRANA_RETAIL',
       });
 
       if (res.needEmailVerification) {
@@ -557,41 +557,23 @@ export const AuthPage: React.FC = () => {
                   {/* Multi-Tenant Store Setup: Owner registers Business Category & Store Name; Staff registers with 6-Digit Store Invite Code */}
                   {role === 'OWNER' ? (
                     <div className="space-y-3 pt-1">
-                      <div>
-                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1">
-                          Business Category *
-                        </label>
-                        <div className="grid grid-cols-2 gap-2" data-testid="signup-business-type-selector">
-                          <button
-                            type="button"
-                            onClick={() => setBusinessType('KIRANA_RETAIL')}
-                            className={`p-2 rounded-xl border text-left transition ${
-                              businessType === 'KIRANA_RETAIL'
-                                ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold'
-                                : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300'
-                            }`}
-                          >
-                            <div className="text-xs font-bold">🏪 General / Kirana Store</div>
-                            <div className="text-[10px] text-slate-400 dark:text-slate-500">Retail grocery &amp; staples</div>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setBusinessType('HOMEMADE_FOOD')}
-                            className={`p-2 rounded-xl border text-left transition ${
-                              businessType === 'HOMEMADE_FOOD'
-                                ? 'border-orange-500 bg-orange-500/10 text-orange-600 dark:text-orange-400 font-bold'
-                                : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300'
-                            }`}
-                          >
-                            <div className="text-xs font-bold">🍲 Homemade Food &amp; Gruh Udyog</div>
-                            <div className="text-[10px] text-slate-400 dark:text-slate-500">Laddus, Modak, Ghavane, Bhakri</div>
-                          </button>
+                      <div className="p-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 flex items-center justify-between">
+                        <div>
+                          <div className="text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                            <span>🏪 Kirana &amp; General Store</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                            Fast Retail Grocery POS, Barcodes, Inventory &amp; Khata
+                          </div>
                         </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-600 text-white">
+                          Pure Retail
+                        </span>
                       </div>
 
                       <div className="space-y-1.5">
                         <label className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                          {businessType === 'HOMEMADE_FOOD' ? 'Gruh Udyog / Food Business Name *' : 'Store Name *'}
+                          Store Name *
                         </label>
                         <div className="relative">
                           <Store className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -600,11 +582,7 @@ export const AuthPage: React.FC = () => {
                             required
                             value={shopName}
                             onChange={(e) => setShopName(e.target.value)}
-                            placeholder={
-                              businessType === 'HOMEMADE_FOOD'
-                                ? 'e.g. Laxmi Vatsalya Gruh Udyog'
-                                : 'e.g. Laxi Vatsalaya Store'
-                            }
+                            placeholder="e.g. Laxmi Vatsalya Kirana Store"
                             className="w-full pl-9 pr-3 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
                           />
                         </div>

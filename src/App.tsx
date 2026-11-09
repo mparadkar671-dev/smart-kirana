@@ -16,7 +16,7 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Sparkles, PlusCircle, CloudDownload } from 'lucide-react';
 import { MAHARASHTRA_105_KIRANA_CATALOG, bulkImportKiranaProducts } from './services/csvCatalogImporter';
 import { cloudSyncService } from './services/cloudSyncService';
-import { filterProductsForBusiness, isHomemadeShopId, getBaseKiranaShopId } from './utils/businessFirewall';
+import { filterProductsForBusiness, getBaseKiranaShopId } from './utils/businessFirewall';
 import { getActiveShopId, getActiveBusinessType } from './services/tenantManager';
 
 const MainApp: React.FC = () => {

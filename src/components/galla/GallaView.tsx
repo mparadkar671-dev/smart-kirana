@@ -9,7 +9,6 @@ import {
 } from '../../types';
 import { db } from '../../db/db';
 import { GallaService } from '../../services/gallaService';
-import { HomemadeFoodService, CapitalAndExpenseSummary } from '../../services/homemadeFoodService';
 import { getActiveShopId, getActiveBusinessType } from '../../services/tenantManager';
 import { formatINR, roundCurrency } from '../../utils/math';
 import {
@@ -47,7 +46,6 @@ export const GallaView: React.FC<GallaViewProps> = ({ shopProfile }) => {
   const [expAmount, setExpAmount] = useState<number>(0);
   const [expPaidVia, setExpPaidVia] = useState<ExpensePaidVia>('CASH_GALLA');
   const [expDesc, setExpDesc] = useState('');
-  const [capitalSummary, setCapitalSummary] = useState<CapitalAndExpenseSummary | null>(null);
 
   // Hotkey: N to Record Expense (when not focused on input) & Esc to close modal
   useEffect(() => {
@@ -92,9 +90,6 @@ export const GallaView: React.FC<GallaViewProps> = ({ shopProfile }) => {
       .reverse()
       .sortBy('created_at');
     setExpenses(expList);
-
-    const capSum = await HomemadeFoodService.getCapitalAndExpenseSummary();
-    setCapitalSummary(capSum);
   };
 
   const handleUpdateOpeningCash = async () => {
@@ -321,94 +316,7 @@ export const GallaView: React.FC<GallaViewProps> = ({ shopProfile }) => {
         </div>
       </div>
 
-      {/* Capital Investment Recovery & Expense Classification Card (Step 4) */}
-      {capitalSummary && (
-        <div
-          data-testid="capital-investment-recovery-card"
-          className="bg-gradient-to-r from-amber-50/70 via-white to-orange-50/70 dark:from-slate-900 dark:via-slate-900 dark:to-amber-950/20 rounded-2xl border border-amber-200 dark:border-amber-800/60 p-5 shadow-2xs space-y-4 transition-colors"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/70 dark:border-slate-800 pb-3">
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>🏗️ Capital Investment Recovery &amp; Business vs. Home Expense Tracker</span>
-                <span
-                  data-testid="capital-recovered-pct-badge"
-                  className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-amber-600 text-white"
-                >
-                  {capitalSummary.capitalRecoveredPct.toFixed(1)}% Capital Recovered
-                </span>
-              </h2>
-              <p className="text-xs text-slate-600 dark:text-slate-400">
-                Tracks One-Time Initial Setup Investments (Bhatti, Bhirda, Steamer, Scales) separately from Daily Raw Material, Operating &amp; Family Drawings
-              </p>
-            </div>
-          </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-              <div className="text-[10px] font-bold uppercase text-slate-500">1. Total Initial Investment</div>
-              <div
-                data-testid="cap-total-initial-investment"
-                className="text-lg font-extrabold text-indigo-700 dark:text-indigo-400 mt-0.5"
-              >
-                {formatINR(capitalSummary.totalInitialInvestmentAllTime)}
-              </div>
-              <div className="text-[10px] text-slate-400">Setup, Utensils, Bhatti, Scales</div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-              <div className="text-[10px] font-bold uppercase text-slate-500">2. Cumulative True Net Profit</div>
-              <div
-                data-testid="cap-cumulative-net-profit"
-                className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5"
-              >
-                {formatINR(capitalSummary.cumulativeTrueNetProfit)}
-              </div>
-              <div className="text-[10px] text-slate-400">After Raw Material &amp; Operating Cost</div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-              <div className="text-[10px] font-bold uppercase text-slate-500">3. Remaining to Break Even</div>
-              <div
-                data-testid="cap-remaining-breakeven"
-                className="text-lg font-extrabold text-amber-600 dark:text-amber-400 mt-0.5"
-              >
-                {formatINR(capitalSummary.remainingToBreakEven)}
-              </div>
-              <div className="text-[10px] text-slate-400">
-                {capitalSummary.remainingToBreakEven === 0 && capitalSummary.totalInitialInvestmentAllTime > 0
-                  ? '🎉 100% Capital Recovered!'
-                  : 'Capital Payback Balance'}
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-              <div className="text-[10px] font-bold uppercase text-slate-500">4. Home &amp; Family Supported</div>
-              <div
-                data-testid="cap-home-family-expenses"
-                className="text-lg font-extrabold text-purple-700 dark:text-purple-400 mt-0.5"
-              >
-                {formatINR(capitalSummary.periodHomeFamilyExpenses)}
-              </div>
-              <div className="text-[10px] text-slate-400">Home expenses paid from business</div>
-            </div>
-          </div>
-
-          {/* Progress Bar */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[11px] font-bold text-slate-600 dark:text-slate-300">
-              <span>Capital Payback Progress</span>
-              <span>{Math.min(100, capitalSummary.capitalRecoveredPct).toFixed(1)}%</span>
-            </div>
-            <div className="w-full h-2.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 transition-all duration-300"
-                style={{ width: `${Math.min(100, Math.max(0, capitalSummary.capitalRecoveredPct))}%` }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Today's Recorded Expenses Table */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xs overflow-hidden transition-colors">

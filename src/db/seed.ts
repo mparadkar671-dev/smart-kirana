@@ -544,6 +544,7 @@ export const INITIAL_CUSTOMERS: Customer[] = [
 export const DEFAULT_SHOP_PROFILE: ShopProfile = {
   id: 'current_shop',
   shop_id: 'current_shop',
+  business_type: 'KIRANA_RETAIL',
   invite_code: 'KRN-4829',
   reset_epoch: 1,
   shop_name: 'Shree Ganesh Kirana & General Store',
