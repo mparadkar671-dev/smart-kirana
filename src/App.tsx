@@ -14,7 +14,11 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { AuthPage } from './components/auth/AuthPage';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { Sparkles, PlusCircle, CloudDownload } from 'lucide-react';
-import { MAHARASHTRA_105_KIRANA_CATALOG, bulkImportKiranaProducts } from './services/csvCatalogImporter';
+import {
+  MAHARASHTRA_105_KIRANA_CATALOG,
+  MAHARASHTRA_170_KIRANA_CATALOG,
+  bulkImportKiranaProducts,
+} from './services/csvCatalogImporter';
 import { cloudSyncService } from './services/cloudSyncService';
 import { filterProductsForBusiness, getBaseKiranaShopId } from './utils/businessFirewall';
 import { getActiveShopId, getActiveBusinessType } from './services/tenantManager';
@@ -25,7 +29,7 @@ const MainApp: React.FC = () => {
   const [isDbReady, setIsDbReady] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
 
-  // Initialize DB on mount and auto-populate the 105 Marathi/English catalog if empty in browser
+  // Initialize DB on mount and auto-populate the 170 Marathi/English catalog if empty in browser
   useEffect(() => {
     let mounted = true;
     const isTestEnv = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
@@ -33,8 +37,8 @@ const MainApp: React.FC = () => {
     db.initializeDatabase().then(async () => {
       if (!isTestEnv) {
         const allProds = await db.products.toArray();
-        if (allProds.length === 0) {
-          await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+        if (allProds.length < 169) {
+          await bulkImportKiranaProducts(MAHARASHTRA_170_KIRANA_CATALOG);
         }
       }
       if (mounted) setIsDbReady(true);
@@ -174,7 +178,7 @@ const MainApp: React.FC = () => {
               onClick={async () => {
                 setIsRecovering(true);
                 try {
-                  await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+                  await bulkImportKiranaProducts(MAHARASHTRA_170_KIRANA_CATALOG);
                 } finally {
                   setIsRecovering(false);
                 }
@@ -183,7 +187,7 @@ const MainApp: React.FC = () => {
               className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition shadow-xs disabled:opacity-50"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              {isRecovering ? 'Restoring...' : '⚡ 1-Click Restore 105 Marathi/English Products'}
+              {isRecovering ? 'Restoring...' : '⚡ 1-Click Load 170 Marathi/English Products'}
             </button>
             <button
               onClick={async () => {
@@ -191,7 +195,7 @@ const MainApp: React.FC = () => {
                 try {
                   const res = await cloudSyncService.restoreProductsFromCloudOrArchive();
                   if (res.restoredCount === 0) {
-                    await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG);
+                    await bulkImportKiranaProducts(MAHARASHTRA_170_KIRANA_CATALOG);
                   }
                 } finally {
                   setIsRecovering(false);

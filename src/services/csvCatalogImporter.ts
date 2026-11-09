@@ -3,6 +3,10 @@ import { Product, UnitType } from '../types';
 import { generateUniqueStoreBarcode } from '../utils/barcodeGenerator';
 import { generateSmartProductThumbnail } from '../utils/productImageEngine';
 import { cloudSyncService } from './cloudSyncService';
+import { MAHARASHTRA_170_KIRANA_CATALOG } from './maharashtra170Catalog';
+
+export { MAHARASHTRA_170_KIRANA_CATALOG } from './maharashtra170Catalog';
+export const MASTER_KIRANA_CATALOG = MAHARASHTRA_170_KIRANA_CATALOG;
 
 export interface RawSheetProductRow {
   marathiName: string;
@@ -539,6 +543,31 @@ export async function bulkImportKiranaProducts(
 
   const totalProducts = await db.products.count();
   return { importedCount, updatedCount, totalProducts };
+}
+
+/**
+ * Exports the 170-product Maharashtra Kirana master catalog as a ready-to-edit CSV string
+ */
+export function export170KiranaCatalogCsvString(): string {
+  const header =
+    'Product Name (Marathi),Product Name (English),Category,Search Keywords (POS),Sell Price,Purchase Price,MRP,Available Stock';
+  const lines = MAHARASHTRA_170_KIRANA_CATALOG.map((r) => {
+    const escapeCsv = (val: string | number | undefined) => {
+      const s = String(val ?? '');
+      return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    return [
+      escapeCsv(r.marathiName),
+      escapeCsv(r.englishName),
+      escapeCsv(r.category),
+      escapeCsv(r.searchKeywords),
+      escapeCsv(r.sellPrice),
+      escapeCsv(r.purchasePrice),
+      escapeCsv(r.mrp),
+      escapeCsv(r.availableStock),
+    ].join(',');
+  });
+  return [header, ...lines].join('\n');
 }
 
 /**

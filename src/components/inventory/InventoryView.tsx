@@ -9,9 +9,11 @@ import { InventoryService } from '../../services/inventoryService';
 import { filterProductsForBusiness, getActiveBusinessType } from '../../utils/businessFirewall';
 import {
   MAHARASHTRA_105_KIRANA_CATALOG,
+  MAHARASHTRA_170_KIRANA_CATALOG,
   parseKiranaCatalogCsv,
   bulkImportKiranaProducts,
   export105KiranaCatalogCsvString,
+  export170KiranaCatalogCsvString,
 } from '../../services/csvCatalogImporter';
 import { normalizeProductImageToSquare, generateSmartProductThumbnail } from '../../utils/productImageEngine';
 import { formatINR, calculateProfitMarginPercent } from '../../utils/math';
@@ -283,9 +285,26 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     }
   };
 
-  // Handle downloading the 105-product sample CSV (Untitled_spreadsheet.csv)
+  // Handle 1-Click Built-in 170 Maharashtra Kirana Master Catalog Import
+  const handleImport170MasterCatalog = async () => {
+    setIsImportingCsv(true);
+    setImportFeedback(null);
+    try {
+      const res = await bulkImportKiranaProducts(MAHARASHTRA_170_KIRANA_CATALOG);
+      setImportFeedback(
+        `✅ Loaded all 170 Maharashtra Kirana master products (${res.importedCount} added, ${res.updatedCount} refreshed) with 160x160px images, GS1 barcodes & Marathi/Hinglish search keywords!`
+      );
+      if (onRefresh) onRefresh();
+    } catch (err: any) {
+      alert(`170-Product Import failed: ${err.message}`);
+    } finally {
+      setIsImportingCsv(false);
+    }
+  };
+
+  // Handle downloading the Maharashtra Kirana catalog CSV
   const handleDownloadSample105Csv = () => {
-    const csvContent = export105KiranaCatalogCsvString();
+    const csvContent = export170KiranaCatalogCsvString();
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -335,7 +354,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
             className="flex-1 sm:flex-initial px-3.5 py-2.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition"
           >
             <Upload className="w-4 h-4" />
-            <span>📥 Import 105 Kirana Catalog</span>
+            <span>📥 Import Kirana Catalog</span>
           </button>
 
           <button
@@ -454,10 +473,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   Instant 1-Click Preset
                 </span>
                 <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                  105-Product Maharashtra Kirana Bilingual Catalog
+                  170-Product Maharashtra Kirana Master Catalog
                 </h4>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Pre-loaded with all 105 Marathi + English items (तूर डाळ, साखर, शेंगदाणे, गगंगिरी मसाला, सोसायटी चहा, संतूर साबण, विम बार, पॅराशूट, इ.) with 160x160px pack illustrations &amp; Hinglish F2 keywords.
+                  Pre-loaded with all 170 Marathi + English items (तूर डाळ, साखर, शेंगदाणे, मसाले, सोसायटी चहा, संतूर साबण, विम बार, पॅराशूट, इ.) with 160x160px pack illustrations &amp; Hinglish F2 keywords.
                 </p>
               </div>
 
@@ -465,12 +484,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <button
                   type="button"
                   disabled={isImportingCsv}
-                  data-testid="import-105-maharashtra-btn"
-                  onClick={handleImport105BuiltInCatalog}
+                  data-testid="import-170-master-btn"
+                  onClick={handleImport170MasterCatalog}
                   className="flex-1 py-2.5 px-4 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition disabled:opacity-50"
                 >
                   <Sparkles className="w-4 h-4" />
-                  <span>{isImportingCsv ? 'Importing 105 Items...' : '⚡ Load 105 Marathi/English Products'}</span>
+                  <span>{isImportingCsv ? 'Importing 170 Items...' : '⚡ Load 170 Master Products'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isImportingCsv}
+                  data-testid="import-105-maharashtra-btn"
+                  onClick={handleImport105BuiltInCatalog}
+                  className="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition disabled:opacity-50"
+                  title="Legacy 105 Preset"
+                >
+                  <span>105 Preset</span>
                 </button>
 
                 <button
