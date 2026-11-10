@@ -41,35 +41,22 @@ const MainApp: React.FC = () => {
           localStorage.setItem('kirana_active_shop_id', 'current_shop');
         }
 
-        // Rescue any products trapped in homemadeDb from earlier dual-business sessions
-        try {
-          const trappedProds = await homemadeDb.products.toArray();
-          if (trappedProds.length > 0) {
-            const rescued = trappedProds.map((p) => ({
-              ...p,
-              shop_id: 'current_shop',
-              business_type: 'KIRANA_RETAIL' as const,
-            }));
-            await kiranaDb.products.bulkPut(rescued);
-            await homemadeDb.products.clear();
-          }
-        } catch {
-          // Ignore rescue errors
-        }
-
-        // Automatically pull from cloud on startup so products added directly in Supabase or across devices are visible immediately
-        await cloudSyncService.pullAllFromCloud().catch((err) => {
-          console.warn('Initial cloud pull failed (offline or network):', err);
-        });
-
         // One-time clean reset of the exact 170 CSV products for Laxmi Vatsalya General Store
+        // Wipes all legacy prod-105-* and prod-csv-* duplicates and stale sync_outbox entries
         const exactResetDone =
           typeof localStorage !== 'undefined' &&
-          localStorage.getItem('laxmi_vatsalya_170_exact_v2') === 'done';
+          localStorage.getItem('laxmi_vatsalya_clean_170_v3') === 'done';
 
         if (!exactResetDone) {
-          await kiranaDb.products.clear().catch(() => {});
-          await homemadeDb.products.clear().catch(() => {});
+          if (typeof localStorage !== 'undefined') {
+            localStorage.removeItem('kirana_deleted_product_ids');
+          }
+          await Promise.all([
+            kiranaDb.sync_outbox.clear().catch(() => {}),
+            homemadeDb.sync_outbox.clear().catch(() => {}),
+            kiranaDb.products.clear().catch(() => {}),
+            homemadeDb.products.clear().catch(() => {}),
+          ]);
           await db.updateShopProfile({
             id: 'current_shop',
             shop_id: 'current_shop',
@@ -81,14 +68,39 @@ const MainApp: React.FC = () => {
           }).catch(() => {});
           await bulkImportKiranaProducts(MAHARASHTRA_170_KIRANA_CATALOG);
           if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('laxmi_vatsalya_170_exact_v2', 'done');
+            localStorage.setItem('laxmi_vatsalya_clean_170_v3', 'done');
+          }
+        } else {
+          // Clean any residual legacy duplicate IDs (prod-105-*, prod-csv-*) before cloud pull
+          try {
+            const existing = await kiranaDb.products.toArray();
+            const seenNames = new Set<string>();
+            const dupIds: string[] = [];
+            for (const p of existing) {
+              if (p.id.startsWith('prod-105-') || p.id.startsWith('prod-csv-')) {
+                dupIds.push(p.id);
+                continue;
+              }
+              const norm = (p.name || '').trim().toLowerCase();
+              if (norm && seenNames.has(norm)) {
+                dupIds.push(p.id);
+                continue;
+              }
+              if (norm) seenNames.add(norm);
+            }
+            if (dupIds.length > 0) {
+              await kiranaDb.products.bulkDelete(dupIds);
+              cloudSyncService.deleteProductsBulk(dupIds);
+            }
+          } catch {
+            // ignore
           }
         }
 
-        const allProds = await kiranaDb.products.toArray();
-        if (allProds.length < 169) {
-          await bulkImportKiranaProducts(MAHARASHTRA_170_KIRANA_CATALOG);
-        }
+        // Pull latest state from cloud (respecting deleted tombstones & deduplicating)
+        await cloudSyncService.pullAllFromCloud().catch((err) => {
+          console.warn('Initial cloud pull failed (offline or network):', err);
+        });
       }
       if (mounted) setIsDbReady(true);
     });
@@ -160,9 +172,15 @@ const MainApp: React.FC = () => {
     async () => {
       if (!isTestEnv) {
         const kiranaList = await kiranaDb.products.toArray();
-        if (kiranaList.length > 0) return kiranaList;
-        const hmfList = await homemadeDb.products.toArray().catch(() => []);
-        return hmfList;
+        const seenNames = new Set<string>();
+        const deduped = kiranaList.filter((p) => {
+          if (p.id.startsWith('prod-105-') || p.id.startsWith('prod-csv-')) return false;
+          const norm = (p.name || '').trim().toLowerCase();
+          if (norm && seenNames.has(norm)) return false;
+          if (norm) seenNames.add(norm);
+          return true;
+        });
+        return deduped;
       }
       const active = getActiveDb(activeBusinessType);
       const all = await active.products.toArray();

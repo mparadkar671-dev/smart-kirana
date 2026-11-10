@@ -26,6 +26,23 @@ import {
   getActiveBusinessType,
 } from '../utils/businessFirewall';
 
+function getLocalDeletedProductTombstones(): Set<string> {
+  if (typeof localStorage === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem('kirana_deleted_product_ids');
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function isLegacyDuplicateId(id?: string | null): boolean {
+  if (!id) return false;
+  return id.startsWith('prod-105-') || id.startsWith('prod-csv-');
+}
+
 export interface CloudSyncStatus {
   isSyncing: boolean;
   lastSyncedAt: string | null;
@@ -379,6 +396,13 @@ class CloudSyncService {
           }
         } else if ((targetDb as any)[table]) {
           if (table === 'products') {
+            const tombstones = getLocalDeletedProductTombstones();
+            if (!newRecord.id || tombstones.has(newRecord.id) || isLegacyDuplicateId(newRecord.id)) {
+              if (newRecord.id) {
+                this.deleteProductsBulk([newRecord.id]);
+              }
+              return;
+            }
             const isHmf = isHomemadeShopId(newRecord.shop_id) || newRecord.business_type === 'HOMEMADE_FOOD';
             newRecord.business_type = isHmf ? 'HOMEMADE_FOOD' : resolveProductBusinessType(newRecord);
             if (!newRecord.unit_type && newRecord.unit) {
@@ -740,14 +764,24 @@ class CloudSyncService {
    * Deletes a single product from Supabase cloud
    */
   async deleteProduct(productId: string): Promise<void> {
-    if (!supabase || this.isTestEnv) return;
+    await this.deleteProductsBulk([productId]);
+  }
+
+  /**
+   * Bulk deletes products from Supabase cloud in safe batches of 100
+   */
+  async deleteProductsBulk(productIds: string[]): Promise<void> {
+    if (!supabase || this.isTestEnv || !productIds || productIds.length === 0) return;
     try {
-      const { error } = await supabase.from('products').delete().eq('id', productId);
-      if (error) {
-        console.warn('Delete product from Supabase returned error:', error.message);
+      for (let i = 0; i < productIds.length; i += 100) {
+        const chunk = productIds.slice(i, i + 100);
+        const { error } = await supabase.from('products').delete().in('id', chunk);
+        if (error) {
+          console.warn('Bulk delete products from Supabase returned error:', error.message);
+        }
       }
     } catch (err) {
-      console.warn('Background delete product from Supabase failed:', err);
+      console.warn('Background bulk delete products from Supabase failed:', err);
     }
   }
 
@@ -1115,15 +1149,37 @@ class CloudSyncService {
         console.warn('Wholesalers sync notice:', e);
       }
 
-      // 3. Sync Products from BOTH kiranaDb and homemadeDb
+      // 3. Sync Products from BOTH kiranaDb and homemadeDb (excluding tombstoned or legacy duplicate IDs)
       try {
         const [kiranaProds, homemadeProds] = await Promise.all([
           kiranaDb.products.toArray(),
           homemadeDb.products.toArray(),
         ]);
+        const tombstones = getLocalDeletedProductTombstones();
         const prodMap = new Map<string, Product>();
-        for (const p of kiranaProds) prodMap.set(p.id, p);
-        for (const p of homemadeProds) prodMap.set(p.id, p);
+        const seenNames = new Set<string>();
+        const duplicateLocalIdsToPurge: string[] = [];
+
+        for (const p of [...kiranaProds, ...homemadeProds]) {
+          if (tombstones.has(p.id) || isLegacyDuplicateId(p.id)) {
+            duplicateLocalIdsToPurge.push(p.id);
+            continue;
+          }
+          const normName = (p.name || '').trim().toLowerCase();
+          if (normName && seenNames.has(normName)) {
+            duplicateLocalIdsToPurge.push(p.id);
+            continue;
+          }
+          if (normName) seenNames.add(normName);
+          prodMap.set(p.id, p);
+        }
+
+        if (duplicateLocalIdsToPurge.length > 0) {
+          await kiranaDb.products.bulkDelete(duplicateLocalIdsToPurge).catch(() => {});
+          await homemadeDb.products.bulkDelete(duplicateLocalIdsToPurge).catch(() => {});
+          this.deleteProductsBulk(duplicateLocalIdsToPurge);
+        }
+
         const prods = Array.from(prodMap.values());
 
         if (prods.length > 0) {
@@ -1361,7 +1417,7 @@ class CloudSyncService {
         console.warn('Pull shop_profile failed:', e);
       }
 
-      // 2. Pull Products strictly scoped by shop_id and reconcile deletions
+      // 2. Pull Products strictly scoped by shop_id and reconcile deletions / duplicates
       try {
         const { data: prods, error } = await supabase
           .from('products')
@@ -1370,7 +1426,29 @@ class CloudSyncService {
 
         if (error) throw new Error(error.message);
         if (prods) {
-          for (const p of prods) {
+          const tombstones = getLocalDeletedProductTombstones();
+          const seenRemoteNames = new Set<string>();
+          const remoteIdsToPurge: string[] = [];
+
+          // Sort so canonical prod-170-* IDs are processed first before any duplicates
+          const sortedProds = [...prods].sort((a, b) => {
+            const aCanon = String(a.id || '').startsWith('prod-170-') ? 0 : 1;
+            const bCanon = String(b.id || '').startsWith('prod-170-') ? 0 : 1;
+            return aCanon - bCanon;
+          });
+
+          for (const p of sortedProds) {
+            if (!p.id || tombstones.has(p.id) || isLegacyDuplicateId(p.id)) {
+              if (p.id) remoteIdsToPurge.push(p.id);
+              continue;
+            }
+            const normName = String(p.name || '').trim().toLowerCase();
+            if (normName && seenRemoteNames.has(normName)) {
+              remoteIdsToPurge.push(p.id);
+              continue;
+            }
+            if (normName) seenRemoteNames.add(normName);
+
             const isHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD' || isHomemadeFoodCategoryOrName(p);
             const itemShopId = p.shop_id || (isHmf ? hmfShopId : primaryShopId);
             const productRecord: Product = {
@@ -1406,6 +1484,12 @@ class CloudSyncService {
             }
             await db.products.put(productRecord).catch(() => { });
             pulledCount++;
+          }
+
+          if (remoteIdsToPurge.length > 0) {
+            await kiranaDb.products.bulkDelete(remoteIdsToPurge).catch(() => {});
+            await homemadeDb.products.bulkDelete(remoteIdsToPurge).catch(() => {});
+            this.deleteProductsBulk(remoteIdsToPurge);
           }
         }
       } catch (e) {
@@ -1840,6 +1924,12 @@ class CloudSyncService {
       try {
         if (item.operation === 'INSERT' || item.operation === 'UPDATE') {
           if (item.table_name === 'products') {
+            const pid = String(item.payload?.id || '');
+            const tombstones = getLocalDeletedProductTombstones();
+            if (!pid || tombstones.has(pid) || isLegacyDuplicateId(pid)) {
+              await targetDb.sync_outbox.delete(item.id);
+              continue;
+            }
             const prodShopId = (item.payload?.shop_id as string) || (item.shop_id as string);
             await this.ensureShopProfileExistsInCloud(
               prodShopId,

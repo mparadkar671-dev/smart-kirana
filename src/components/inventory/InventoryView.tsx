@@ -73,10 +73,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   );
   const products = (passedProducts && passedProducts.length > 0) ? passedProducts : (liveDbProducts || []);
 
-  // Strict business isolation defense-in-depth with safe single-store fallback for Laxmi Vatsalya General Store
+  // Strict business isolation defense-in-depth with safe single-store fallback & duplicate prevention
   const businessProducts = useMemo(() => {
     if (!isTestEnv) {
-      return products;
+      const seenNames = new Set<string>();
+      return products.filter((p) => {
+        if (p.id.startsWith('prod-105-') || p.id.startsWith('prod-csv-')) return false;
+        const norm = (p.name || '').trim().toLowerCase();
+        if (norm && seenNames.has(norm)) return false;
+        if (norm) seenNames.add(norm);
+        return true;
+      });
     }
     const filtered = filterProductsForBusiness(products, activeBusinessType);
     if (filtered.length === 0 && products.length > 0) {
@@ -551,7 +558,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           }`}
         >
           <Layers className="w-4 h-4" />
-          <span>All Products ({products.length})</span>
+          <span>All Products ({businessProducts.length})</span>
         </button>
 
         <button

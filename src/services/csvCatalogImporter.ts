@@ -3,6 +3,7 @@ import { Product, UnitType } from '../types';
 import { generateUniqueStoreBarcode } from '../utils/barcodeGenerator';
 import { generateSmartProductThumbnail } from '../utils/productImageEngine';
 import { cloudSyncService } from './cloudSyncService';
+import { unmarkProductsDeletedTombstone, isLegacyDuplicateProductId } from './inventoryService';
 import { MAHARASHTRA_170_KIRANA_CATALOG } from './maharashtra170Catalog';
 
 export { MAHARASHTRA_170_KIRANA_CATALOG } from './maharashtra170Catalog';
@@ -427,6 +428,14 @@ export async function bulkImportKiranaProducts(
 
   const productsToSave: Product[] = [];
   const matchedExistingIds = new Set<string>();
+  const obsoleteDuplicateIds = new Set<string>();
+
+  // Purge any legacy timestamped duplicate IDs (prod-105-*, prod-csv-*)
+  for (const ep of existingProducts) {
+    if (isLegacyDuplicateProductId(ep.id)) {
+      obsoleteDuplicateIds.add(ep.id);
+    }
+  }
 
   rows.forEach((row, index) => {
     const marathi = row.marathiName.trim();
@@ -441,16 +450,21 @@ export async function bulkImportKiranaProducts(
     const deterministicId = (row as any).id || `prod-170-${String(index + 1).padStart(3, '0')}`;
 
     // Check if this product already exists by stable ID or name without colliding across batch
-    const existingMatch = existingProducts.find(
+    const matchingExistingAll = existingProducts.filter(
       (p) =>
-        !matchedExistingIds.has(p.id) &&
-        (p.id === deterministicId ||
-          p.name.toLowerCase() === bilingualDisplayName.toLowerCase() ||
-          (english && p.name.toLowerCase() === english.toLowerCase()) ||
-          (marathi && p.marathi_name === marathi))
+        p.id === deterministicId ||
+        p.name.toLowerCase() === bilingualDisplayName.toLowerCase() ||
+        (english && p.name.toLowerCase() === english.toLowerCase()) ||
+        (marathi && p.marathi_name === marathi)
     );
+    const existingMatch = matchingExistingAll.find((p) => !matchedExistingIds.has(p.id));
     if (existingMatch) {
       matchedExistingIds.add(existingMatch.id);
+    }
+    for (const dup of matchingExistingAll) {
+      if (dup.id !== deterministicId) {
+        obsoleteDuplicateIds.add(dup.id);
+      }
     }
 
     const barcode =
@@ -492,8 +506,11 @@ export async function bulkImportKiranaProducts(
       .filter(Boolean)
       .join(', ');
 
+    const canonicalId = deterministicId;
+    obsoleteDuplicateIds.delete(canonicalId);
+
     const productRecord: Product = {
-      id: existingMatch?.id || deterministicId,
+      id: canonicalId,
       shop_id: shopId,
       business_type: 'KIRANA_RETAIL',
       name: bilingualDisplayName,
@@ -525,7 +542,12 @@ export async function bulkImportKiranaProducts(
     }
   });
 
+  unmarkProductsDeletedTombstone(productsToSave.map((p) => p.id));
+
   await db.transaction('rw', [db.products, db.inventory_logs, db.sync_outbox], async () => {
+    if (obsoleteDuplicateIds.size > 0) {
+      await db.products.bulkDelete(Array.from(obsoleteDuplicateIds));
+    }
     await db.products.bulkPut(productsToSave);
     const outboxEntries = productsToSave.map((p, idx) => ({
       id: `sync-prod-${p.id}-${Date.now()}-${idx}`,
@@ -539,6 +561,10 @@ export async function bulkImportKiranaProducts(
     }));
     await db.sync_outbox.bulkPut(outboxEntries);
   });
+
+  if (obsoleteDuplicateIds.size > 0) {
+    cloudSyncService.deleteProductsBulk(Array.from(obsoleteDuplicateIds));
+  }
 
   // Trigger non-blocking cloud sync to Supabase
   cloudSyncService.syncAllToCloud().catch(() => {});
