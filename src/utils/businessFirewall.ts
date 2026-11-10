@@ -239,15 +239,21 @@ export function filterProductsForBusiness<
         }
         return false;
       } else {
-        // KIRANA_RETAIL: Allow if both are Kirana retail and share base shop_id
+        // KIRANA_RETAIL: In Kirana Retail mode, any Kirana product should be visible to the retailer
         const isProductHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD';
-        const isActiveHmf = isHomemadeShopId(activeShopId);
-        if (!isProductHmf && !isActiveHmf) {
-          const baseP = getBaseKiranaShopId(p.shop_id);
-          const baseActive = getBaseKiranaShopId(activeShopId);
-          if (baseP === baseActive || baseP === 'current_shop' || baseActive === 'current_shop') {
-            return true;
-          }
+        if (isProductHmf) return false;
+
+        const baseP = getBaseKiranaShopId(p.shop_id);
+        const baseActive = getBaseKiranaShopId(activeShopId);
+        if (
+          p.shop_id === activeShopId ||
+          p.shop_id === 'current_shop' ||
+          activeShopId === 'current_shop' ||
+          baseP === baseActive ||
+          !p.shop_id ||
+          !activeShopId
+        ) {
+          return true;
         }
         return false;
       }

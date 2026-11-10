@@ -36,6 +36,11 @@ const MainApp: React.FC = () => {
 
     db.initializeDatabase().then(async () => {
       if (!isTestEnv) {
+        // Automatically pull from cloud on startup so products added directly in Supabase or across devices are visible immediately
+        await cloudSyncService.pullAllFromCloud().catch((err) => {
+          console.warn('Initial cloud pull failed (offline or network):', err);
+        });
+
         const allProds = await db.products.toArray();
         if (allProds.length < 169) {
           await bulkImportKiranaProducts(MAHARASHTRA_170_KIRANA_CATALOG);

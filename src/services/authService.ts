@@ -307,15 +307,14 @@ export const authService = {
       if (!isJoining) {
         try {
           await supabase.from('shop_profile').upsert({
-            id: selectedBusinessType === 'HOMEMADE_FOOD' ? 'homemade_food_shop' : 'current_shop',
+            id: 'current_shop',
+            shop_id: 'current_shop',
             user_id: data.user.id,
             shop_name: shopData.shopName || 'My Kirana Store',
             owner_name: shopData.ownerName || 'Store Owner',
             phone: shopData.phone || '',
             upi_vpa: `${shopData.phone || 'kirana'}@upi`,
             invite_code: ownerInviteCode,
-            business_type: selectedBusinessType,
-            invoice_prefix: defaultPrefix,
             updated_at: new Date().toISOString(),
           });
         } catch (err) {

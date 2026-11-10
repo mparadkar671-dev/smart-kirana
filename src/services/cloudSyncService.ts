@@ -89,6 +89,36 @@ export function sanitizeProductForSupabase(
   return sanitized;
 }
 
+/**
+ * Strips non-existent columns (business_type, invoice_prefix, created_at) from shop_profile
+ * so that Supabase PostgREST accepts upserts without schema cache errors (PGRST204).
+ */
+export function sanitizeShopProfileForSupabase(
+  profile: Partial<ShopProfile> | Record<string, unknown>,
+  targetId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = profile as any;
+  const id = targetId || raw.id || raw.shop_id || 'current_shop';
+  const sanitized: Record<string, unknown> = {
+    id,
+    shop_id: id,
+    shop_name: raw.shop_name || 'Shree Ganesh Kirana',
+    owner_name: raw.owner_name || 'Store Owner',
+    phone: raw.phone || '9876543210',
+    upi_vpa: raw.upi_vpa || 'kirana@upi',
+    address: raw.address || '',
+    gst_footer_note: raw.gst_footer_note || '',
+    invite_code: raw.invite_code || 'KRN-4829',
+    reset_epoch: Number(raw.reset_epoch) || 1,
+    last_wiped_at: raw.last_wiped_at || null,
+    updated_at: raw.updated_at || new Date().toISOString(),
+  };
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
 class CloudSyncService {
   private status: CloudSyncStatus = {
     isSyncing: false,
@@ -580,25 +610,20 @@ class CloudSyncService {
   /**
    * Ensures that the target shop_profile row exists in Supabase so foreign key constraints on products.shop_id succeed.
    */
-  async ensureShopProfileExistsInCloud(shopId: string, bizType: BusinessType = 'HOMEMADE_FOOD'): Promise<void> {
+  async ensureShopProfileExistsInCloud(shopId: string, bizType: BusinessType = 'KIRANA_RETAIL'): Promise<void> {
     if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
       const isHmf = bizType === 'HOMEMADE_FOOD' || isHomemadeShopId(shopId);
-      const payload: Record<string, unknown> = {
-        id: shopId,
-        shop_id: shopId,
-        shop_name: isHmf ? 'Shree Ganesh Gruh Udyog' : 'Shree Ganesh Kirana',
-        owner_name: 'Store Owner',
-        phone: '9876543210',
-        upi_vpa: 'kirana@upi',
-        business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
-        invoice_prefix: isHmf ? 'HMF' : 'KRN',
-        invite_code: 'KRN-4829',
-        reset_epoch: 1,
-        updated_at: new Date().toISOString(),
-      };
-      if (userId) payload.user_id = userId;
+      const payload = sanitizeShopProfileForSupabase(
+        {
+          id: shopId,
+          shop_id: shopId,
+          shop_name: isHmf ? 'Shree Ganesh Gruh Udyog' : 'Shree Ganesh Kirana',
+        },
+        shopId,
+        userId
+      );
       await supabase.from('shop_profile').upsert(payload, { onConflict: 'id' });
     } catch {
       // Ignore in offline
@@ -928,21 +953,7 @@ class CloudSyncService {
     if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
-      const payload: Record<string, unknown> = {
-        id: 'current_shop',
-        shop_id: profile.shop_id || profile.id || 'current_shop',
-        invite_code: profile.invite_code || 'KRN-4829',
-        shop_name: profile.shop_name,
-        owner_name: profile.owner_name,
-        phone: profile.phone,
-        upi_vpa: profile.upi_vpa,
-        address: profile.address || '',
-        gst_footer_note: profile.gst_footer_note || '',
-        business_type: profile.business_type || 'KIRANA_RETAIL',
-        invoice_prefix: profile.invoice_prefix || 'KRN',
-        updated_at: new Date().toISOString(),
-      };
-      if (userId) payload.user_id = userId;
+      const payload = sanitizeShopProfileForSupabase(profile, profile.shop_id || profile.id || 'current_shop', userId);
 
       const { error } = await supabase.from('shop_profile').upsert(payload, { onConflict: 'id' });
       if (error) {
@@ -1034,40 +1045,32 @@ class CloudSyncService {
       try {
         const profile = await db.getShopProfile();
         if (profile) {
-          const kiranaPayload: Record<string, unknown> = {
-            id: primaryShopId,
-            shop_name: profile.business_type === 'HOMEMADE_FOOD' ? (profile.shop_name.replace(/Gruh Udyog|Homemade Food/i, 'Kirana Store') || 'Smart Kirana Store') : profile.shop_name,
-            owner_name: profile.owner_name,
-            phone: profile.phone,
-            upi_vpa: profile.upi_vpa,
-            address: profile.address || '',
-            gst_footer_note: profile.gst_footer_note || '',
-            business_type: 'KIRANA_RETAIL',
-            invoice_prefix: 'KRN',
-            invite_code: profile.invite_code,
-            reset_epoch: profile.reset_epoch || 1,
-            last_wiped_at: profile.last_wiped_at,
-            updated_at: new Date().toISOString(),
-          };
-          if (userId) kiranaPayload.user_id = userId;
+          const kiranaPayload = sanitizeShopProfileForSupabase(
+            {
+              ...profile,
+              id: primaryShopId,
+              shop_id: primaryShopId,
+              shop_name: profile.business_type === 'HOMEMADE_FOOD'
+                ? (profile.shop_name.replace(/Gruh Udyog|Homemade Food/i, 'Kirana Store') || 'Smart Kirana Store')
+                : profile.shop_name,
+            },
+            primaryShopId,
+            userId
+          );
           await supabase.from('shop_profile').upsert(kiranaPayload, { onConflict: 'id' });
 
-          const hmfPayload: Record<string, unknown> = {
-            id: hmfShopId,
-            shop_name: profile.business_type === 'HOMEMADE_FOOD' ? profile.shop_name : `${profile.shop_name} (Gruh Udyog)`,
-            owner_name: profile.owner_name,
-            phone: profile.phone,
-            upi_vpa: profile.upi_vpa,
-            address: profile.address || '',
-            gst_footer_note: profile.gst_footer_note || '',
-            business_type: 'HOMEMADE_FOOD',
-            invoice_prefix: 'HMF',
-            invite_code: profile.invite_code,
-            reset_epoch: profile.reset_epoch || 1,
-            last_wiped_at: profile.last_wiped_at,
-            updated_at: new Date().toISOString(),
-          };
-          if (userId) hmfPayload.user_id = userId;
+          const hmfPayload = sanitizeShopProfileForSupabase(
+            {
+              ...profile,
+              id: hmfShopId,
+              shop_id: hmfShopId,
+              shop_name: profile.business_type === 'HOMEMADE_FOOD'
+                ? profile.shop_name
+                : `${profile.shop_name} (Gruh Udyog)`,
+            },
+            hmfShopId,
+            userId
+          );
           await supabase.from('shop_profile').upsert(hmfPayload, { onConflict: 'id' });
           pushedCount += 2;
         }
@@ -1318,7 +1321,7 @@ class CloudSyncService {
       const shopId = await this.getActiveShopId();
       const primaryShopId = getBaseKiranaShopId(typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_base_shop_id') || localStorage.getItem('kirana_primary_shop_id') || shopId : shopId);
       const hmfShopId = getHomemadeShopId(primaryShopId);
-      const shopIdsToPull = Array.from(new Set([shopId, primaryShopId, hmfShopId].filter(Boolean)));
+      const shopIdsToPull = Array.from(new Set([shopId, primaryShopId, hmfShopId, 'current_shop'].filter(Boolean)));
 
       const localProfile = await db.getShopProfile();
       const localResetEpoch = localProfile.reset_epoch || 1;
@@ -1409,9 +1412,7 @@ class CloudSyncService {
             } else {
               await kiranaDb.products.put(productRecord);
             }
-            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.products.put(productRecord).catch(() => {});
-            }
+            await db.products.put(productRecord).catch(() => {});
             pulledCount++;
           }
         }
