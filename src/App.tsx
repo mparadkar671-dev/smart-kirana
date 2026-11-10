@@ -88,7 +88,10 @@ const MainApp: React.FC = () => {
   }, [activeTab]);
 
   const shopProfile = useLiveQuery(() => db.getShopProfile(), []);
-  const activeBusinessType: BusinessType = shopProfile?.business_type || getActiveBusinessType();
+  const activeBusinessType: BusinessType =
+    (shopProfile?.business_type === 'HOMEMADE_FOOD' && typeof localStorage !== 'undefined' && localStorage.getItem('kirana_active_business_type') === 'HOMEMADE_FOOD')
+      ? 'HOMEMADE_FOOD'
+      : 'KIRANA_RETAIL';
   const activeShopId: string =
     (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) ||
     shopProfile?.shop_id ||
@@ -112,7 +115,11 @@ const MainApp: React.FC = () => {
     async () => {
       const active = getActiveDb(activeBusinessType);
       const all = await active.products.toArray();
-      return filterProductsForBusiness(all, activeBusinessType, activeShopId);
+      const filtered = filterProductsForBusiness(all, activeBusinessType, activeShopId);
+      if (filtered.length === 0 && all.length > 0 && activeBusinessType === 'KIRANA_RETAIL') {
+        return all;
+      }
+      return filtered;
     },
     [activeBusinessType, activeShopId],
     []

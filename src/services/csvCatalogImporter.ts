@@ -439,11 +439,14 @@ export async function bulkImportKiranaProducts(
 
     const inferred = inferUnitAndDefaultPricing(row);
 
-    // Check if this product already exists by name without colliding across batch
+    const deterministicId = (row as any).id || `prod-170-${String(index + 1).padStart(3, '0')}`;
+
+    // Check if this product already exists by stable ID or name without colliding across batch
     const existingMatch = existingProducts.find(
       (p) =>
         !matchedExistingIds.has(p.id) &&
-        (p.name.toLowerCase() === bilingualDisplayName.toLowerCase() ||
+        (p.id === deterministicId ||
+          p.name.toLowerCase() === bilingualDisplayName.toLowerCase() ||
           (english && p.name.toLowerCase() === english.toLowerCase()) ||
           (marathi && p.marathi_name === marathi))
     );
@@ -491,7 +494,7 @@ export async function bulkImportKiranaProducts(
       .join(', ');
 
     const productRecord: Product = {
-      id: existingMatch?.id || `prod-105-${Date.now()}-${index}`,
+      id: existingMatch?.id || deterministicId,
       shop_id: shopId,
       business_type: 'KIRANA_RETAIL',
       name: bilingualDisplayName,

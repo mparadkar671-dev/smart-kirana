@@ -351,10 +351,20 @@ export class KiranaDatabase extends Dexie {
           await this.customers.add(WALK_IN_CUSTOMER_RECORD);
         }
 
-        // 2. Ensure Shop Profile exists
+        // 2. Ensure Shop Profile exists and is set to Laxmi Vatsalya Kirana & General Store
         const profile = await this.shop_profile.get(DEFAULT_SHOP_PROFILE.id);
         if (!profile) {
           await this.shop_profile.add(DEFAULT_SHOP_PROFILE);
+        } else if (profile.business_type !== 'HOMEMADE_FOOD' && (profile.shop_name === 'Shree Ganesh Kirana' || profile.shop_name === 'Shree Ganesh Kirana & General Store')) {
+          await this.shop_profile.update(DEFAULT_SHOP_PROFILE.id, {
+            shop_name: 'Laxmi Vatsalya Kirana & General Store',
+            owner_name: 'Pandurang Paradkar',
+            phone: '9404380326',
+            upi_vpa: 'kirana@upi',
+            business_type: 'KIRANA_RETAIL',
+            address: 'Laxmi Vatsalya General Store, Maharashtra',
+            updated_at: new Date().toISOString(),
+          });
         }
 
         // 3. Only seed products if explicitly requested
@@ -724,6 +734,18 @@ export class KiranaDatabase extends Dexie {
     if (!profile) {
       const first = await this.shop_profile.toCollection().first();
       profile = first || DEFAULT_SHOP_PROFILE;
+    }
+    if (profile && profile.business_type !== 'HOMEMADE_FOOD' && (profile.shop_name === 'Shree Ganesh Kirana' || profile.shop_name === 'Shree Ganesh Kirana & General Store')) {
+      profile = {
+        ...profile,
+        shop_name: 'Laxmi Vatsalya Kirana & General Store',
+        owner_name: 'Pandurang Paradkar',
+        phone: '9404380326',
+        upi_vpa: 'kirana@upi',
+        business_type: 'KIRANA_RETAIL',
+        address: 'Laxmi Vatsalya General Store, Maharashtra',
+      };
+      this.shop_profile.put(profile).catch(() => {});
     }
     return profile;
   }

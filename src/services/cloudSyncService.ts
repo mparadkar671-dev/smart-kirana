@@ -103,12 +103,12 @@ export function sanitizeShopProfileForSupabase(
   const sanitized: Record<string, unknown> = {
     id,
     shop_id: id,
-    shop_name: raw.shop_name || 'Shree Ganesh Kirana',
-    owner_name: raw.owner_name || 'Store Owner',
-    phone: raw.phone || '9876543210',
-    upi_vpa: raw.upi_vpa || 'kirana@upi',
-    address: raw.address || '',
-    gst_footer_note: raw.gst_footer_note || '',
+    shop_name: raw.shop_name || 'Laxmi Vatsalya General Store',
+    owner_name: raw.owner_name || 'Pandurang Paradkar',
+    phone: raw.phone || '9404380326',
+    upi_vpa: raw.upi_vpa || '9404380326@upi',
+    address: raw.address || 'Laxmi Vatsalya General Store, Maharashtra',
+    gst_footer_note: raw.gst_footer_note || 'Thank you for shopping at Laxmi Vatsalya General Store! Visit again.',
     invite_code: raw.invite_code || 'KRN-4829',
     reset_epoch: Number(raw.reset_epoch) || 1,
     last_wiped_at: raw.last_wiped_at || null,
@@ -614,12 +614,14 @@ class CloudSyncService {
     if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
-      const isHmf = bizType === 'HOMEMADE_FOOD' || isHomemadeShopId(shopId);
       const payload = sanitizeShopProfileForSupabase(
         {
           id: shopId,
           shop_id: shopId,
-          shop_name: isHmf ? 'Shree Ganesh Gruh Udyog' : 'Shree Ganesh Kirana',
+          shop_name: 'Laxmi Vatsalya General Store',
+          owner_name: 'Pandurang Paradkar',
+          phone: '9404380326',
+          upi_vpa: '9404380326@upi',
         },
         shopId,
         userId
@@ -1040,8 +1042,8 @@ class CloudSyncService {
       }
 
       // 1. Sync Shop Profile for both stores
+      // 1. Sync Shop Profile strictly for Laxmi Vatsalya General Store
       const primaryShopId = getBaseKiranaShopId(shopId);
-      const hmfShopId = getHomemadeShopId(primaryShopId);
       try {
         const profile = await db.getShopProfile();
         if (profile) {
@@ -1050,29 +1052,18 @@ class CloudSyncService {
               ...profile,
               id: primaryShopId,
               shop_id: primaryShopId,
-              shop_name: profile.business_type === 'HOMEMADE_FOOD'
-                ? (profile.shop_name.replace(/Gruh Udyog|Homemade Food/i, 'Kirana Store') || 'Smart Kirana Store')
-                : profile.shop_name,
+              shop_name: 'Laxmi Vatsalya General Store',
+              owner_name: 'Pandurang Paradkar',
+              phone: '9404380326',
+              upi_vpa: '9404380326@upi',
+              address: 'Laxmi Vatsalya General Store, Maharashtra',
+              gst_footer_note: 'Thank you for shopping at Laxmi Vatsalya General Store! Visit again.',
             },
             primaryShopId,
             userId
           );
           await supabase.from('shop_profile').upsert(kiranaPayload, { onConflict: 'id' });
-
-          const hmfPayload = sanitizeShopProfileForSupabase(
-            {
-              ...profile,
-              id: hmfShopId,
-              shop_id: hmfShopId,
-              shop_name: profile.business_type === 'HOMEMADE_FOOD'
-                ? profile.shop_name
-                : `${profile.shop_name} (Gruh Udyog)`,
-            },
-            hmfShopId,
-            userId
-          );
-          await supabase.from('shop_profile').upsert(hmfPayload, { onConflict: 'id' });
-          pushedCount += 2;
+          pushedCount += 1;
         }
       } catch (e: unknown) {
         errors.push(`Shop Profile: ${e instanceof Error ? e.message : String(e)}`);
@@ -1135,6 +1126,7 @@ class CloudSyncService {
         for (const p of homemadeProds) prodMap.set(p.id, p);
         const prods = Array.from(prodMap.values());
 
+        const hmfShopId = getHomemadeShopId(primaryShopId);
         if (prods.length > 0) {
           const rows = prods.map((p) => {
             const isHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD' || isHomemadeFoodCategoryOrName(p);

@@ -102,7 +102,7 @@ export const Shell: React.FC<ShellProps> = ({
     setTimeout(() => setSyncToast(null), 3000);
   };
 
-  const shopName = shopProfile?.shop_name || 'Smart Kirana POS';
+  const shopName = shopProfile?.shop_name || 'Laxmi Vatsalya General Store';
 
   const roleBadgeMap: Record<UserRole, { label: string; color: string }> = {
     OWNER: { label: '👑 Owner', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' },

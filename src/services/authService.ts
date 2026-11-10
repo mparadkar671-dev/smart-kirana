@@ -147,9 +147,9 @@ export const authService = {
         valid: true,
         shop: {
           id: 'current_shop',
-          shop_name: 'Shree Ganesh Kirana & General Store',
-          owner_name: 'Ramesh Patel',
-          phone: '9876543210',
+          shop_name: 'Laxmi Vatsalya General Store',
+          owner_name: 'Pandurang Paradkar',
+          phone: '9404380326',
           invite_code: 'KRN-4829',
         },
       };
@@ -214,7 +214,7 @@ export const authService = {
     const approvalStatus = isActive ? 'APPROVED' : 'PENDING';
 
     let targetShopId = shopData.shopId || 'current_shop';
-    let targetShopName = shopData.shopName || 'My Kirana Store';
+    let targetShopName = shopData.shopName || 'Laxmi Vatsalya General Store';
 
     // Multi-tenant isolation: non-owners must supply a valid store invite code
     if (isJoining) {
@@ -310,10 +310,10 @@ export const authService = {
             id: 'current_shop',
             shop_id: 'current_shop',
             user_id: data.user.id,
-            shop_name: shopData.shopName || 'My Kirana Store',
-            owner_name: shopData.ownerName || 'Store Owner',
-            phone: shopData.phone || '',
-            upi_vpa: `${shopData.phone || 'kirana'}@upi`,
+            shop_name: shopData.shopName || 'Laxmi Vatsalya General Store',
+            owner_name: shopData.ownerName || 'Pandurang Paradkar',
+            phone: shopData.phone || '9404380326',
+            upi_vpa: `${shopData.phone || '9404380326'}@upi`,
             invite_code: ownerInviteCode,
             updated_at: new Date().toISOString(),
           });

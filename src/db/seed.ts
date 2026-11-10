@@ -547,12 +547,12 @@ export const DEFAULT_SHOP_PROFILE: ShopProfile = {
   business_type: 'KIRANA_RETAIL',
   invite_code: 'KRN-4829',
   reset_epoch: 1,
-  shop_name: 'Shree Ganesh Kirana & General Store',
-  owner_name: 'Ramesh Patel',
-  phone: '9876543210',
+  shop_name: 'Laxmi Vatsalya Kirana & General Store',
+  owner_name: 'Pandurang Paradkar',
+  phone: '9404380326',
   upi_vpa: 'kirana@upi',
-  address: 'Shop No. 4, Main Market, Station Road',
-  gst_footer_note: 'Thank you for shopping with us! Visit again.',
+  address: 'Laxmi Vatsalya General Store, Maharashtra',
+  gst_footer_note: 'Thank you for shopping at Laxmi Vatsalya General Store! Visit again.',
   updated_at: new Date().toISOString(),
 };
 

@@ -51,17 +51,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   shopProfile,
   onRefresh,
 }) => {
-  const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
+  const activeBusinessType: BusinessType =
+    (shopProfile?.business_type === 'HOMEMADE_FOOD' && typeof localStorage !== 'undefined' && localStorage.getItem('kirana_active_business_type') === 'HOMEMADE_FOOD')
+      ? 'HOMEMADE_FOOD'
+      : 'KIRANA_RETAIL';
 
   // Instant local-first reactivity: observe active database directly if prop array is empty
   const liveDbProducts = useLiveQuery(() => getActiveDb(activeBusinessType).products.toArray(), [activeBusinessType], []);
   const products = (passedProducts && passedProducts.length > 0) ? passedProducts : (liveDbProducts || []);
 
-  // Strict business isolation defense-in-depth:
-  const businessProducts = useMemo(
-    () => filterProductsForBusiness(products, activeBusinessType),
-    [products, activeBusinessType]
-  );
+  // Strict business isolation defense-in-depth with safe single-store fallback for Laxmi Vatsalya General Store
+  const businessProducts = useMemo(() => {
+    const filtered = filterProductsForBusiness(products, activeBusinessType);
+    if (filtered.length === 0 && products.length > 0 && activeBusinessType === 'KIRANA_RETAIL') {
+      return products;
+    }
+    return filtered;
+  }, [products, activeBusinessType]);
 
   const [activeTab, setActiveTab] = useState<'all' | 'restock'>('all');
   const [searchQuery, setSearchQuery] = useState('');
