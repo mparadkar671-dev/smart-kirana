@@ -1,4 +1,4 @@
-import { db } from '../db/db';
+import { db, kiranaDb } from '../db/db';
 import { Product, UnitType } from '../types';
 import { generateUniqueStoreBarcode } from '../utils/barcodeGenerator';
 import { generateSmartProductThumbnail } from '../utils/productImageEngine';
@@ -239,21 +239,20 @@ export function inferUnitAndDefaultPricing(row: {
     }
   }
 
-  let sellPrice = Number(row.sellPrice || 0);
-  if (sellPrice <= 0) {
-    sellPrice = matchedCatalog?.sellPrice || (unitType === 'KG_LOOSE' ? 110 : 35);
-  }
+  const sellPrice =
+    row.sellPrice !== undefined && Number.isFinite(row.sellPrice) && row.sellPrice >= 0
+      ? Number(row.sellPrice)
+      : matchedCatalog?.sellPrice || (unitType === 'KG_LOOSE' ? 110 : 35);
 
-  let purchasePrice = Number(row.purchasePrice || 0);
-  if (purchasePrice <= 0) {
-    purchasePrice =
-      matchedCatalog?.purchasePrice || Math.round(sellPrice * 0.86 * 100) / 100;
-  }
+  const purchasePrice =
+    row.purchasePrice !== undefined && Number.isFinite(row.purchasePrice) && row.purchasePrice >= 0
+      ? Number(row.purchasePrice)
+      : matchedCatalog?.purchasePrice || Math.round(sellPrice * 0.86 * 100) / 100;
 
-  let mrp = Number(row.mrp || 0);
-  if (mrp <= 0) {
-    mrp = matchedCatalog?.mrp || (unitType === 'KG_LOOSE' ? Math.round(sellPrice * 1.08) : sellPrice);
-  }
+  const mrp =
+    row.mrp !== undefined && Number.isFinite(row.mrp) && row.mrp >= 0
+      ? Number(row.mrp)
+      : matchedCatalog?.mrp || (unitType === 'KG_LOOSE' ? Math.round(sellPrice * 1.08) : sellPrice);
 
   const isLoose = unitType === 'KG_LOOSE' || unitType === 'LTR';
   const availableStock =
@@ -528,17 +527,17 @@ export async function bulkImportKiranaProducts(
 
   await db.transaction('rw', [db.products, db.inventory_logs, db.sync_outbox], async () => {
     await db.products.bulkPut(productsToSave);
-    for (const p of productsToSave) {
-      await db.queueSync(
-        {
-          table_name: 'products',
-          operation: 'INSERT',
-          payload: p as unknown as Record<string, unknown>,
-          shop_id: shopId,
-        },
-        db.sync_outbox
-      );
-    }
+    const outboxEntries = productsToSave.map((p, idx) => ({
+      id: `sync-prod-${p.id}-${Date.now()}-${idx}`,
+      shop_id: shopId,
+      table_name: 'products' as const,
+      operation: 'INSERT' as const,
+      payload: p as unknown as Record<string, unknown>,
+      status: 'PENDING' as const,
+      retry_count: 0,
+      created_at: nowIso,
+    }));
+    await db.sync_outbox.bulkPut(outboxEntries);
   });
 
   // Trigger non-blocking cloud sync to Supabase

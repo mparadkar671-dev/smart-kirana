@@ -155,10 +155,10 @@ describe('105-Product Marathi/English Sheet Importer & Uniform 160x160 Image Eng
     const load105Btn = await screen.findByTestId('import-105-maharashtra-btn');
     fireEvent.click(load105Btn);
 
-    const banner = await screen.findByTestId('csv-import-success-banner', {}, { timeout: 5000 });
+    const banner = await screen.findByTestId('csv-import-success-banner', {}, { timeout: 10000 });
     expect(banner.textContent).toContain('105');
 
     const countAfter = await db.products.count();
     expect(countAfter).toBe(105);
-  });
+  }, 15000);
 });

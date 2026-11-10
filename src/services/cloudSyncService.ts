@@ -151,7 +151,7 @@ class CloudSyncService {
       // Periodic background heartbeat every 10 seconds when online
       this.heartbeatTimer = setInterval(() => {
         if (typeof navigator !== 'undefined' && navigator.onLine && !this.isTestEnv && !this.status.isSyncing) {
-          this.syncBidirectionalNow().catch(() => {});
+          this.syncBidirectionalNow().catch(() => { });
         }
       }, 10000);
 
@@ -251,7 +251,7 @@ class CloudSyncService {
     }
 
     if (!supabase || this.isTestEnv) {
-      return () => {};
+      return () => { };
     }
 
     const currentShopId =
@@ -397,7 +397,7 @@ class CloudSyncService {
 
       // Reconcile stock and ledger balances on inventory logs and khata transactions
       if (table === 'inventory_logs' || table === 'khata_transactions') {
-        await targetDb.reconcileAllStockAndBalances().catch(() => {});
+        await targetDb.reconcileAllStockAndBalances().catch(() => { });
       }
 
       const now = new Date().toISOString();
@@ -1126,8 +1126,8 @@ class CloudSyncService {
         for (const p of homemadeProds) prodMap.set(p.id, p);
         const prods = Array.from(prodMap.values());
 
-        const hmfShopId = getHomemadeShopId(primaryShopId);
         if (prods.length > 0) {
+          const hmfShopId = getHomemadeShopId(primaryShopId);
           const rows = prods.map((p) => {
             const isHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD' || isHomemadeFoodCategoryOrName(p);
             const targetShopId = isHmf ? hmfShopId : (p.shop_id || primaryShopId);
@@ -1334,7 +1334,7 @@ class CloudSyncService {
               await db.updateShopProfile({ reset_epoch: profile.reset_epoch });
               if (localProds.length > 0) {
                 // Ensure local products are backed up and synced to the cloud
-                this.syncAllToCloud().catch(() => {});
+                this.syncAllToCloud().catch(() => { });
               }
             }
 
@@ -1404,7 +1404,7 @@ class CloudSyncService {
             } else {
               await kiranaDb.products.put(productRecord);
             }
-            await db.products.put(productRecord).catch(() => {});
+            await db.products.put(productRecord).catch(() => { });
             pulledCount++;
           }
         }
@@ -1473,7 +1473,7 @@ class CloudSyncService {
               await kiranaDb.customers.put(customerRecord);
             }
             if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.customers.put(customerRecord).catch(() => {});
+              await db.customers.put(customerRecord).catch(() => { });
             }
             pulledCount++;
           }
@@ -1541,7 +1541,7 @@ class CloudSyncService {
               await kiranaDb.inventory_logs.put(logRecord);
             }
             if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.inventory_logs.put(logRecord).catch(() => {});
+              await db.inventory_logs.put(logRecord).catch(() => { });
             }
             pulledCount++;
           }
@@ -1580,7 +1580,7 @@ class CloudSyncService {
               await kiranaDb.khata_transactions.put(txRecord);
             }
             if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.khata_transactions.put(txRecord).catch(() => {});
+              await db.khata_transactions.put(txRecord).catch(() => { });
             }
             pulledCount++;
           }
@@ -1622,7 +1622,7 @@ class CloudSyncService {
               await kiranaDb.sales_invoices.put(invoiceRecord);
             }
             if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.sales_invoices.put(invoiceRecord).catch(() => {});
+              await db.sales_invoices.put(invoiceRecord).catch(() => { });
             }
             pulledCount++;
           }
@@ -1660,7 +1660,7 @@ class CloudSyncService {
               await kiranaDb.sale_items.put(itemRecord);
             }
             if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.sale_items.put(itemRecord).catch(() => {});
+              await db.sale_items.put(itemRecord).catch(() => { });
             }
             pulledCount++;
           }
@@ -1671,8 +1671,8 @@ class CloudSyncService {
 
       // 9. ACID Reconciliation: Recompute stock & udhari deterministically from deltas across both databases
       await Promise.all([
-        kiranaDb.reconcileAllStockAndBalances().catch(() => {}),
-        homemadeDb.reconcileAllStockAndBalances().catch(() => {}),
+        kiranaDb.reconcileAllStockAndBalances().catch(() => { }),
+        homemadeDb.reconcileAllStockAndBalances().catch(() => { }),
       ]);
       await HomemadeFoodService.repairMixedBusinessProducts();
 

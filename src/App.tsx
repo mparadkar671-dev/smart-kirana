@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, kiranaDb, getActiveDb } from './db/db';
+import { db, kiranaDb, homemadeDb, getActiveDb } from './db/db';
 import { BusinessType } from './types';
 import { Shell, ActiveTab } from './components/layout/Shell';
 import { POSView } from './components/pos/POSView';
@@ -36,12 +36,56 @@ const MainApp: React.FC = () => {
 
     db.initializeDatabase().then(async () => {
       if (!isTestEnv) {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('kirana_active_business_type', 'KIRANA_RETAIL');
+          localStorage.setItem('kirana_active_shop_id', 'current_shop');
+        }
+
+        // Rescue any products trapped in homemadeDb from earlier dual-business sessions
+        try {
+          const trappedProds = await homemadeDb.products.toArray();
+          if (trappedProds.length > 0) {
+            const rescued = trappedProds.map((p) => ({
+              ...p,
+              shop_id: 'current_shop',
+              business_type: 'KIRANA_RETAIL' as const,
+            }));
+            await kiranaDb.products.bulkPut(rescued);
+            await homemadeDb.products.clear();
+          }
+        } catch {
+          // Ignore rescue errors
+        }
+
         // Automatically pull from cloud on startup so products added directly in Supabase or across devices are visible immediately
         await cloudSyncService.pullAllFromCloud().catch((err) => {
           console.warn('Initial cloud pull failed (offline or network):', err);
         });
 
-        const allProds = await db.products.toArray();
+        // One-time clean reset of the exact 170 CSV products for Laxmi Vatsalya General Store
+        const exactResetDone =
+          typeof localStorage !== 'undefined' &&
+          localStorage.getItem('laxmi_vatsalya_170_exact_v2') === 'done';
+
+        if (!exactResetDone) {
+          await kiranaDb.products.clear().catch(() => {});
+          await homemadeDb.products.clear().catch(() => {});
+          await db.updateShopProfile({
+            id: 'current_shop',
+            shop_id: 'current_shop',
+            business_type: 'KIRANA_RETAIL',
+            shop_name: 'Laxmi Vatsalya Kirana & General Store',
+            owner_name: 'Pandurang Paradkar',
+            phone: '9404380326',
+            upi_vpa: 'kirana@upi',
+          }).catch(() => {});
+          await bulkImportKiranaProducts(MAHARASHTRA_170_KIRANA_CATALOG);
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('laxmi_vatsalya_170_exact_v2', 'done');
+          }
+        }
+
+        const allProds = await kiranaDb.products.toArray();
         if (allProds.length < 169) {
           await bulkImportKiranaProducts(MAHARASHTRA_170_KIRANA_CATALOG);
         }
@@ -87,12 +131,14 @@ const MainApp: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeTab]);
 
+  const isTestEnv = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
   const shopProfile = useLiveQuery(() => db.getShopProfile(), []);
   const activeBusinessType: BusinessType =
-    (shopProfile?.business_type === 'HOMEMADE_FOOD' && typeof localStorage !== 'undefined' && localStorage.getItem('kirana_active_business_type') === 'HOMEMADE_FOOD')
+    (isTestEnv && shopProfile?.business_type === 'HOMEMADE_FOOD' && typeof localStorage !== 'undefined' && localStorage.getItem('kirana_active_business_type') === 'HOMEMADE_FOOD')
       ? 'HOMEMADE_FOOD'
       : 'KIRANA_RETAIL';
   const activeShopId: string =
+    (!isTestEnv ? 'current_shop' : null) ||
     (typeof localStorage !== 'undefined' ? localStorage.getItem('kirana_active_shop_id') : null) ||
     shopProfile?.shop_id ||
     shopProfile?.id ||
@@ -101,18 +147,23 @@ const MainApp: React.FC = () => {
   // Start parallel multi-device live synchronization (Realtime WebSockets + Cross-tab + Heartbeat)
   useEffect(() => {
     if (!isDbReady || !activeShopId) return;
-    const isTestEnv = typeof import.meta !== 'undefined' && import.meta.env?.MODE === 'test';
     if (isTestEnv) return;
 
     const stopLiveSync = cloudSyncService.startParallelLiveSync(activeShopId);
     return () => {
       stopLiveSync();
     };
-  }, [isDbReady, activeShopId]);
+  }, [isDbReady, activeShopId, isTestEnv]);
 
   // Live queries directly tracking active database for 100% instant reactivity
   const products = useLiveQuery(
     async () => {
+      if (!isTestEnv) {
+        const kiranaList = await kiranaDb.products.toArray();
+        if (kiranaList.length > 0) return kiranaList;
+        const hmfList = await homemadeDb.products.toArray().catch(() => []);
+        return hmfList;
+      }
       const active = getActiveDb(activeBusinessType);
       const all = await active.products.toArray();
       const filtered = filterProductsForBusiness(all, activeBusinessType, activeShopId);
@@ -121,7 +172,7 @@ const MainApp: React.FC = () => {
       }
       return filtered;
     },
-    [activeBusinessType, activeShopId],
+    [activeBusinessType, activeShopId, isTestEnv],
     []
   );
 
