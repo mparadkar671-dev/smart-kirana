@@ -779,9 +779,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className="font-semibold text-slate-900 dark:text-slate-100">
-                                  {p.marathi_name && !p.name.includes(p.marathi_name)
-                                    ? `${p.marathi_name} (${p.name})`
-                                    : p.name}
+                                  {p.name}
                                 </span>
                                 {p.is_quick_tap && (
                                   <span

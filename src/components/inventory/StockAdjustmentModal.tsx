@@ -66,7 +66,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
       setNotes('');
       setErrorMsg(null);
     }
-  }, [product, mode, isOpen]);
+  }, [product?.id, mode, isOpen]);
 
   const handleSaveInlineLoan = async () => {
     if (!newLoanName.trim()) {

@@ -192,15 +192,30 @@ export class InventoryService {
    * Updates an existing product and logs adjustments if stock changes manually
    */
   static async updateProduct(productId: string, updates: Partial<CreateProductInput>): Promise<void> {
-    await db.transaction('rw', [db.products, db.inventory_logs], async () => {
+    let finalUpdatedProduct: Product | null = null;
+
+    await db.transaction('rw', [db.products, db.inventory_logs, db.sync_outbox], async () => {
       const existing = await db.products.get(productId);
       if (!existing) throw new Error(`Product not found: ${productId}`);
 
+      const nowIso = new Date().toISOString();
       const patched: Partial<Product> = {
         ...updates,
-        updated_at: new Date().toISOString(),
+        updated_at: nowIso,
       };
 
+      if (updates.name !== undefined) {
+        patched.name = updates.name.trim();
+      }
+      if (updates.marathi_name !== undefined) {
+        patched.marathi_name = updates.marathi_name.trim() || undefined;
+      }
+      if (updates.search_keywords !== undefined) {
+        patched.search_keywords = updates.search_keywords.trim() || undefined;
+      }
+      if (updates.short_code !== undefined) {
+        patched.short_code = updates.short_code.trim().toUpperCase();
+      }
       if (updates.purchase_price !== undefined) {
         patched.purchase_price = roundCurrency(updates.purchase_price);
       }
@@ -232,33 +247,65 @@ export class InventoryService {
       // Check if stock is directly changed in edit modal
       if (updates.current_stock !== undefined) {
         const newStock = roundQty(updates.current_stock);
-        const diff = roundQty(newStock - existing.current_stock);
-        if (diff !== 0) {
-          patched.current_stock = newStock;
+        patched.current_stock = newStock;
+
+        // Ensure inventory_logs ledger sum matches newStock so reconciliation never reverts it
+        const existingLogs = await db.inventory_logs.where('product_id').equals(productId).toArray();
+        const currentLogSum = roundQty(
+          existingLogs.reduce((sum, l) => sum + (Number(l.change_qty) || 0), 0)
+        );
+        const ledgerDiff = roundQty(newStock - currentLogSum);
+
+        if (ledgerDiff !== 0) {
           const log: InventoryLog = {
             id: `log-${Date.now()}-adjust`,
+            shop_id: existing.shop_id || 'current_shop',
+            business_type: existing.business_type || 'KIRANA_RETAIL',
             product_id: productId,
-            change_qty: diff,
+            change_qty: ledgerDiff,
             reason_type: 'AUDIT_ADJUST',
             unit_cost_at_time: patched.purchase_price ?? existing.purchase_price,
             reference_id: null,
-            notes: `Manual inventory audit edit (${diff > 0 ? '+' : ''}${diff})`,
-            created_at: new Date().toISOString(),
+            notes: `Manual inventory audit edit (${ledgerDiff > 0 ? '+' : ''}${ledgerDiff})`,
+            created_at: nowIso,
           };
           await db.inventory_logs.add(log);
         }
       }
 
+      finalUpdatedProduct = {
+        ...existing,
+        ...patched,
+      };
+
       const isHmf = existing.business_type === 'HOMEMADE_FOOD' || (existing.shop_id && isHomemadeShopId(existing.shop_id));
       const targetDb = isHmf ? homemadeDb : kiranaDb;
-      await targetDb.products.update(productId, patched);
-      await db.products.update(productId, patched).catch(() => {});
+      await targetDb.products.put(finalUpdatedProduct);
+      await db.products.put(finalUpdatedProduct).catch(() => {});
+
+      // Replace any stale pending INSERT/UPDATE entries for this product in sync_outbox with the updated payload
+      const pendingOutbox = await db.sync_outbox.where('table_name').equals('products').toArray();
+      const staleIds = pendingOutbox
+        .filter((item) => (item.payload as any)?.id === productId && item.status === 'PENDING')
+        .map((item) => item.id);
+      if (staleIds.length > 0) {
+        await db.sync_outbox.bulkDelete(staleIds);
+      }
+      await db.queueSync(
+        {
+          table_name: 'products',
+          operation: 'UPDATE',
+          payload: finalUpdatedProduct as unknown as Record<string, unknown>,
+          shop_id: finalUpdatedProduct.shop_id || 'current_shop',
+        },
+        db.sync_outbox
+      );
     });
 
-    const activeDb = getActiveBusinessType() === 'HOMEMADE_FOOD' ? homemadeDb : kiranaDb;
-    activeDb.products.get(productId).then((p) => {
-      if (p) cloudSyncService.syncProduct(p);
-    });
+    if (finalUpdatedProduct) {
+      unmarkProductsDeletedTombstone([productId]);
+      await cloudSyncService.syncProduct(finalUpdatedProduct);
+    }
   }
 
   /**

@@ -64,6 +64,15 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     business_type: 'KIRANA_RETAIL',
   });
 
+  // Raw string buffers for numeric inputs so typing decimals (e.g. "10.50", "0.25") or clearing fields never jumps or resets mid-keystroke
+  const [rawNumericInputs, setRawNumericInputs] = useState({
+    purchase_price: '0',
+    selling_price: '0',
+    mrp: '0',
+    current_stock: '0',
+    low_stock_threshold: '5',
+  });
+
   const [wholesalers, setWholesalers] = useState<Wholesaler[]>([]);
   const [showInlineWholesaler, setShowInlineWholesaler] = useState(false);
   const [newWsName, setNewWsName] = useState('');
@@ -86,19 +95,39 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const wasOpenRef = useRef(false);
+  const initializedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isOpen) return;
-    setTimeout(() => {
-      nameInputRef.current?.focus();
-      nameInputRef.current?.select();
-    }, 50);
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      initializedKeyRef.current = null;
+      return;
+    }
+
+    // Focus the name input ONLY once when the modal first opens, and NEVER call .select() so user typing is never overwritten
+    if (!wasOpenRef.current) {
+      wasOpenRef.current = true;
+      setTimeout(() => {
+        if (nameInputRef.current) {
+          nameInputRef.current.focus();
+          const len = nameInputRef.current.value.length;
+          try {
+            nameInputRef.current.setSelectionRange(len, len);
+          } catch {
+            // ignore on inputs that do not support selectionRange
+          }
+        }
+      }, 30);
+    }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -109,7 +138,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   const loadWholesalers = async () => {
     try {
@@ -143,6 +172,15 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
+
+    // Only initialize form state once per modal open or when switching to a different product ID.
+    // This prevents background live-query re-renders from wiping user edits while typing.
+    const targetKey = productToEdit ? `edit:${productToEdit.id}` : 'create:new';
+    if (initializedKeyRef.current === targetKey) {
+      return;
+    }
+    initializedKeyRef.current = targetKey;
+
     loadWholesalers();
     loadLoanAccounts();
     setShowInlineWholesaler(false);
@@ -174,6 +212,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         is_quick_tap: productToEdit.is_quick_tap,
         business_type: 'KIRANA_RETAIL',
       });
+      setRawNumericInputs({
+        purchase_price: String(productToEdit.purchase_price ?? 0),
+        selling_price: String(productToEdit.selling_price ?? 0),
+        mrp: String(productToEdit.mrp ?? 0),
+        current_stock: String(productToEdit.current_stock ?? 0),
+        low_stock_threshold: String(productToEdit.low_stock_threshold ?? 5),
+      });
     } else {
       setIsFromLoan(false);
       // Pre-fill initial synchronous barcode immediately, then refine against DB
@@ -200,6 +245,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         expiry_date: null,
         is_quick_tap: false,
         business_type: 'KIRANA_RETAIL',
+      });
+      setRawNumericInputs({
+        purchase_price: '',
+        selling_price: '',
+        mrp: '',
+        current_stock: '0',
+        low_stock_threshold: '5',
       });
       generateFreshBarcode().then((uniqueCode) => {
         setFormData((prev) => ({
@@ -435,7 +487,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 required
                 data-testid="product-name-input"
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData((prev) => ({ ...prev, name: val }));
+                }}
                 placeholder="e.g. Toor Dal (Arhar) / Tata Salt 1kg"
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
@@ -450,7 +505,20 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 type="text"
                 data-testid="product-marathi-name-input"
                 value={formData.marathi_name || ''}
-                onChange={(e) => setFormData({ ...formData, marathi_name: e.target.value })}
+                onChange={(e) => {
+                  const nextMarathi = e.target.value;
+                  setFormData((prev) => {
+                    const oldMarathi = (prev.marathi_name || '').trim();
+                    let nextName = prev.name;
+                    if (oldMarathi && prev.name.startsWith(`${oldMarathi} (`)) {
+                      const suffix = prev.name.slice(oldMarathi.length);
+                      nextName = nextMarathi.trim()
+                        ? `${nextMarathi.trim()}${suffix}`
+                        : suffix.replace(/^\s*\((.*)\)\s*$/, '$1');
+                    }
+                    return { ...prev, marathi_name: nextMarathi, name: nextName };
+                  });
+                }}
                 placeholder="उदा. तूर डाळ, साखर, पारले-जी"
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
@@ -465,7 +533,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 type="text"
                 data-testid="product-search-keywords-input"
                 value={formData.search_keywords || ''}
-                onChange={(e) => setFormData({ ...formData, search_keywords: e.target.value })}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData((prev) => ({ ...prev, search_keywords: val }));
+                }}
                 placeholder="e.g. toor dal, arhar dal, turdal, तुरीची डाळ, dal, chaha, saban"
                 className="w-full px-3.5 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
@@ -481,7 +552,22 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 required
                 data-testid="product-shortcode-input"
                 value={formData.short_code}
-                onChange={(e) => setFormData({ ...formData, short_code: e.target.value.toUpperCase() })}
+                onChange={(e) => {
+                  const inputEl = e.target;
+                  const start = inputEl.selectionStart;
+                  const end = inputEl.selectionEnd;
+                  const upperVal = inputEl.value.toUpperCase();
+                  setFormData((prev) => ({ ...prev, short_code: upperVal }));
+                  if (start !== null && end !== null) {
+                    requestAnimationFrame(() => {
+                      try {
+                        inputEl.setSelectionRange(start, end);
+                      } catch {
+                        // ignore
+                      }
+                    });
+                  }
+                }}
                 placeholder="e.g. TS1, PG5, SUG"
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm font-mono uppercase text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
@@ -507,7 +593,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 type="text"
                 data-testid="product-barcode-input"
                 value={formData.barcode || ''}
-                onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData((prev) => ({ ...prev, barcode: val }));
+                }}
                 placeholder="Scan or auto-generate 13-digit EAN"
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
@@ -558,7 +647,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               <select
                 data-testid="product-category-select"
                 value={formData.category}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData((prev) => ({ ...prev, category: val }));
+                }}
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
               >
                 {Array.from(new Set([formData.category, ...activeCategories])).filter(Boolean).map((c) => (
@@ -578,12 +670,17 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 onChange={(e) => {
                   const nextUnit = e.target.value as UnitType;
                   const nextIsLoose = nextUnit === 'KG_LOOSE' || nextUnit === 'LTR';
-                  setFormData({
-                    ...formData,
+                  const nextLowThreshold =
+                    nextIsLoose && formData.low_stock_threshold === 5 ? 0.5 : formData.low_stock_threshold;
+                  setFormData((prev) => ({
+                    ...prev,
                     unit_type: nextUnit,
-                    low_stock_threshold:
-                      nextIsLoose && formData.low_stock_threshold === 5 ? 0.5 : formData.low_stock_threshold,
-                  });
+                    low_stock_threshold: nextLowThreshold,
+                  }));
+                  setRawNumericInputs((prev) => ({
+                    ...prev,
+                    low_stock_threshold: String(nextLowThreshold),
+                  }));
                 }}
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium"
               >
@@ -608,8 +705,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                       min="0"
                       required
                       data-testid="purchase-price-input"
-                      value={formData.purchase_price || ''}
-                      onChange={(e) => setFormData({ ...formData, purchase_price: parseFloat(e.target.value) || 0 })}
+                      value={rawNumericInputs.purchase_price}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setRawNumericInputs((prev) => ({ ...prev, purchase_price: raw }));
+                        const parsed = parseFloat(raw);
+                        setFormData((prev) => ({
+                          ...prev,
+                          purchase_price: Number.isFinite(parsed) ? parsed : 0,
+                        }));
+                      }}
                       className="w-full pl-8 pr-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                       placeholder="0.00"
                     />
@@ -643,8 +748,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                       min="0"
                       required
                       data-testid="selling-price-input"
-                      value={formData.selling_price || ''}
-                      onChange={(e) => setFormData({ ...formData, selling_price: parseFloat(e.target.value) || 0 })}
+                      value={rawNumericInputs.selling_price}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setRawNumericInputs((prev) => ({ ...prev, selling_price: raw }));
+                        const parsed = parseFloat(raw);
+                        setFormData((prev) => ({
+                          ...prev,
+                          selling_price: Number.isFinite(parsed) ? parsed : 0,
+                        }));
+                      }}
                       className="w-full pl-8 pr-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm font-semibold text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                       placeholder="0.00"
                     />
@@ -663,8 +776,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                       step="0.01"
                       min="0"
                       data-testid="mrp-input"
-                      value={formData.mrp || ''}
-                      onChange={(e) => setFormData({ ...formData, mrp: parseFloat(e.target.value) || 0 })}
+                      value={rawNumericInputs.mrp}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setRawNumericInputs((prev) => ({ ...prev, mrp: raw }));
+                        const parsed = parseFloat(raw);
+                        setFormData((prev) => ({
+                          ...prev,
+                          mrp: Number.isFinite(parsed) ? parsed : 0,
+                        }));
+                      }}
                       className="w-full pl-8 pr-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                       placeholder="0.00"
                     />
@@ -679,7 +800,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                   <input
                     type="date"
                     value={formData.expiry_date || ''}
-                    onChange={(e) => setFormData({ ...formData, expiry_date: e.target.value || null })}
+                    onChange={(e) => {
+                      const val = e.target.value || null;
+                      setFormData((prev) => ({ ...prev, expiry_date: val }));
+                    }}
                     className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   />
                 </div>
@@ -698,7 +822,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                       <button
                         key={preset}
                         type="button"
-                        onClick={() => setFormData({ ...formData, current_stock: preset })}
+                        onClick={() => {
+                          setFormData((prev) => ({ ...prev, current_stock: preset }));
+                          setRawNumericInputs((prev) => ({ ...prev, current_stock: String(preset) }));
+                        }}
                         className="px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded text-[10px] font-bold hover:bg-blue-100"
                       >
                         {preset}
@@ -712,8 +839,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 step={isLoose ? '0.001' : '1'}
                 min="0"
                 data-testid="current-stock-input"
-                value={formData.current_stock}
-                onChange={(e) => setFormData({ ...formData, current_stock: parseFloat(e.target.value) || 0 })}
+                value={rawNumericInputs.current_stock}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setRawNumericInputs((prev) => ({ ...prev, current_stock: raw }));
+                  const parsed = parseFloat(raw);
+                  setFormData((prev) => ({
+                    ...prev,
+                    current_stock: Number.isFinite(parsed) ? parsed : 0,
+                  }));
+                }}
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl text-sm font-bold text-blue-900 dark:text-blue-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
               {isLoose && (
@@ -740,7 +875,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                       <button
                         key={p.val}
                         type="button"
-                        onClick={() => setFormData({ ...formData, low_stock_threshold: p.val })}
+                        onClick={() => {
+                          setFormData((prev) => ({ ...prev, low_stock_threshold: p.val }));
+                          setRawNumericInputs((prev) => ({ ...prev, low_stock_threshold: String(p.val) }));
+                        }}
                         className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded text-[10px] font-bold hover:bg-amber-100"
                       >
                         {p.label}
@@ -754,8 +892,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 step={isLoose ? '0.001' : '1'}
                 min="0"
                 data-testid="low-stock-threshold-input"
-                value={formData.low_stock_threshold}
-                onChange={(e) => setFormData({ ...formData, low_stock_threshold: parseFloat(e.target.value) || 0 })}
+                value={rawNumericInputs.low_stock_threshold}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setRawNumericInputs((prev) => ({ ...prev, low_stock_threshold: raw }));
+                  const parsed = parseFloat(raw);
+                  setFormData((prev) => ({
+                    ...prev,
+                    low_stock_threshold: Number.isFinite(parsed) ? parsed : 0,
+                  }));
+                }}
                 className="w-full px-3.5 py-2.5 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
               {isLoose && (
@@ -801,7 +947,10 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                   <input
                     type="text"
                     value={formData.last_supplier_name || ''}
-                    onChange={(e) => setFormData({ ...formData, last_supplier_name: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormData((prev) => ({ ...prev, last_supplier_name: val }));
+                    }}
                     placeholder="Or type supplier name manually"
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   />
@@ -839,7 +988,6 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                         value={newWsPhone}
                         onChange={(e) => setNewWsPhone(e.target.value)}
                         placeholder="WhatsApp 10-Digit Phone *"
-                        maxLength={10}
                         className="px-2.5 py-2 border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white"
                       />
                     </div>

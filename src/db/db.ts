@@ -884,7 +884,26 @@ export class KiranaDatabase extends Dexie {
 
       const allProducts = await this.products.toArray();
       for (const prod of allProducts) {
-        const trueStock = await this.recomputeProductStockFromLogs(prod.id);
+        const logs = await this.inventory_logs.where('product_id').equals(prod.id).toArray();
+        if (logs.length === 0) {
+          if (prod.current_stock > 0) {
+            await this.inventory_logs.put({
+              id: `init-log-${prod.id}`,
+              shop_id: prod.shop_id || 'current_shop',
+              business_type: prod.business_type || 'KIRANA_RETAIL',
+              product_id: prod.id,
+              change_qty: prod.current_stock,
+              reason_type: 'PURCHASE_IN',
+              unit_cost_at_time: prod.purchase_price || 0,
+              reference_id: null,
+              notes: 'Opening stock balance',
+              created_at: prod.updated_at || new Date().toISOString(),
+            });
+          }
+          continue;
+        }
+        const totalDelta = logs.reduce((acc, log) => acc + (Number(log.change_qty) || 0), 0);
+        const trueStock = Math.round(totalDelta * 1000) / 1000;
         if (Math.abs(prod.current_stock - trueStock) > 0.0001) {
           await this.products.update(prod.id, {
             current_stock: trueStock,

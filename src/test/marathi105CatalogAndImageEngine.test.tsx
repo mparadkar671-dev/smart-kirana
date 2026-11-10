@@ -18,6 +18,7 @@ import {
 import { isValidEan13 } from '../utils/barcodeGenerator';
 import { POSView } from '../components/pos/POSView';
 import { InventoryView } from '../components/inventory/InventoryView';
+import { ProductModal } from '../components/inventory/ProductModal';
 
 describe('105-Product Marathi/English Sheet Importer & Uniform 160x160 Image Engine', () => {
   beforeEach(async () => {
@@ -161,4 +162,108 @@ describe('105-Product Marathi/English Sheet Importer & Uniform 160x160 Image Eng
     const countAfter = await db.products.count();
     expect(countAfter).toBe(105);
   }, 15000);
+
+  it('6. ProductModal allows smooth typing without auto-selection or character limits, and persists product edits to IndexedDB & Supabase sync without reverting', async () => {
+    await bulkImportKiranaProducts(MAHARASHTRA_105_KIRANA_CATALOG.slice(0, 2));
+    const allProds = await db.products.toArray();
+    const targetProd = allProds[0];
+    expect(targetProd).toBeDefined();
+
+    const syncSpy = vi.spyOn(cloudSyncService, 'syncProduct').mockResolvedValue(undefined);
+    const onSaved = vi.fn();
+
+    const { rerender } = render(
+      <ProductModal
+        isOpen={true}
+        onClose={() => {}}
+        productToEdit={targetProd}
+        onSaved={onSaved}
+      />
+    );
+
+    const nameInput = screen.getByTestId('product-name-input') as HTMLInputElement;
+    const marathiInput = screen.getByTestId('product-marathi-name-input') as HTMLInputElement;
+    const shortCodeInput = screen.getByTestId('product-shortcode-input') as HTMLInputElement;
+    const purchasePriceInput = screen.getByTestId('purchase-price-input') as HTMLInputElement;
+    const sellingPriceInput = screen.getByTestId('selling-price-input') as HTMLInputElement;
+    const currentStockInput = screen.getByTestId('current-stock-input') as HTMLInputElement;
+
+    // Verify no maxLength restrictions exist on any product inputs
+    expect(nameInput.getAttribute('maxlength')).toBeNull();
+    expect(marathiInput.getAttribute('maxlength')).toBeNull();
+    expect(shortCodeInput.getAttribute('maxlength')).toBeNull();
+
+    // Simulate typing long product name while parent re-renders with new inline callbacks
+    const longCustomName = 'तूर डाळ स्पेशल अनपॉलिश प्रीमियम क्वालिटी (Laxmi Vatsalya Special Unpolished Toor Dal 1kg Family Pack)';
+    fireEvent.change(nameInput, { target: { value: 'तूर डाळ स्पेशल' } });
+
+    // Force a parent re-render with a fresh inline onClose function and cloned productToEdit object
+    rerender(
+      <ProductModal
+        isOpen={true}
+        onClose={() => {}}
+        productToEdit={{ ...targetProd }}
+        onSaved={onSaved}
+      />
+    );
+
+    // Wait 60ms (past the old 50ms setTimeout) and verify the input value was NOT reset or selected-overwritten
+    await new Promise((r) => setTimeout(r, 60));
+    expect(nameInput.value).toBe('तूर डाळ स्पेशल');
+
+    // Continue typing the full long name, Marathi name, short code, and decimal prices/stock
+    fireEvent.change(nameInput, { target: { value: longCustomName } });
+    fireEvent.change(marathiInput, { target: { value: 'तूर डाळ स्पेशल अनपॉलिश' } });
+    fireEvent.change(shortCodeInput, { target: { value: 'tdspec100' } });
+
+    // Clear numeric fields to '' first (simulating Backspace) then type decimal numbers
+    fireEvent.change(purchasePriceInput, { target: { value: '' } });
+    expect(purchasePriceInput.value).toBe('');
+    fireEvent.change(purchasePriceInput, { target: { value: '128.50' } });
+    expect(purchasePriceInput.value).toBe('128.50');
+
+    fireEvent.change(sellingPriceInput, { target: { value: '155.75' } });
+    expect(sellingPriceInput.value).toBe('155.75');
+
+    fireEvent.change(currentStockInput, { target: { value: '' } });
+    expect(currentStockInput.value).toBe('');
+    fireEvent.change(currentStockInput, { target: { value: '42.5' } });
+    expect(currentStockInput.value).toBe('42.5');
+
+    // Submit the edit form
+    const submitBtn = screen.getByTestId('save-product-submit-btn');
+    fireEvent.click(submitBtn);
+
+    await vi.waitFor(async () => {
+      const updated = await db.products.get(targetProd.id);
+      expect(updated?.name).toBe(longCustomName);
+    });
+
+    const updatedInDb = await db.products.get(targetProd.id);
+    expect(updatedInDb?.name).toBe(longCustomName);
+    expect(updatedInDb?.marathi_name).toBe('तूर डाळ स्पेशल अनपॉलिश');
+    expect(updatedInDb?.short_code).toBe('TDSPEC100');
+    expect(updatedInDb?.purchase_price).toBe(128.5);
+    expect(updatedInDb?.selling_price).toBe(155.75);
+    expect(updatedInDb?.current_stock).toBe(42.5);
+
+    // Verify Supabase immediate sync was called with the updated product
+    expect(syncSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: targetProd.id,
+        name: longCustomName,
+        short_code: 'TDSPEC100',
+        purchase_price: 128.5,
+        selling_price: 155.75,
+        current_stock: 42.5,
+      })
+    );
+
+    // Verify background 10-second ledger reconciliation does NOT overwrite edited stock or fields
+    await db.reconcileAllStockAndBalances();
+    const afterReconcile = await db.products.get(targetProd.id);
+    expect(afterReconcile?.name).toBe(longCustomName);
+    expect(afterReconcile?.current_stock).toBe(42.5);
+    expect(afterReconcile?.selling_price).toBe(155.75);
+  });
 });

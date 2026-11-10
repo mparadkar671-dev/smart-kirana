@@ -672,9 +672,30 @@ class CloudSyncService {
       const userId = await this.getUserId();
       const payload = sanitizeProductForSupabase(product, shopIdToUse, userId);
 
-      const { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
+      let { error } = await supabase.from('products').upsert(payload, { onConflict: 'id' });
+      if (error && payload.wholesaler_id) {
+        // Fallback if wholesaler foreign key hasn't synced yet
+        const retryRes = await supabase
+          .from('products')
+          .upsert({ ...payload, wholesaler_id: null }, { onConflict: 'id' });
+        error = retryRes.error;
+      }
+
       if (error) {
         console.warn('Sync product to Supabase failed:', error.message);
+      } else {
+        // Clear pending outbox entries for this product since it is now live on Supabase
+        const pending = await kiranaDb.sync_outbox
+          .where('status')
+          .equals('PENDING')
+          .toArray()
+          .catch(() => []);
+        const idsToRemove = pending
+          .filter((item) => item.table_name === 'products' && item.payload?.id === product.id && item.id)
+          .map((item) => item.id);
+        if (idsToRemove.length > 0) {
+          await kiranaDb.sync_outbox.bulkDelete(idsToRemove).catch(() => {});
+        }
       }
     } catch (err) {
       console.warn('Background sync product to Supabase failed (offline mode):', err);
@@ -1430,6 +1451,18 @@ class CloudSyncService {
           const seenRemoteNames = new Set<string>();
           const remoteIdsToPurge: string[] = [];
 
+          // Collect any product IDs that currently have pending local outbox edits
+          const pendingOutboxItems = await kiranaDb.sync_outbox
+            .where('status')
+            .equals('PENDING')
+            .toArray()
+            .catch(() => []);
+          const pendingProductIds = new Set(
+            pendingOutboxItems
+              .filter((item) => item.table_name === 'products' && item.payload?.id)
+              .map((item) => String(item.payload.id))
+          );
+
           // Sort so canonical prod-170-* IDs are processed first before any duplicates
           const sortedProds = [...prods].sort((a, b) => {
             const aCanon = String(a.id || '').startsWith('prod-170-') ? 0 : 1;
@@ -1451,13 +1484,27 @@ class CloudSyncService {
 
             const isHmf = isHomemadeShopId(p.shop_id) || p.business_type === 'HOMEMADE_FOOD' || isHomemadeFoodCategoryOrName(p);
             const itemShopId = p.shop_id || (isHmf ? hmfShopId : primaryShopId);
+            const existingLocal = isHmf
+              ? await homemadeDb.products.get(p.id).catch(() => undefined)
+              : await kiranaDb.products.get(p.id).catch(() => undefined);
+
+            // Never overwrite a local product that has pending outbox mutations or a newer updated_at timestamp
+            if (existingLocal) {
+              const localTs = existingLocal.updated_at ? new Date(existingLocal.updated_at).getTime() : 0;
+              const remoteTs = p.updated_at ? new Date(p.updated_at).getTime() : 0;
+              if (pendingProductIds.has(p.id) || (localTs > 0 && localTs > remoteTs)) {
+                this.syncProduct(existingLocal).catch(() => {});
+                continue;
+              }
+            }
+
             const productRecord: Product = {
               id: p.id,
               shop_id: itemShopId,
               business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
               name: p.name,
-              marathi_name: p.marathi_name || undefined,
-              search_keywords: p.search_keywords || undefined,
+              marathi_name: p.marathi_name || existingLocal?.marathi_name || undefined,
+              search_keywords: p.search_keywords || existingLocal?.search_keywords || undefined,
               short_code: p.short_code,
               barcode: p.barcode || '',
               category: p.category || (isHmf ? 'Konkani Breakfast & Tiffin' : 'General'),
@@ -1467,12 +1514,13 @@ class CloudSyncService {
               mrp: Number(p.mrp) || Number(p.selling_price) || 0,
               current_stock: Number(p.current_stock) || 0,
               low_stock_threshold: Number(p.low_stock_threshold) || 5,
-              last_supplier_name: p.last_supplier_name || (isHmf ? 'In-House Kitchen' : 'General Wholesaler'),
-              supplier_phone: p.supplier_phone || undefined,
-              wholesaler_id: p.wholesaler_id || null,
-              loan_account_id: p.loan_account_id || null,
-              image_url: p.image_url || null,
-              expiry_date: p.expiry_date || null,
+              last_supplier_name: p.last_supplier_name || existingLocal?.last_supplier_name || (isHmf ? 'In-House Kitchen' : 'General Wholesaler'),
+              supplier_phone: p.supplier_phone || existingLocal?.supplier_phone || undefined,
+              wholesaler_id: p.wholesaler_id || existingLocal?.wholesaler_id || null,
+              loan_account_id: p.loan_account_id || existingLocal?.loan_account_id || null,
+              is_loan_funded: Boolean(p.is_loan_funded ?? existingLocal?.is_loan_funded ?? (p.loan_account_id || existingLocal?.loan_account_id)),
+              image_url: p.image_url || existingLocal?.image_url || null,
+              expiry_date: p.expiry_date || existingLocal?.expiry_date || null,
               is_quick_tap: Boolean(p.is_quick_tap),
               updated_at: p.updated_at || new Date().toISOString(),
             };
