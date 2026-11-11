@@ -694,7 +694,8 @@ class CloudSyncService {
             newRecord.running_balance_after = Number(newRecord.running_balance_after ?? newRecord.balance_after) || 0;
           }
           await (targetDb as any)[table].put(newRecord);
-          if ((db as any)[table]) {
+          // Only sync to default db if targetDb is NOT isolating a different physical workspace
+          if ((db as any)[table] && targetDb === kiranaDb) {
             await (db as any)[table].put(newRecord).catch(() => {});
           }
         }

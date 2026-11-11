@@ -1,0 +1,39 @@
+# Smart Kirana POS, Inventory & Khata System — Roo Code Project Rules
+
+## 1. Store & Project Identity
+- **Store Name**: Laxmi Vatsalya General Store (Owner: Pandurang Paradkar, Phone: `9404380326`)
+- **Primary Shop ID**: `current_shop`
+- **Primary Business Type**: `KIRANA_RETAIL`
+- **Tech Stack**: React 18, TypeScript, Vite, Tailwind CSS, Dexie.js (IndexedDB offline-first), Supabase (PostgreSQL + Realtime WebSockets), Vitest.
+- **Production URL**: `https://smart-kirana-drab.vercel.app`
+
+## 2. Database & Cloud Sync Architecture
+- **Local IndexedDB (`src/db/db.ts`)**: Offline-first primary store (`kiranaDb` / `db`).
+- **Live Supabase Cloud (`src/services/cloudSyncService.ts`)**:
+  - **Supabase URL**: `https://oyolyrptcfbudnwlxyyq.supabase.co`
+  - **11 Connected Cloud Tables**:
+    1. `shop_profile`
+    2. `store_users`
+    3. `wholesalers`
+    4. `products`
+    5. `customers` (includes `0000-WALK-IN` for walk-in POS bills)
+    6. `sales_invoices`
+    7. `sale_items`
+    8. `khata_transactions`
+    9. `inventory_logs`
+    10. `daily_galla_sessions`
+    11. `expenses_and_drawings`
+  - **Rule**: Always sanitize payloads via `sanitizeTablePayloadForSupabase()` in `src/services/cloudSyncService.ts` before upserting to Supabase so local-only fields (`business_type`, `loan_account_id`, `is_loan_funded`, `sale_rate_type`, `approval_status`) never cause `42703` / `PGRST204` errors.
+
+## 3. Core Accounting & POS Invariants
+- **Integer Paisa Math (`src/utils/math.ts`)**: Always use `toPaise()`, `toRupees()`, `roundCurrency()`, and `roundQty()` to prevent floating-point drift.
+- **Checkout Equation (`src/services/billingService.ts`)**:
+  `subtotal_amount - discount_roundoff = grand_total = amount_paid_now + udhari_added`
+- **Backdated Billing Support**: `CartTab.billDate` (`YYYY-MM-DD`) in `src/components/pos/POSView.tsx` passes `billDate` into `BillingService.executeCheckout()` and stamps `sales_invoices`, `khata_transactions`, `inventory_logs`, and `daily_galla_sessions` with the selected historical date.
+
+## 4. Development, Test & Deployment Commands
+- **Start Dev Server**: `npm run dev`
+- **Run Unit Tests**: `npx vitest run`
+- **Production Build**: `npm run build`
+- **Deploy to Vercel Production**: `npx vercel --prod --yes`
+
