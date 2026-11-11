@@ -39,17 +39,36 @@ export interface CheckoutParams {
   notes?: string;
   shopId?: string;
   businessType?: BusinessType;
+  billDate?: string; // Optional YYYY-MM-DD or ISO timestamp for backdated/custom date billing
+}
+
+export function getLocalTodayDateString(d: Date = new Date()): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 export class BillingService {
   /**
-   * Generates next invoice number for today: INV-YYYYMMDD-001 (or HMF-YYYYMMDD-001 for Homemade Food)
+   * Generates next invoice number for today (or custom date): INV-YYYYMMDD-001 (or HMF-YYYYMMDD-001 for Homemade Food)
    */
-  static async generateInvoiceNumber(bizType?: BusinessType): Promise<string> {
+  static async generateInvoiceNumber(bizType?: BusinessType, customDateStr?: string): Promise<string> {
     const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
+    let yyyy = String(today.getFullYear());
+    let mm = String(today.getMonth() + 1).padStart(2, '0');
+    let dd = String(today.getDate()).padStart(2, '0');
+
+    if (customDateStr && /^\d{4}-\d{2}-\d{2}/.test(customDateStr.trim())) {
+      const datePart = customDateStr.trim().split('T')[0];
+      const parts = datePart.split('-');
+      if (parts.length === 3) {
+        yyyy = parts[0];
+        mm = parts[1];
+        dd = parts[2];
+      }
+    }
+
     const profile = await db.getShopProfile();
     const effectiveBizType = bizType || profile?.business_type || getActiveBusinessType();
     const customPrefix = profile?.invoice_prefix
@@ -101,10 +120,33 @@ export class BillingService {
     const activeBizType: BusinessType = params.businessType || shopProfile?.business_type || getActiveBusinessType();
     const activeShopId: string = params.shopId || shopProfile?.id || getActiveShopId(activeBizType);
 
+    const now = new Date();
+    const realNowIso = now.toISOString();
+    const localTodayStr = getLocalTodayDateString(now);
+    const rawBillDate = params.billDate?.trim();
+
+    let nowIso = realNowIso;
+    let todayDate = realNowIso.split('T')[0];
+
+    if (rawBillDate) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(rawBillDate)) {
+        todayDate = rawBillDate;
+        if (rawBillDate !== localTodayStr) {
+          // Construct an ISO timestamp that stays on rawBillDate in both UTC and IST (+05:30)
+          const safeUtcHour = String(Math.min(17, Math.max(6, now.getHours()))).padStart(2, '0');
+          const minStr = String(now.getMinutes()).padStart(2, '0');
+          const secStr = String(now.getSeconds()).padStart(2, '0');
+          const msStr = String(now.getMilliseconds()).padStart(3, '0');
+          nowIso = `${rawBillDate}T${safeUtcHour}:${minStr}:${secStr}.${msStr}Z`;
+        }
+      } else if (rawBillDate.includes('T')) {
+        nowIso = rawBillDate;
+        todayDate = rawBillDate.split('T')[0];
+      }
+    }
+
     const invoiceId = `inv-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    const invoiceNumber = await this.generateInvoiceNumber(activeBizType);
-    const nowIso = new Date().toISOString();
-    const todayDate = nowIso.split('T')[0];
+    const invoiceNumber = await this.generateInvoiceNumber(activeBizType, todayDate);
 
     let totalCogs = 0;
     const saleItems: SaleItem[] = [];
@@ -257,7 +299,10 @@ export class BillingService {
           if (!cust) throw new Error(`Customer not found: ${params.customerId}`);
 
           const newBalance = roundCurrency(cust.current_udhari_balance + udhari);
-          const oldestDate = cust.oldest_unpaid_date || nowIso;
+          const oldestDate =
+            !cust.oldest_unpaid_date || nowIso < cust.oldest_unpaid_date
+              ? nowIso
+              : cust.oldest_unpaid_date;
 
           await db.customers.update(params.customerId, {
             current_udhari_balance: newBalance,

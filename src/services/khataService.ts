@@ -148,7 +148,7 @@ export class KhataService {
       }
     );
 
-    cloudSyncService.flushOutbox().catch(() => {});
+    cloudSyncService.flushOutbox().catch(() => { });
     return { customer: updatedCustomer, transaction: newTx };
   }
 
@@ -236,8 +236,8 @@ export class KhataService {
         payload: { id: customerId, last_reminder_sent_at: nowIso },
       },
       db.sync_outbox
-    ).catch(() => {});
-    cloudSyncService.flushOutbox().catch(() => {});
+    ).catch(() => { });
+    cloudSyncService.flushOutbox().catch(() => { });
   }
 
   /**

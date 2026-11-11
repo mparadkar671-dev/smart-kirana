@@ -7,7 +7,7 @@ import { UdhariCheckoutModal } from './UdhariCheckoutModal';
 import { ReceiptModal } from './ReceiptModal';
 import { usePosKeyboardShortcuts } from '../../hooks/usePosKeyboardShortcuts';
 import { KeyboardShortcutsModal } from '../common/KeyboardShortcutsModal';
-import { BillingService, CartItemInput } from '../../services/billingService';
+import { BillingService, CartItemInput, getLocalTodayDateString } from '../../services/billingService';
 import { GallaService } from '../../services/gallaService';
 import { BatchFifoService, ExpiryAlertItem } from '../../services/batchFifoService';
 import { getActiveShopId } from '../../services/tenantManager';
@@ -35,6 +35,8 @@ import {
   AlertTriangle,
   Tag,
   Clock,
+  Calendar,
+  RotateCcw,
   ChevronDown,
   Check,
   CheckCircle2,
@@ -72,6 +74,8 @@ interface CartTab {
   name: string;
   items: CartItem[];
   discountRoundoff: number;
+  billDate: string; // YYYY-MM-DD (independent per tab, defaults to today)
+  customerId?: string;
   createdAt?: number;
 }
 
@@ -83,17 +87,21 @@ export const POSView: React.FC<POSViewProps> = ({
 }) => {
   const activeBusinessType: BusinessType = shopProfile?.business_type || 'KIRANA_RETAIL';
   const activeShopId = shopProfile?.id || getActiveShopId(activeBusinessType);
+  const todayDateStr = getLocalTodayDateString();
 
   // Live direct fallback to active database for 100% reactive counter grid
   const liveDbProducts = useLiveQuery(() => getActiveDb(activeBusinessType).products.toArray(), [activeBusinessType], []);
   const effectiveProducts = (products && products.length > 0) ? products : (liveDbProducts || []);
 
-  // Multi-Cart State (Bill 1, Bill 2, Bill 3)
-  const [carts, setCarts] = useState<CartTab[]>([
-    { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, createdAt: Date.now() },
-    { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, createdAt: Date.now() },
-    { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0, createdAt: Date.now() },
-  ]);
+  // Multi-Cart State (Bill 1, Bill 2, Bill 3) with independent billDate per tab
+  const [carts, setCarts] = useState<CartTab[]>(() => {
+    const today = getLocalTodayDateString();
+    return [
+      { id: 1, name: 'Bill 1', items: [], discountRoundoff: 0, billDate: today, createdAt: Date.now() },
+      { id: 2, name: 'Bill 2', items: [], discountRoundoff: 0, billDate: today, createdAt: Date.now() },
+      { id: 3, name: 'Bill 3', items: [], discountRoundoff: 0, billDate: today, createdAt: Date.now() },
+    ];
+  });
 
   const [activeCartId, setActiveCartId] = useState<number>(1);
 
@@ -151,6 +159,7 @@ export const POSView: React.FC<POSViewProps> = ({
     amount: number;
     items: CartItem[];
     customerId: string;
+    billDate: string;
     secondsLeft: number;
   } | null>(null);
 
@@ -168,14 +177,14 @@ export const POSView: React.FC<POSViewProps> = ({
 
   const handleUndoCashCheckout = async () => {
     if (!undoCheckout) return;
-    const { invoiceId, items, customerId, invoiceNumber } = undoCheckout;
+    const { invoiceId, items, customerId, billDate, invoiceNumber } = undoCheckout;
     setUndoCheckout(null);
     try {
       await GallaService.voidInvoice(invoiceId);
       setCarts((prev) =>
         prev.map((c) =>
           c.id === activeCartId
-            ? { ...c, items, customerId }
+            ? { ...c, items, customerId, billDate }
             : c
         )
       );
@@ -189,6 +198,17 @@ export const POSView: React.FC<POSViewProps> = ({
   };
 
   const activeCart = carts.find((c) => c.id === activeCartId) || carts[0];
+  const activeBillDate = activeCart.billDate || todayDateStr;
+  const isBackdated = activeBillDate !== todayDateStr;
+
+  const setActiveCartBillDate = (newDate: string) => {
+    const cleanDate = newDate && /^\d{4}-\d{2}-\d{2}$/.test(newDate) ? newDate : todayDateStr;
+    setCarts((prevCarts) =>
+      prevCarts.map((cart) =>
+        cart.id === activeCartId ? { ...cart, billDate: cleanDate } : cart
+      )
+    );
+  };
 
   // Strictly filter products to the active business type via bulletproof business firewall
   const businessProducts = useMemo(
@@ -452,12 +472,13 @@ export const POSView: React.FC<POSViewProps> = ({
     );
   };
 
-  // Clear current active cart
+  // Clear current active cart (resets items, discount, and billDate back to Today)
   const clearCurrentCart = () => {
+    const today = getLocalTodayDateString();
     setCarts((prevCarts) =>
       prevCarts.map((cart) =>
         cart.id === activeCartId
-          ? { ...cart, items: [], discountRoundoff: 0 }
+          ? { ...cart, items: [], discountRoundoff: 0, billDate: today }
           : cart
       )
     );
@@ -489,6 +510,8 @@ export const POSView: React.FC<POSViewProps> = ({
         is_loan_funded: i.product.is_loan_funded,
       }));
 
+      const billDateToUse = activeBillDate;
+
       const res = await BillingService.executeCheckout({
         customerId: selectedCustomerId,
         items: itemsPayload,
@@ -499,6 +522,7 @@ export const POSView: React.FC<POSViewProps> = ({
         udhariAdded: 0,
         shopId: activeShopId,
         businessType: activeBusinessType,
+        billDate: billDateToUse,
       });
 
       const cartItemsToPreserve = [...activeCart.items];
@@ -519,6 +543,7 @@ export const POSView: React.FC<POSViewProps> = ({
         amount: grandTotalRupees,
         items: cartItemsToPreserve,
         customerId: customerToPreserve,
+        billDate: billDateToUse,
         secondsLeft: 4,
       });
 
@@ -553,6 +578,7 @@ export const POSView: React.FC<POSViewProps> = ({
         udhariAdded: 0,
         shopId: activeShopId,
         businessType: activeBusinessType,
+        billDate: activeBillDate,
       });
 
       clearCurrentCart();
@@ -604,6 +630,7 @@ export const POSView: React.FC<POSViewProps> = ({
         notes: params.amountPaidNow > 0 ? 'CASH' : undefined,
         shopId: activeShopId,
         businessType: activeBusinessType,
+        billDate: activeBillDate,
       });
 
       clearCurrentCart();
@@ -1019,6 +1046,7 @@ export const POSView: React.FC<POSViewProps> = ({
                 (Date.now() - (cart.createdAt || Date.now())) / 60000
               );
               const isHeldWithItems = !isActive && itemCount > 0;
+              const isTabBackdated = Boolean(cart.billDate && cart.billDate !== todayDateStr);
 
               return (
                 <button
@@ -1028,8 +1056,8 @@ export const POSView: React.FC<POSViewProps> = ({
                   onClick={() => setActiveCartId(cart.id)}
                   title={
                     itemCount > 0
-                      ? `${cart.name}: ${itemCount} items, held ${elapsedMinutes}m ago`
-                      : cart.name
+                      ? `${cart.name}: ${itemCount} items, held ${elapsedMinutes}m ago${isTabBackdated ? ` (Bill Date: ${cart.billDate})` : ''}`
+                      : `${cart.name}${isTabBackdated ? ` (Bill Date: ${cart.billDate})` : ''}`
                   }
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
                     isActive
@@ -1040,6 +1068,12 @@ export const POSView: React.FC<POSViewProps> = ({
                   }`}
                 >
                   <span>{cart.name}</span>
+                  {isTabBackdated && (
+                    <Calendar
+                      data-testid={`cart-tab-backdated-${cart.id}`}
+                      className={`w-3 h-3 shrink-0 ${isActive ? 'text-amber-300' : 'text-amber-500'}`}
+                    />
+                  )}
                   <span
                     className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
                       isActive
@@ -1193,7 +1227,71 @@ export const POSView: React.FC<POSViewProps> = ({
           )}
         </div>
 
+        {/* Compact Bill Date / Backdated Billing Selector Row */}
+        <div
+          data-testid="pos-bill-date-row"
+          className={`px-3 py-1.5 border-b flex items-center justify-between gap-2 transition-colors ${
+            isBackdated
+              ? 'bg-amber-50/90 dark:bg-amber-950/35 border-amber-300 dark:border-amber-800/80'
+              : 'bg-slate-50/90 dark:bg-slate-900/90 border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Calendar
+              className={`w-3.5 h-3.5 shrink-0 ${
+                isBackdated
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-slate-400 dark:text-slate-500'
+              }`}
+            />
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 shrink-0">
+              Bill Date:
+            </span>
+            {isBackdated ? (
+              <span
+                data-testid="backdated-bill-badge"
+                className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 truncate"
+              >
+                Backdated / Previous Bill
+              </span>
+            ) : (
+              <span
+                data-testid="today-bill-badge"
+                className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+              >
+                Today
+              </span>
+            )}
+          </div>
 
+          <div className="flex items-center gap-1.5 shrink-0">
+            <input
+              type="date"
+              aria-label="Bill Date"
+              data-testid="pos-bill-date-input"
+              value={activeBillDate}
+              max={todayDateStr}
+              onChange={(e) => setActiveCartBillDate(e.target.value || todayDateStr)}
+              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border focus:outline-hidden cursor-pointer transition ${
+                isBackdated
+                  ? 'bg-amber-100/80 dark:bg-amber-950/70 border-amber-400 dark:border-amber-600 text-amber-900 dark:text-amber-200 focus:border-amber-500'
+                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 focus:border-blue-600 dark:focus:border-emerald-500'
+              }`}
+            />
+            {isBackdated && (
+              <button
+                type="button"
+                data-testid="reset-bill-date-btn"
+                onClick={() => setActiveCartBillDate(todayDateStr)}
+                title="Reset Bill Date to Today"
+                className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-600 hover:bg-amber-700 text-white transition flex items-center gap-1 shadow-2xs cursor-pointer"
+              >
+                <RotateCcw className="w-2.5 h-2.5" />
+                <span>Reset to Today</span>
+              </button>
+            )}
+          </div>
+        </div>
 
         {/* Cart Items List */}
         <div
