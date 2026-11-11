@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Customer, ShopProfile, KhataTransaction } from '../../types';
 import { db } from '../../db/db';
 import { KhataService } from '../../services/khataService';
+import { cloudSyncService } from '../../services/cloudSyncService';
 import { CustomerPassbookDrawer } from './CustomerPassbookDrawer';
 import { ReceiveJamaModal } from './ReceiveJamaModal';
 import { getActiveShopId, getActiveBusinessType } from '../../services/tenantManager';
@@ -328,6 +329,8 @@ export const KhataView: React.FC<KhataViewProps> = ({
       payload: newCust as unknown as Record<string, unknown>,
       shop_id: shopId,
     });
+    cloudSyncService.syncCustomer(newCust).catch(() => {});
+    cloudSyncService.flushOutbox().catch(() => {});
 
     setNewCustomerName('');
     setNewCustomerPhone('');

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Customer } from '../../types';
 import { db } from '../../db/db';
+import { cloudSyncService } from '../../services/cloudSyncService';
 import { formatINR, roundCurrency, toPaise, toRupees } from '../../utils/math';
 import { X, UserPlus, AlertTriangle, Check, BookOpen, Search, User, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -118,6 +119,17 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
     };
 
     await db.customers.add(newCustomer);
+    await db.queueSync(
+      {
+        table_name: 'customers',
+        operation: 'INSERT',
+        payload: newCustomer as unknown as Record<string, unknown>,
+        shop_id: newCustomer.shop_id,
+      },
+      db.sync_outbox
+    );
+    cloudSyncService.syncCustomer(newCustomer).catch(() => {});
+    cloudSyncService.flushOutbox().catch(() => {});
     setSelectedCustomerId(newCustomer.id);
     setIsQuickCreate(false);
     setErrorMsg(null);

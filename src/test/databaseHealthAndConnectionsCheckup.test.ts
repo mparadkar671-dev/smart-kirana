@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { db, kiranaDb, getActiveDb } from '../db/db';
-import { cloudSyncService } from '../services/cloudSyncService';
+import {
+  cloudSyncService,
+  SUPABASE_CLOUD_TABLES,
+  sanitizeTablePayloadForSupabase,
+} from '../services/cloudSyncService';
 import { getSupabaseCredentials, getSupabaseClient } from '../lib/supabase';
 import { resolveProductBusinessType, filterProductsForBusiness } from '../utils/businessFirewall';
 import { Product, Customer, SalesInvoice, SaleItem, DailyGallaSession, ExpenseAndDrawing } from '../types';
@@ -214,5 +218,131 @@ describe('Comprehensive Database Health, Schemas & Connections Checkup', () => {
       });
       expect(resolved).toBe('KIRANA_RETAIL');
     }
+  });
+
+  it('7. Verifies all 11 Supabase Cloud tables sanitize payloads strictly to live PostgreSQL schema columns', () => {
+    expect(Array.from(SUPABASE_CLOUD_TABLES)).toEqual([
+      'shop_profile',
+      'store_users',
+      'wholesalers',
+      'products',
+      'customers',
+      'sales_invoices',
+      'sale_items',
+      'khata_transactions',
+      'inventory_logs',
+      'daily_galla_sessions',
+      'expenses_and_drawings',
+    ]);
+
+    // Verify local-only fields (business_type, loan_account_id, is_loan_funded, sale_rate_type, entry_type, approval_status)
+    // are stripped before sending to Supabase so PostgREST never throws 42703 / PGRST204
+    const ws = sanitizeTablePayloadForSupabase(
+      'wholesalers',
+      { id: 'ws-1', name: 'Test Agency', phone: '9876543210', business_type: 'KIRANA_RETAIL' },
+      TEST_SHOP_ID
+    );
+    expect(ws).not.toHaveProperty('business_type');
+    expect(ws).toHaveProperty('name', 'Test Agency');
+
+    const cust = sanitizeTablePayloadForSupabase(
+      'customers',
+      { id: 'cust-1', name: 'Ramesh', phone: '9876543210', business_type: 'KIRANA_RETAIL' },
+      TEST_SHOP_ID
+    );
+    expect(cust).not.toHaveProperty('business_type');
+
+    const inv = sanitizeTablePayloadForSupabase(
+      'sales_invoices',
+      {
+        id: 'inv-1',
+        invoice_number: 'KRN-1001',
+        customer_id: '0000-WALK-IN',
+        payment_mode: 'CASH',
+        grand_total: 150,
+        business_type: 'KIRANA_RETAIL',
+      },
+      TEST_SHOP_ID
+    );
+    expect(inv).not.toHaveProperty('business_type');
+    expect(inv).toHaveProperty('customer_id', '0000-WALK-IN');
+
+    const item = sanitizeTablePayloadForSupabase(
+      'sale_items',
+      {
+        id: 'si-1',
+        invoice_id: 'inv-1',
+        product_id: 'prod-1',
+        product_name_snapshot: 'Sugar 1kg',
+        qty: 2,
+        sale_rate_type: 'RETAIL',
+        business_type: 'KIRANA_RETAIL',
+      },
+      TEST_SHOP_ID
+    );
+    expect(item).not.toHaveProperty('sale_rate_type');
+    expect(item).not.toHaveProperty('business_type');
+
+    const khata = sanitizeTablePayloadForSupabase(
+      'khata_transactions',
+      {
+        id: 'kh-1',
+        customer_id: 'cust-1',
+        entry_type: 'DEBIT_UDHARI_GIVEN',
+        amount: 250,
+        running_balance_after: 500,
+        business_type: 'KIRANA_RETAIL',
+      },
+      TEST_SHOP_ID
+    );
+    expect(khata).toHaveProperty('entry_type', 'DEBIT_UDHARI_GIVEN');
+    expect(khata).not.toHaveProperty('business_type');
+    expect(khata).toHaveProperty('balance_after', 500);
+    expect(khata).toHaveProperty('running_balance_after', 500);
+
+    const log = sanitizeTablePayloadForSupabase(
+      'inventory_logs',
+      {
+        id: 'log-1',
+        product_id: 'prod-1',
+        change_qty: 10,
+        reason_type: 'RESTOCK_IN',
+        loan_account_id: 'loan-1',
+        is_loan_funded: true,
+        business_type: 'KIRANA_RETAIL',
+      },
+      TEST_SHOP_ID
+    );
+    expect(log).not.toHaveProperty('loan_account_id');
+    expect(log).not.toHaveProperty('is_loan_funded');
+    expect(log).not.toHaveProperty('business_type');
+
+    const galla = sanitizeTablePayloadForSupabase(
+      'daily_galla_sessions',
+      {
+        id: 'galla-2026-11-11',
+        session_date: '2026-11-11',
+        opening_cash: 1000,
+        business_type: 'KIRANA_RETAIL',
+      },
+      TEST_SHOP_ID
+    );
+    expect(galla).not.toHaveProperty('business_type');
+
+    const exp = sanitizeTablePayloadForSupabase(
+      'expenses_and_drawings',
+      {
+        id: 'exp-1',
+        category: 'SHOP_EXPENSE',
+        amount: 100,
+        loan_account_id: 'loan-1',
+        is_loan_funded: true,
+        business_type: 'KIRANA_RETAIL',
+      },
+      TEST_SHOP_ID
+    );
+    expect(exp).not.toHaveProperty('loan_account_id');
+    expect(exp).not.toHaveProperty('is_loan_funded');
+    expect(exp).not.toHaveProperty('business_type');
   });
 });

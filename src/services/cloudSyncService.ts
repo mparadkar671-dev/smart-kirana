@@ -106,6 +106,288 @@ export function sanitizeProductForSupabase(
   return sanitized;
 }
 
+export const SUPABASE_CLOUD_TABLES = new Set([
+  'shop_profile',
+  'store_users',
+  'wholesalers',
+  'products',
+  'customers',
+  'sales_invoices',
+  'sale_items',
+  'khata_transactions',
+  'inventory_logs',
+  'daily_galla_sessions',
+  'expenses_and_drawings',
+]);
+
+export const TABLE_SYNC_PRIORITY: Record<string, number> = {
+  shop_profile: 1,
+  store_users: 2,
+  wholesalers: 3,
+  products: 4,
+  customers: 5,
+  sales_invoices: 6,
+  sale_items: 7,
+  khata_transactions: 8,
+  inventory_logs: 9,
+  daily_galla_sessions: 10,
+  expenses_and_drawings: 11,
+};
+
+export function sanitizeStoreUserForSupabase(
+  u: Partial<StoreUser> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = u as any;
+  const now = new Date().toISOString();
+  return {
+    id: raw.id,
+    user_id: raw.user_id || userId || null,
+    email: raw.email || '',
+    full_name: raw.full_name || 'Store Staff',
+    phone: raw.phone || null,
+    role: raw.role || 'OWNER',
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    is_active: raw.is_active !== false,
+    approval_status: raw.approval_status || 'APPROVED',
+    created_at: raw.created_at || now,
+    updated_at: raw.updated_at || now,
+  };
+}
+
+export function sanitizeWholesalerForSupabase(
+  w: Partial<Wholesaler> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = w as any;
+  const now = new Date().toISOString();
+  const sanitized: Record<string, unknown> = {
+    id: raw.id,
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    name: raw.name || 'Wholesaler',
+    agency_or_brand: raw.agency_or_brand || raw.notes || null,
+    phone: raw.phone || '0000000000',
+    gstin: raw.gstin || raw.gst_number || null,
+    address: raw.address || raw.address_city || null,
+    visit_day: raw.visit_day || null,
+    is_active: raw.is_active !== false,
+    created_at: raw.created_at || now,
+    updated_at: raw.updated_at || now,
+  };
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
+export function sanitizeCustomerForSupabase(
+  c: Partial<Customer> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = c as any;
+  const sanitized: Record<string, unknown> = {
+    id: raw.id,
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    name: raw.name || 'Store Customer',
+    phone: raw.phone || '0000000000',
+    address_landmark: raw.address_landmark || null,
+    credit_limit: Number(raw.credit_limit ?? 2000),
+    current_udhari_balance: Number(raw.current_udhari_balance ?? 0),
+    oldest_unpaid_date: raw.oldest_unpaid_date || null,
+    last_reminder_sent_at: raw.last_reminder_sent_at || null,
+    created_at: raw.created_at || new Date().toISOString(),
+  };
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
+export function sanitizeSalesInvoiceForSupabase(
+  inv: Partial<SalesInvoice> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = inv as any;
+  const sanitized: Record<string, unknown> = {
+    id: raw.id,
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    invoice_number: raw.invoice_number || `INV-${raw.id}`,
+    customer_id: raw.customer_id || '0000-WALK-IN',
+    subtotal_amount: Number(raw.subtotal_amount ?? 0),
+    discount_roundoff: Number(raw.discount_roundoff ?? 0),
+    grand_total: Number(raw.grand_total ?? 0),
+    total_cogs: Number(raw.total_cogs ?? 0),
+    payment_mode: raw.payment_mode || 'CASH',
+    amount_paid_now: Number(raw.amount_paid_now ?? 0),
+    udhari_added: Number(raw.udhari_added ?? 0),
+    status: raw.status || 'COMPLETED',
+    return_reason: raw.return_reason || null,
+    credit_note_number: raw.credit_note_number || null,
+    returned_at: raw.returned_at || null,
+    created_at: raw.created_at || new Date().toISOString(),
+  };
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
+export function sanitizeSaleItemForSupabase(
+  item: Partial<SaleItem> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = item as any;
+  const qty = Number(raw.qty ?? 1);
+  const unitCost = Number(raw.unit_purchase_cost ?? 0);
+  const unitPrice = Number(raw.unit_selling_price ?? 0);
+  const lineTotal = Number(raw.line_total ?? qty * unitPrice);
+  const lineCogs = Number(raw.line_cogs ?? Math.round(qty * unitCost * 100) / 100);
+  const sanitized: Record<string, unknown> = {
+    id: raw.id,
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    invoice_id: raw.invoice_id,
+    product_id: raw.product_id,
+    product_name_snapshot: raw.product_name_snapshot || 'Item',
+    qty,
+    unit_selling_price: unitPrice,
+    unit_purchase_cost: unitCost,
+    line_total: lineTotal,
+    line_cogs: lineCogs,
+    created_at: raw.created_at || new Date().toISOString(),
+  };
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
+export function sanitizeKhataTransactionForSupabase(
+  tx: Partial<KhataTransaction> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = tx as any;
+  const bal = Number(raw.running_balance_after ?? raw.balance_after ?? 0);
+  const sanitized: Record<string, unknown> = {
+    id: raw.id,
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    customer_id: raw.customer_id,
+    entry_type: raw.entry_type || 'DEBIT_UDHARI_GIVEN',
+    amount: Number(raw.amount ?? 0),
+    balance_after: bal,
+    running_balance_after: bal,
+    payment_channel: raw.payment_channel || 'CASH',
+    invoice_id: raw.invoice_id || null,
+    notes: raw.notes || null,
+    created_at: raw.created_at || new Date().toISOString(),
+  };
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
+export function sanitizeInventoryLogForSupabase(
+  log: Partial<InventoryLog> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = log as any;
+  const sanitized: Record<string, unknown> = {
+    id: raw.id,
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    product_id: raw.product_id,
+    change_qty: Number(raw.change_qty ?? 0),
+    reason_type: raw.reason_type || 'AUDIT_ADJUST',
+    unit_cost_at_time: Number(raw.unit_cost_at_time ?? 0),
+    reference_id: raw.reference_id || null,
+    notes: raw.notes || null,
+    created_at: raw.created_at || new Date().toISOString(),
+  };
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
+export function sanitizeGallaSessionForSupabase(
+  session: Partial<DailyGallaSession> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = session as any;
+  const today = new Date().toISOString().split('T')[0];
+  const sanitized: Record<string, unknown> = {
+    id: raw.id,
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    session_date: raw.session_date || today,
+    opening_cash: Number(raw.opening_cash ?? 0),
+    cash_sales_total: Number(raw.cash_sales_total ?? 0),
+    cash_udhari_recovered: Number(raw.cash_udhari_recovered ?? 0),
+    cash_expenses_out: Number(raw.cash_expenses_out ?? 0),
+    expected_closing_cash: Number(raw.expected_closing_cash ?? 0),
+    actual_counted_cash: raw.actual_counted_cash !== undefined && raw.actual_counted_cash !== null ? Number(raw.actual_counted_cash) : null,
+    discrepancy: raw.discrepancy !== undefined && raw.discrepancy !== null ? Number(raw.discrepancy) : null,
+    created_at: raw.created_at || new Date().toISOString(),
+  };
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
+export function sanitizeExpenseForSupabase(
+  expense: Partial<ExpenseAndDrawing> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = expense as any;
+  const sanitized: Record<string, unknown> = {
+    id: raw.id,
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    category: raw.category || 'SHOP_EXPENSE_RENT_ELEC',
+    amount: Number(raw.amount ?? 0),
+    paid_via: raw.paid_via || 'CASH_GALLA',
+    description: raw.description || null,
+    created_at: raw.created_at || new Date().toISOString(),
+  };
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
+export function sanitizeTablePayloadForSupabase(
+  tableName: string,
+  payload: Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  switch (tableName) {
+    case 'shop_profile':
+      return sanitizeShopProfileForSupabase(payload, shopId, userId);
+    case 'store_users':
+      return sanitizeStoreUserForSupabase(payload, shopId, userId);
+    case 'wholesalers':
+      return sanitizeWholesalerForSupabase(payload, shopId, userId);
+    case 'products':
+      return sanitizeProductForSupabase(payload, shopId, userId);
+    case 'customers':
+      return sanitizeCustomerForSupabase(payload, shopId, userId);
+    case 'sales_invoices':
+      return sanitizeSalesInvoiceForSupabase(payload, shopId, userId);
+    case 'sale_items':
+      return sanitizeSaleItemForSupabase(payload, shopId, userId);
+    case 'khata_transactions':
+      return sanitizeKhataTransactionForSupabase(payload, shopId, userId);
+    case 'inventory_logs':
+      return sanitizeInventoryLogForSupabase(payload, shopId, userId);
+    case 'daily_galla_sessions':
+      return sanitizeGallaSessionForSupabase(payload, shopId, userId);
+    case 'expenses_and_drawings':
+      return sanitizeExpenseForSupabase(payload, shopId, userId);
+    default:
+      return payload;
+  }
+}
+
 /**
  * Strips non-existent columns (business_type, invoice_prefix, created_at) from shop_profile
  * so that Supabase PostgREST accepts upserts without schema cache errors (PGRST204).
@@ -408,14 +690,20 @@ class CloudSyncService {
             if (!newRecord.unit_type && newRecord.unit) {
               newRecord.unit_type = newRecord.unit;
             }
+          } else if (table === 'khata_transactions') {
+            newRecord.running_balance_after = Number(newRecord.running_balance_after ?? newRecord.balance_after) || 0;
           }
           await (targetDb as any)[table].put(newRecord);
+          if ((db as any)[table]) {
+            await (db as any)[table].put(newRecord).catch(() => {});
+          }
         }
       } else if (eventType === 'DELETE') {
         const idToDelete = oldRecord?.id || oldRecord?.session_date;
         if (idToDelete) {
           if ((kiranaDb as any)[table]) await (kiranaDb as any)[table].delete(idToDelete);
           if ((homemadeDb as any)[table]) await (homemadeDb as any)[table].delete(idToDelete);
+          if ((db as any)[table]) await (db as any)[table].delete(idToDelete).catch(() => {});
         }
       }
 
@@ -657,6 +945,43 @@ class CloudSyncService {
   }
 
   /**
+   * Ensures that a customer row (including 0000-WALK-IN) exists in Supabase before syncing sales_invoices or khata_transactions.
+   */
+  async ensureCustomerExistsInCloud(customerId: string, shopId = 'current_shop'): Promise<void> {
+    if (!supabase || this.isTestEnv || !customerId) return;
+    try {
+      const userId = await this.getUserId();
+      if (customerId === '0000-WALK-IN') {
+        const walkInPayload = sanitizeCustomerForSupabase(
+          {
+            id: '0000-WALK-IN',
+            shop_id: shopId,
+            name: 'Walk-in Customer (Cash / UPI)',
+            phone: '0000000000',
+            address_landmark: 'Counter Sale',
+            credit_limit: 0,
+            current_udhari_balance: 0,
+            created_at: new Date(0).toISOString(),
+          },
+          shopId,
+          userId
+        );
+        await supabase.from('customers').upsert(walkInPayload, { onConflict: 'id' });
+        return;
+      }
+      const localCust =
+        (await kiranaDb.customers.get(customerId).catch(() => undefined)) ||
+        (await db.customers.get(customerId).catch(() => undefined));
+      if (localCust) {
+        const custPayload = sanitizeCustomerForSupabase(localCust, localCust.shop_id || shopId, userId);
+        await supabase.from('customers').upsert(custPayload, { onConflict: 'id' });
+      }
+    } catch {
+      // Ignore in offline
+    }
+  }
+
+  /**
    * Syncs a single product to Supabase cloud
    */
   async syncProduct(product: Product): Promise<void> {
@@ -709,21 +1034,9 @@ class CloudSyncService {
     if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
-      const payload: Record<string, unknown> = {
-        id: wholesaler.id,
-        shop_id: wholesaler.shop_id || 'current_shop',
-        business_type: wholesaler.business_type || 'KIRANA_RETAIL',
-        name: wholesaler.name,
-        agency_or_brand: wholesaler.agency_or_brand || null,
-        phone: wholesaler.phone,
-        gstin: wholesaler.gstin || wholesaler.gst_number || null,
-        address: wholesaler.address || wholesaler.address_city || null,
-        visit_day: wholesaler.visit_day || null,
-        is_active: wholesaler.is_active !== false,
-        created_at: wholesaler.created_at || new Date().toISOString(),
-        updated_at: wholesaler.updated_at || new Date().toISOString(),
-      };
-      if (userId) payload.user_id = userId;
+      const shopId = wholesaler.shop_id || 'current_shop';
+      await this.ensureShopProfileExistsInCloud(shopId);
+      const payload = sanitizeWholesalerForSupabase(wholesaler, shopId, userId);
 
       const { error } = await supabase.from('wholesalers').upsert(payload, { onConflict: 'id' });
       if (error) {
@@ -735,35 +1048,10 @@ class CloudSyncService {
   }
 
   /**
-   * Syncs a single Loan Account to Supabase cloud
+   * Syncs a single Loan Account (local-first; silently skips if loan_accounts table is not in cloud schema)
    */
-  async syncLoanAccount(loanAccount: LoanAccount): Promise<void> {
-    if (!supabase || this.isTestEnv) return;
-    try {
-      const userId = await this.getUserId();
-      const payload: Record<string, unknown> = {
-        id: loanAccount.id,
-        shop_id: loanAccount.shop_id || 'current_shop',
-        name: loanAccount.name,
-        lender_name: loanAccount.lender_name,
-        principal_amount: loanAccount.principal_amount,
-        interest_rate_pct: loanAccount.interest_rate_pct || 0,
-        emi_or_daily_target: loanAccount.emi_or_daily_target || 0,
-        amount_repaid: loanAccount.amount_repaid || 0,
-        is_active: loanAccount.is_active !== false,
-        notes: loanAccount.notes || null,
-        created_at: loanAccount.created_at || new Date().toISOString(),
-        updated_at: loanAccount.updated_at || new Date().toISOString(),
-      };
-      if (userId) payload.user_id = userId;
-
-      const { error } = await supabase.from('loan_accounts').upsert(payload, { onConflict: 'id' });
-      if (error) {
-        console.warn('Sync loan_account to Supabase returned error:', error.message);
-      }
-    } catch (err) {
-      console.warn('Background sync loan_account to Supabase failed (offline mode):', err);
-    }
+  async syncLoanAccount(_loanAccount: LoanAccount): Promise<void> {
+    return;
   }
 
   /**
@@ -813,20 +1101,9 @@ class CloudSyncService {
     if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
-      const payload: Record<string, unknown> = {
-        id: customer.id,
-        shop_id: customer.shop_id || 'current_shop',
-        business_type: customer.business_type || 'KIRANA_RETAIL',
-        name: customer.name,
-        phone: customer.phone,
-        address_landmark: customer.address_landmark || null,
-        credit_limit: customer.credit_limit,
-        current_udhari_balance: customer.current_udhari_balance,
-        oldest_unpaid_date: customer.oldest_unpaid_date || null,
-        last_reminder_sent_at: customer.last_reminder_sent_at || null,
-        created_at: customer.created_at || new Date().toISOString(),
-      };
-      if (userId) payload.user_id = userId;
+      const shopId = customer.shop_id || 'current_shop';
+      await this.ensureShopProfileExistsInCloud(shopId);
+      const payload = sanitizeCustomerForSupabase(customer, shopId, userId);
 
       const { error } = await supabase.from('customers').upsert(payload, { onConflict: 'id' });
       if (error) {
@@ -853,30 +1130,36 @@ class CloudSyncService {
   }
 
   /**
+   * Syncs a single inventory log to Supabase cloud
+   */
+  async syncInventoryLog(log: InventoryLog): Promise<void> {
+    if (!supabase || this.isTestEnv) return;
+    try {
+      const userId = await this.getUserId();
+      const shopId = log.shop_id || 'current_shop';
+      const payload = sanitizeInventoryLogForSupabase(log, shopId, userId);
+      const { error } = await supabase.from('inventory_logs').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.warn('Sync inventory_log returned error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Background sync inventory_log failed:', err);
+    }
+  }
+
+  /**
    * Syncs completed sales invoice and associated items to Supabase cloud
    */
   async syncInvoice(invoice: SalesInvoice, items: SaleItem[]): Promise<void> {
     if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
+      const shopId = invoice.shop_id || 'current_shop';
 
-      const invoicePayload: Record<string, unknown> = {
-        id: invoice.id,
-        shop_id: invoice.shop_id || 'current_shop',
-        business_type: invoice.business_type || 'KIRANA_RETAIL',
-        invoice_number: invoice.invoice_number,
-        customer_id: invoice.customer_id,
-        subtotal_amount: invoice.subtotal_amount,
-        discount_roundoff: invoice.discount_roundoff,
-        grand_total: invoice.grand_total,
-        total_cogs: invoice.total_cogs,
-        payment_mode: invoice.payment_mode,
-        amount_paid_now: invoice.amount_paid_now,
-        udhari_added: invoice.udhari_added,
-        status: invoice.status,
-        created_at: invoice.created_at,
-      };
-      if (userId) invoicePayload.user_id = userId;
+      await this.ensureShopProfileExistsInCloud(shopId);
+      await this.ensureCustomerExistsInCloud(invoice.customer_id || '0000-WALK-IN', shopId);
+
+      const invoicePayload = sanitizeSalesInvoiceForSupabase(invoice, shopId, userId);
 
       const { error: invErr } = await supabase.from('sales_invoices').upsert(invoicePayload, { onConflict: 'id' });
       if (invErr) {
@@ -884,24 +1167,9 @@ class CloudSyncService {
       }
 
       if (items && items.length > 0) {
-        const itemsPayload = items.map((item) => {
-          const itemRow: Record<string, unknown> = {
-            id: item.id,
-            shop_id: item.shop_id || 'current_shop',
-            business_type: item.business_type || invoice.business_type || 'KIRANA_RETAIL',
-            invoice_id: item.invoice_id,
-            product_id: item.product_id,
-            product_name_snapshot: item.product_name_snapshot,
-            qty: item.qty,
-            unit_purchase_cost: item.unit_purchase_cost,
-            unit_selling_price: item.unit_selling_price,
-            line_total: item.line_total,
-            is_loan_funded: item.is_loan_funded ?? false,
-            sale_rate_type: item.sale_rate_type || 'RETAIL_CUSTOMER',
-          };
-          if (userId) itemRow.user_id = userId;
-          return itemRow;
-        });
+        const itemsPayload = items.map((item) =>
+          sanitizeSaleItemForSupabase(item, item.shop_id || shopId, userId)
+        );
 
         const { error: itemErr } = await supabase.from('sale_items').upsert(itemsPayload, { onConflict: 'id' });
         if (itemErr) {
@@ -920,20 +1188,9 @@ class CloudSyncService {
     if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
-      const payload: Record<string, unknown> = {
-        id: tx.id,
-        shop_id: tx.shop_id || 'current_shop',
-        business_type: tx.business_type || 'KIRANA_RETAIL',
-        customer_id: tx.customer_id,
-        entry_type: tx.entry_type,
-        amount: tx.amount,
-        payment_channel: tx.payment_channel,
-        invoice_id: tx.invoice_id || null,
-        running_balance_after: tx.running_balance_after,
-        notes: tx.notes || null,
-        created_at: tx.created_at,
-      };
-      if (userId) payload.user_id = userId;
+      const shopId = tx.shop_id || 'current_shop';
+      await this.ensureCustomerExistsInCloud(tx.customer_id, shopId);
+      const payload = sanitizeKhataTransactionForSupabase(tx, shopId, userId);
 
       const { error } = await supabase.from('khata_transactions').upsert(payload, { onConflict: 'id' });
       if (error) {
@@ -951,22 +1208,10 @@ class CloudSyncService {
     if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
-      const payload: Record<string, unknown> = {
-        id: session.id,
-        shop_id: session.shop_id || 'current_shop',
-        business_type: session.business_type || 'KIRANA_RETAIL',
-        session_date: session.session_date,
-        opening_cash: session.opening_cash,
-        cash_sales_total: session.cash_sales_total,
-        cash_udhari_recovered: session.cash_udhari_recovered,
-        cash_expenses_out: session.cash_expenses_out,
-        expected_closing_cash: session.expected_closing_cash,
-        actual_counted_cash: session.actual_counted_cash || null,
-        discrepancy: session.discrepancy || null,
-      };
-      if (userId) payload.user_id = userId;
+      const shopId = session.shop_id || 'current_shop';
+      const payload = sanitizeGallaSessionForSupabase(session, shopId, userId);
 
-      const { error } = await supabase.from('daily_galla_sessions').upsert(payload, { onConflict: 'session_date' });
+      const { error } = await supabase.from('daily_galla_sessions').upsert(payload, { onConflict: 'id' });
       if (error) {
         console.warn('Sync galla session returned error:', error.message);
       }
@@ -982,17 +1227,8 @@ class CloudSyncService {
     if (!supabase || this.isTestEnv) return;
     try {
       const userId = await this.getUserId();
-      const payload: Record<string, unknown> = {
-        id: expense.id,
-        shop_id: expense.shop_id || 'current_shop',
-        business_type: expense.business_type || 'KIRANA_RETAIL',
-        category: expense.category,
-        amount: expense.amount,
-        paid_via: expense.paid_via,
-        description: expense.description || null,
-        created_at: expense.created_at,
-      };
-      if (userId) payload.user_id = userId;
+      const shopId = expense.shop_id || 'current_shop';
+      const payload = sanitizeExpenseForSupabase(expense, shopId, userId);
 
       const { error } = await supabase.from('expenses_and_drawings').upsert(payload, { onConflict: 'id' });
       if (error) {
@@ -1027,18 +1263,8 @@ class CloudSyncService {
   async syncStoreUser(storeUser: StoreUser): Promise<void> {
     if (!supabase || this.isTestEnv) return;
     try {
-      const payload: Record<string, unknown> = {
-        id: storeUser.id,
-        user_id: storeUser.user_id || null,
-        email: storeUser.email,
-        full_name: storeUser.full_name,
-        phone: storeUser.phone || null,
-        role: storeUser.role,
-        shop_id: storeUser.shop_id || 'current_shop',
-        is_active: storeUser.is_active,
-        created_at: storeUser.created_at,
-        updated_at: storeUser.updated_at || new Date().toISOString(),
-      };
+      const userId = await this.getUserId();
+      const payload = sanitizeStoreUserForSupabase(storeUser, storeUser.shop_id || 'current_shop', userId);
 
       const { error } = await supabase.from('store_users').upsert(payload, { onConflict: 'id' });
       if (error) {
@@ -1063,13 +1289,15 @@ class CloudSyncService {
     let pushedCount = 0;
 
     try {
+      // 0. Flush any pending outbox items (including DELETE operations) first
+      await this.flushOutbox().catch(() => {});
+
       const userId = await this.getUserId();
       const shopId = await this.getActiveShopId();
       const localProfile = await db.getShopProfile();
       const localResetEpoch = localProfile.reset_epoch || 1;
 
       // Multi-device watermark check: Ensure local reset_epoch catches up with remote reset_epoch
-      // NEVER wipe local products during a push (syncAllToCloud) if the user has local products added/imported!
       try {
         const { data: remoteProfile } = await supabase
           .from('shop_profile')
@@ -1078,25 +1306,12 @@ class CloudSyncService {
           .maybeSingle();
 
         if (remoteProfile?.reset_epoch && remoteProfile.reset_epoch > localResetEpoch) {
-          const localProducts = await db.products.toArray();
-          const remoteWipedTime = remoteProfile.last_wiped_at ? new Date(remoteProfile.last_wiped_at).getTime() : 0;
-          const hasNewerLocalProducts = localProducts.some((p) => {
-            const pTime = p.updated_at ? new Date(p.updated_at).getTime() : Date.now();
-            return pTime >= remoteWipedTime;
-          });
-
-          if (!hasNewerLocalProducts && localProducts.length === 0) {
-            await db.updateShopProfile({ reset_epoch: remoteProfile.reset_epoch });
-          } else {
-            // User has active/newly imported local products; adopt the latest reset_epoch and proceed to push them!
-            await db.updateShopProfile({ reset_epoch: remoteProfile.reset_epoch });
-          }
+          await db.updateShopProfile({ reset_epoch: remoteProfile.reset_epoch });
         }
       } catch (checkErr) {
         console.warn('Could not check remote reset_epoch:', checkErr);
       }
 
-      // 1. Sync Shop Profile for both stores
       // 1. Sync Shop Profile strictly for Laxmi Vatsalya General Store
       const primaryShopId = getBaseKiranaShopId(shopId);
       try {
@@ -1117,7 +1332,8 @@ class CloudSyncService {
             primaryShopId,
             userId
           );
-          await supabase.from('shop_profile').upsert(kiranaPayload, { onConflict: 'id' });
+          const { error } = await supabase.from('shop_profile').upsert(kiranaPayload, { onConflict: 'id' });
+          if (error) throw new Error(error.message);
           pushedCount += 1;
         }
       } catch (e: unknown) {
@@ -1128,37 +1344,20 @@ class CloudSyncService {
       try {
         const users = await db.getStoreUsers();
         if (users.length > 0) {
-          for (const u of users) {
-            await this.syncStoreUser({ ...u, shop_id: u.shop_id || shopId });
-            pushedCount++;
-          }
+          const rows = users.map((u) => sanitizeStoreUserForSupabase(u, u.shop_id || primaryShopId, userId));
+          const { error } = await supabase.from('store_users').upsert(rows, { onConflict: 'id' });
+          if (error) throw new Error(error.message);
+          pushedCount += rows.length;
         }
       } catch (e: unknown) {
         errors.push(`Store Users: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      // 2b. Sync Wholesalers BEFORE Products (so foreign key wholesaler_id succeeds)
+      // 3. Sync Wholesalers BEFORE Products (so foreign key wholesaler_id succeeds)
       try {
         const wholesalers = await db.wholesalers.toArray();
         if (wholesalers.length > 0) {
-          const rows = wholesalers.map((w) => {
-            const r: Record<string, unknown> = {
-              id: w.id,
-              shop_id: w.shop_id || shopId,
-              business_type: w.business_type || 'KIRANA_RETAIL',
-              name: w.name,
-              agency_or_brand: w.agency_or_brand || null,
-              phone: w.phone,
-              gstin: w.gstin || w.gst_number || null,
-              address: w.address || w.address_city || null,
-              visit_day: w.visit_day || null,
-              is_active: w.is_active !== false,
-              created_at: w.created_at || new Date().toISOString(),
-              updated_at: w.updated_at || new Date().toISOString(),
-            };
-            if (userId) r.user_id = userId;
-            return r;
-          });
+          const rows = wholesalers.map((w) => sanitizeWholesalerForSupabase(w, w.shop_id || primaryShopId, userId));
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
             const { error } = await supabase.from('wholesalers').upsert(chunk, { onConflict: 'id' });
@@ -1167,10 +1366,10 @@ class CloudSyncService {
           }
         }
       } catch (e: unknown) {
-        console.warn('Wholesalers sync notice:', e);
+        errors.push(`Wholesalers: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      // 3. Sync Products from BOTH kiranaDb and homemadeDb (excluding tombstoned or legacy duplicate IDs)
+      // 4. Sync Products from kiranaDb and homemadeDb (excluding tombstoned or legacy duplicate IDs)
       try {
         const [kiranaProds, homemadeProds] = await Promise.all([
           kiranaDb.products.toArray(),
@@ -1210,14 +1409,16 @@ class CloudSyncService {
             const targetShopId = isHmf ? hmfShopId : (p.shop_id || primaryShopId);
             return sanitizeProductForSupabase(p, targetShopId, userId);
           });
-          // Upsert in chunks of 50
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
-            const { error } = await supabase.from('products').upsert(chunk, { onConflict: 'id' });
+            let { error } = await supabase.from('products').upsert(chunk, { onConflict: 'id' });
             if (error) {
-              console.warn('Bulk upsert products chunk error:', error.message);
-              throw new Error(error.message);
+              // Retry with wholesaler_id nulled if FK fails
+              const fallbackChunk = chunk.map((r) => ({ ...r, wholesaler_id: null }));
+              const retryRes = await supabase.from('products').upsert(fallbackChunk, { onConflict: 'id' });
+              error = retryRes.error;
             }
+            if (error) throw new Error(error.message);
             pushedCount += chunk.length;
           }
         }
@@ -1225,27 +1426,12 @@ class CloudSyncService {
         errors.push(`Products: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      // 4. Sync Customers
+      // 5. Sync Customers (always including 0000-WALK-IN so sales_invoices foreign keys succeed)
       try {
+        await this.ensureCustomerExistsInCloud('0000-WALK-IN', primaryShopId);
         const custs = await db.customers.toArray();
         if (custs.length > 0) {
-          const rows = custs.map((c) => {
-            const r: Record<string, unknown> = {
-              id: c.id,
-              shop_id: c.shop_id || shopId,
-              business_type: c.business_type || 'KIRANA_RETAIL',
-              name: c.name,
-              phone: c.phone,
-              address_landmark: c.address_landmark || null,
-              credit_limit: c.credit_limit,
-              current_udhari_balance: c.current_udhari_balance,
-              oldest_unpaid_date: c.oldest_unpaid_date || null,
-              last_reminder_sent_at: c.last_reminder_sent_at || null,
-              created_at: c.created_at,
-            };
-            if (userId) r.user_id = userId;
-            return r;
-          });
+          const rows = custs.map((c) => sanitizeCustomerForSupabase(c, c.shop_id || primaryShopId, userId));
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
             const { error } = await supabase.from('customers').upsert(chunk, { onConflict: 'id' });
@@ -1257,30 +1443,11 @@ class CloudSyncService {
         errors.push(`Customers: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      // 5. Sync Sales Invoices
+      // 6. Sync Sales Invoices
       try {
         const invoices = await db.sales_invoices.toArray();
         if (invoices.length > 0) {
-          const rows = invoices.map((inv) => {
-            const r: Record<string, unknown> = {
-              id: inv.id,
-              shop_id: inv.shop_id || shopId,
-              business_type: inv.business_type || 'KIRANA_RETAIL',
-              invoice_number: inv.invoice_number,
-              customer_id: inv.customer_id,
-              subtotal_amount: inv.subtotal_amount,
-              discount_roundoff: inv.discount_roundoff,
-              grand_total: inv.grand_total,
-              total_cogs: inv.total_cogs,
-              payment_mode: inv.payment_mode,
-              amount_paid_now: inv.amount_paid_now,
-              udhari_added: inv.udhari_added,
-              status: inv.status,
-              created_at: inv.created_at,
-            };
-            if (userId) r.user_id = userId;
-            return r;
-          });
+          const rows = invoices.map((inv) => sanitizeSalesInvoiceForSupabase(inv, inv.shop_id || primaryShopId, userId));
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
             const { error } = await supabase.from('sales_invoices').upsert(chunk, { onConflict: 'id' });
@@ -1292,27 +1459,27 @@ class CloudSyncService {
         errors.push(`Sales Invoices: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      // 6. Sync Khata Transactions
+      // 7. Sync Sale Items (linked to sales_invoices)
+      try {
+        const saleItems = await db.sale_items.toArray();
+        if (saleItems.length > 0) {
+          const rows = saleItems.map((it) => sanitizeSaleItemForSupabase(it, it.shop_id || primaryShopId, userId));
+          for (let i = 0; i < rows.length; i += 50) {
+            const chunk = rows.slice(i, i + 50);
+            const { error } = await supabase.from('sale_items').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
+            pushedCount += chunk.length;
+          }
+        }
+      } catch (e: unknown) {
+        errors.push(`Sale Items: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      // 8. Sync Khata Transactions
       try {
         const txs = await db.khata_transactions.toArray();
         if (txs.length > 0) {
-          const rows = txs.map((t) => {
-            const r: Record<string, unknown> = {
-              id: t.id,
-              shop_id: t.shop_id || shopId,
-              business_type: t.business_type || 'KIRANA_RETAIL',
-              customer_id: t.customer_id,
-              entry_type: t.entry_type,
-              amount: t.amount,
-              payment_channel: t.payment_channel,
-              invoice_id: t.invoice_id || null,
-              running_balance_after: t.running_balance_after,
-              notes: t.notes || null,
-              created_at: t.created_at,
-            };
-            if (userId) r.user_id = userId;
-            return r;
-          });
+          const rows = txs.map((t) => sanitizeKhataTransactionForSupabase(t, t.shop_id || primaryShopId, userId));
           for (let i = 0; i < rows.length; i += 50) {
             const chunk = rows.slice(i, i + 50);
             const { error } = await supabase.from('khata_transactions').upsert(chunk, { onConflict: 'id' });
@@ -1324,26 +1491,48 @@ class CloudSyncService {
         errors.push(`Khata Transactions: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      // 7. Sync Galla Sessions
+      // 9. Sync Inventory Logs
+      try {
+        const logs = await db.inventory_logs.toArray();
+        if (logs.length > 0) {
+          const rows = logs.map((l) => sanitizeInventoryLogForSupabase(l, l.shop_id || primaryShopId, userId));
+          for (let i = 0; i < rows.length; i += 50) {
+            const chunk = rows.slice(i, i + 50);
+            const { error } = await supabase.from('inventory_logs').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
+            pushedCount += chunk.length;
+          }
+        }
+      } catch (e: unknown) {
+        errors.push(`Inventory Logs: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      // 10. Sync Daily Galla Sessions
       try {
         const sessions = await db.daily_galla_sessions.toArray();
         if (sessions.length > 0) {
-          for (const s of sessions) {
-            await this.syncGallaSession({ ...s, shop_id: s.shop_id || shopId });
-            pushedCount++;
+          const rows = sessions.map((s) => sanitizeGallaSessionForSupabase(s, s.shop_id || primaryShopId, userId));
+          for (let i = 0; i < rows.length; i += 50) {
+            const chunk = rows.slice(i, i + 50);
+            const { error } = await supabase.from('daily_galla_sessions').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
+            pushedCount += chunk.length;
           }
         }
       } catch (e: unknown) {
         errors.push(`Galla Sessions: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      // 8. Sync Expenses
+      // 11. Sync Expenses and Drawings
       try {
         const expenses = await db.expenses_and_drawings.toArray();
         if (expenses.length > 0) {
-          for (const exp of expenses) {
-            await this.syncExpense({ ...exp, shop_id: exp.shop_id || shopId });
-            pushedCount++;
+          const rows = expenses.map((exp) => sanitizeExpenseForSupabase(exp, exp.shop_id || primaryShopId, userId));
+          for (let i = 0; i < rows.length; i += 50) {
+            const chunk = rows.slice(i, i + 50);
+            const { error } = await supabase.from('expenses_and_drawings').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
+            pushedCount += chunk.length;
           }
         }
       } catch (e: unknown) {
@@ -1395,7 +1584,7 @@ class CloudSyncService {
       const localProfile = await db.getShopProfile();
       const localResetEpoch = localProfile.reset_epoch || 1;
 
-      // 1. Pull Shop Profiles for both Kirana and Homemade Food stores
+      // 1. Pull Shop Profiles
       try {
         const { data: profiles, error } = await supabase
           .from('shop_profile')
@@ -1405,12 +1594,10 @@ class CloudSyncService {
         if (error) throw new Error(error.message);
         if (profiles && profiles.length > 0) {
           for (const profile of profiles) {
-            // Multi-device watermark: update local reset_epoch to track cloud state without wiping active local products
             if (profile.id === shopId && profile.reset_epoch && profile.reset_epoch > localResetEpoch) {
               const localProds = await db.products.toArray();
               await db.updateShopProfile({ reset_epoch: profile.reset_epoch });
               if (localProds.length > 0) {
-                // Ensure local products are backed up and synced to the cloud
                 this.syncAllToCloud().catch(() => { });
               }
             }
@@ -1424,7 +1611,7 @@ class CloudSyncService {
               shop_name: profile.shop_name,
               owner_name: profile.owner_name,
               phone: profile.phone,
-              upi_vpa: profile.upi_vpa || 'kirana@upi',
+              upi_vpa: profile.upi_vpa || '9404380326@upi',
               address: profile.address || '',
               gst_footer_note: profile.gst_footer_note || '',
               invite_code: profile.invite_code,
@@ -1567,7 +1754,8 @@ class CloudSyncService {
               created_at: w.created_at || new Date().toISOString(),
               updated_at: w.updated_at || undefined,
             };
-            await db.wholesalers.put(wsRecord);
+            await kiranaDb.wholesalers.put(wsRecord).catch(() => {});
+            await db.wholesalers.put(wsRecord).catch(() => {});
             pulledCount++;
           }
         }
@@ -1604,9 +1792,7 @@ class CloudSyncService {
             } else {
               await kiranaDb.customers.put(customerRecord);
             }
-            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.customers.put(customerRecord).catch(() => { });
-            }
+            await db.customers.put(customerRecord).catch(() => { });
             pulledCount++;
           }
         }
@@ -1672,9 +1858,7 @@ class CloudSyncService {
             } else {
               await kiranaDb.inventory_logs.put(logRecord);
             }
-            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.inventory_logs.put(logRecord).catch(() => { });
-            }
+            await db.inventory_logs.put(logRecord).catch(() => { });
             pulledCount++;
           }
         }
@@ -1702,7 +1886,7 @@ class CloudSyncService {
               amount: Number(t.amount) || 0,
               payment_channel: t.payment_channel,
               invoice_id: t.invoice_id || null,
-              running_balance_after: Number(t.running_balance_after) || 0,
+              running_balance_after: Number(t.running_balance_after ?? (t as any).balance_after) || 0,
               notes: t.notes || '',
               created_at: t.created_at || new Date().toISOString(),
             };
@@ -1711,9 +1895,7 @@ class CloudSyncService {
             } else {
               await kiranaDb.khata_transactions.put(txRecord);
             }
-            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.khata_transactions.put(txRecord).catch(() => { });
-            }
+            await db.khata_transactions.put(txRecord).catch(() => { });
             pulledCount++;
           }
         }
@@ -1746,6 +1928,9 @@ class CloudSyncService {
               amount_paid_now: Number(inv.amount_paid_now) || 0,
               udhari_added: Number(inv.udhari_added) || 0,
               status: inv.status,
+              return_reason: inv.return_reason || undefined,
+              credit_note_number: inv.credit_note_number || undefined,
+              returned_at: inv.returned_at || undefined,
               created_at: inv.created_at || new Date().toISOString(),
             };
             if (isHmf) {
@@ -1753,9 +1938,7 @@ class CloudSyncService {
             } else {
               await kiranaDb.sales_invoices.put(invoiceRecord);
             }
-            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.sales_invoices.put(invoiceRecord).catch(() => { });
-            }
+            await db.sales_invoices.put(invoiceRecord).catch(() => { });
             pulledCount++;
           }
         }
@@ -1791,9 +1974,7 @@ class CloudSyncService {
             } else {
               await kiranaDb.sale_items.put(itemRecord);
             }
-            if (getActiveBusinessType() === (isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL')) {
-              await db.sale_items.put(itemRecord).catch(() => { });
-            }
+            await db.sale_items.put(itemRecord).catch(() => { });
             pulledCount++;
           }
         }
@@ -1801,7 +1982,78 @@ class CloudSyncService {
         console.warn('Pull sale items failed:', e);
       }
 
-      // 9. ACID Reconciliation: Recompute stock & udhari deterministically from deltas across both databases
+      // 9. Pull Daily Galla Sessions strictly scoped by shop_id
+      try {
+        const { data: sessions, error } = await supabase
+          .from('daily_galla_sessions')
+          .select('*')
+          .in('shop_id', shopIdsToPull);
+
+        if (error) throw new Error(error.message);
+        if (sessions && sessions.length > 0) {
+          for (const s of sessions) {
+            const isHmf = isHomemadeShopId(s.shop_id) || s.business_type === 'HOMEMADE_FOOD';
+            const sessionRecord: DailyGallaSession = {
+              id: s.id,
+              shop_id: s.shop_id || (isHmf ? hmfShopId : primaryShopId),
+              business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
+              session_date: s.session_date,
+              opening_cash: Number(s.opening_cash) || 0,
+              cash_sales_total: Number(s.cash_sales_total) || 0,
+              cash_udhari_recovered: Number(s.cash_udhari_recovered) || 0,
+              cash_expenses_out: Number(s.cash_expenses_out) || 0,
+              expected_closing_cash: Number(s.expected_closing_cash) || 0,
+              actual_counted_cash: s.actual_counted_cash !== null && s.actual_counted_cash !== undefined ? Number(s.actual_counted_cash) : null,
+              discrepancy: s.discrepancy !== null && s.discrepancy !== undefined ? Number(s.discrepancy) : null,
+            };
+            if (isHmf) {
+              await homemadeDb.daily_galla_sessions.put(sessionRecord);
+            } else {
+              await kiranaDb.daily_galla_sessions.put(sessionRecord);
+            }
+            await db.daily_galla_sessions.put(sessionRecord).catch(() => {});
+            pulledCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Pull daily_galla_sessions failed:', e);
+      }
+
+      // 10. Pull Expenses and Drawings strictly scoped by shop_id
+      try {
+        const { data: expenses, error } = await supabase
+          .from('expenses_and_drawings')
+          .select('*')
+          .in('shop_id', shopIdsToPull);
+
+        if (error) throw new Error(error.message);
+        if (expenses && expenses.length > 0) {
+          for (const exp of expenses) {
+            const isHmf = isHomemadeShopId(exp.shop_id) || exp.business_type === 'HOMEMADE_FOOD';
+            const expRecord: ExpenseAndDrawing = {
+              id: exp.id,
+              shop_id: exp.shop_id || (isHmf ? hmfShopId : primaryShopId),
+              business_type: isHmf ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL',
+              category: exp.category,
+              amount: Number(exp.amount) || 0,
+              paid_via: exp.paid_via || 'CASH_GALLA',
+              description: exp.description || '',
+              created_at: exp.created_at || new Date().toISOString(),
+            };
+            if (isHmf) {
+              await homemadeDb.expenses_and_drawings.put(expRecord);
+            } else {
+              await kiranaDb.expenses_and_drawings.put(expRecord);
+            }
+            await db.expenses_and_drawings.put(expRecord).catch(() => {});
+            pulledCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Pull expenses_and_drawings failed:', e);
+      }
+
+      // 11. ACID Reconciliation: Recompute stock & udhari deterministically from deltas across both databases
       await Promise.all([
         kiranaDb.reconcileAllStockAndBalances().catch(() => { }),
         homemadeDb.reconcileAllStockAndBalances().catch(() => { }),
@@ -1965,37 +2217,87 @@ class CloudSyncService {
       return { processedCount: 0, errors: [] };
     }
 
+    // Sort by topological FK table priority so parents (shop_profile, wholesalers, products, customers, sales_invoices)
+    // are always flushed before children (sale_items, khata_transactions, inventory_logs)
+    combined.sort((a, b) => {
+      const pA = TABLE_SYNC_PRIORITY[a.item.table_name] ?? 99;
+      const pB = TABLE_SYNC_PRIORITY[b.item.table_name] ?? 99;
+      if (pA !== pB) return pA - pB;
+      return String(a.item.created_at || '').localeCompare(String(b.item.created_at || ''));
+    });
+
     let processedCount = 0;
     const errors: string[] = [];
+    const userId = await this.getUserId();
 
     for (const { item, targetDb } of combined) {
       try {
+        // Local-only tables (e.g., credit_notes, loan_accounts, production_batches, advance_orders)
+        // do not exist in Supabase public schema — mark SYNCED immediately so they never block the queue.
+        if (!SUPABASE_CLOUD_TABLES.has(item.table_name)) {
+          await targetDb.sync_outbox.update(item.id, {
+            status: 'SYNCED',
+            error_message: null,
+          });
+          processedCount++;
+          continue;
+        }
+
         if (item.operation === 'INSERT' || item.operation === 'UPDATE') {
+          const recordId = String(item.payload?.id || '');
+
           if (item.table_name === 'products') {
-            const pid = String(item.payload?.id || '');
             const tombstones = getLocalDeletedProductTombstones();
-            if (!pid || tombstones.has(pid) || isLegacyDuplicateId(pid)) {
+            if (!recordId || tombstones.has(recordId) || isLegacyDuplicateId(recordId)) {
               await targetDb.sync_outbox.delete(item.id);
               continue;
             }
-            const prodShopId = (item.payload?.shop_id as string) || (item.shop_id as string);
-            await this.ensureShopProfileExistsInCloud(
-              prodShopId,
-              isHomemadeShopId(prodShopId) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL'
-            );
-            const userId = await this.getUserId();
-            const sanitized = sanitizeProductForSupabase(item.payload, prodShopId, userId);
-            const { error } = await supabase.from('products').upsert(sanitized, { onConflict: 'id' });
-            if (error) throw new Error(error.message);
-          } else {
-            const { error } = await supabase.from(item.table_name).upsert(item.payload, { onConflict: 'id' });
-            if (error) throw new Error(error.message);
+          }
+
+          // Merge partial UPDATE payloads with full local record from Dexie so NOT NULL columns are always present
+          let fullRecord: Record<string, unknown> = { ...item.payload };
+          if (recordId && (targetDb as any)[item.table_name]) {
+            const localRec = await (targetDb as any)[item.table_name].get(recordId).catch(() => undefined);
+            if (localRec) {
+              fullRecord = { ...localRec, ...item.payload };
+            }
+          }
+
+          const itemShopId = String(fullRecord.shop_id || item.shop_id || 'current_shop');
+          await this.ensureShopProfileExistsInCloud(
+            itemShopId,
+            isHomemadeShopId(itemShopId) ? 'HOMEMADE_FOOD' : 'KIRANA_RETAIL'
+          );
+
+          if (item.table_name === 'sales_invoices' || item.table_name === 'khata_transactions') {
+            const custId = String(fullRecord.customer_id || '0000-WALK-IN');
+            await this.ensureCustomerExistsInCloud(custId, itemShopId);
+          }
+
+          const sanitized = sanitizeTablePayloadForSupabase(item.table_name, fullRecord, itemShopId, userId);
+          let { error } = await supabase.from(item.table_name).upsert(sanitized, { onConflict: 'id' });
+
+          if (error && item.table_name === 'products' && sanitized.wholesaler_id) {
+            const retryRes = await supabase
+              .from('products')
+              .upsert({ ...sanitized, wholesaler_id: null }, { onConflict: 'id' });
+            error = retryRes.error;
+          }
+
+          if (error) {
+            // If table does not exist in remote schema cache (PGRST205), mark synced so queue doesn't stall
+            if (error.code === 'PGRST205') {
+              await targetDb.sync_outbox.update(item.id, { status: 'SYNCED', error_message: null });
+              processedCount++;
+              continue;
+            }
+            throw new Error(error.message);
           }
         } else if (item.operation === 'DELETE') {
-          const targetId = item.payload.id as string;
+          const targetId = item.payload?.id as string;
           if (targetId) {
             const { error } = await supabase.from(item.table_name).delete().eq('id', targetId);
-            if (error) throw new Error(error.message);
+            if (error && error.code !== 'PGRST205') throw new Error(error.message);
           }
         }
 

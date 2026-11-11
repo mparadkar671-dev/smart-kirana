@@ -179,9 +179,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onDataReset }) => {
         created_at: new Date().toISOString(),
       };
       await db.saveStoreUser(newStaff);
-      if (supabase) {
-        await supabase.from('store_users').upsert(newStaff);
-      }
+      await cloudSyncService.syncStoreUser(newStaff);
       await refreshStaffList();
       setShowAddStaffModal(false);
       setNewStaffEmail('');

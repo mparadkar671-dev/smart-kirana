@@ -16,6 +16,7 @@ import {
 } from '../types';
 import { roundCurrency, roundQty, toPaise, toRupees } from '../utils/math';
 import { getActiveShopId, getActiveBusinessType } from './tenantManager';
+import { cloudSyncService } from './cloudSyncService';
 
 export interface CartItemInput {
   product: Product;
@@ -347,6 +348,7 @@ export class BillingService {
       }
     );
 
+    cloudSyncService.flushOutbox().catch(() => {});
     return { invoice, saleItems, customer: updatedCustomer };
   }
 
@@ -556,6 +558,7 @@ export class BillingService {
       }
     }
 
+    cloudSyncService.flushOutbox().catch(() => {});
     return { creditNote, invoice: updatedInvoice, restoredItems: itemsToRestore };
   }
 

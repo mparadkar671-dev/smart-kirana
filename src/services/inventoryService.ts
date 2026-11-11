@@ -145,6 +145,7 @@ export class InventoryService {
     };
 
     const targetDb = resolvedBiz === 'HOMEMADE_FOOD' ? homemadeDb : kiranaDb;
+    let initialLog: InventoryLog | null = null;
 
     await targetDb.transaction('rw', [targetDb.products, targetDb.inventory_logs], async () => {
       await targetDb.products.put(newProduct);
@@ -166,6 +167,7 @@ export class InventoryService {
           created_at: new Date().toISOString(),
         };
         await targetDb.inventory_logs.put(log);
+        initialLog = log;
       }
     });
 
@@ -183,8 +185,22 @@ export class InventoryService {
       targetDb.sync_outbox
     ).catch(() => {});
 
+    if (initialLog) {
+      await targetDb.queueSync(
+        {
+          table_name: 'inventory_logs',
+          operation: 'INSERT',
+          payload: initialLog as unknown as Record<string, unknown>,
+          shop_id: activeShopId,
+        },
+        targetDb.sync_outbox
+      ).catch(() => {});
+    }
+
     // Sync to Supabase cloud
-    cloudSyncService.syncProduct(newProduct);
+    cloudSyncService.syncProduct(newProduct).then(() => {
+      if (initialLog) cloudSyncService.syncInventoryLog(initialLog);
+    }).catch(() => {});
     return newProduct;
   }
 
@@ -270,6 +286,15 @@ export class InventoryService {
             created_at: nowIso,
           };
           await db.inventory_logs.add(log);
+          await db.queueSync(
+            {
+              table_name: 'inventory_logs',
+              operation: 'INSERT',
+              payload: log as unknown as Record<string, unknown>,
+              shop_id: log.shop_id || 'current_shop',
+            },
+            db.sync_outbox
+          );
         }
       }
 
@@ -305,6 +330,7 @@ export class InventoryService {
     if (finalUpdatedProduct) {
       unmarkProductsDeletedTombstone([productId]);
       await cloudSyncService.syncProduct(finalUpdatedProduct);
+      cloudSyncService.flushOutbox().catch(() => {});
     }
   }
 
@@ -405,6 +431,7 @@ export class InventoryService {
         );
       }
     });
+    cloudSyncService.flushOutbox().catch(() => {});
   }
 
   /**
@@ -426,6 +453,7 @@ export class InventoryService {
         );
       }
     });
+    cloudSyncService.flushOutbox().catch(() => {});
   }
 
   /**
@@ -501,6 +529,7 @@ export class InventoryService {
       updatedProduct = { ...product, ...updates };
     });
 
+    cloudSyncService.flushOutbox().catch(() => {});
     return { product: updatedProduct, log: newLog };
   }
 
@@ -580,6 +609,7 @@ export class InventoryService {
       updatedProduct = { ...product, current_stock: newStock, updated_at: new Date().toISOString() };
     });
 
+    cloudSyncService.flushOutbox().catch(() => {});
     return { product: updatedProduct, log: newLog, expense: newExpense };
   }
 

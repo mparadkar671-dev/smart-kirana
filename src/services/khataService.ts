@@ -148,6 +148,7 @@ export class KhataService {
       }
     );
 
+    cloudSyncService.flushOutbox().catch(() => {});
     return { customer: updatedCustomer, transaction: newTx };
   }
 
@@ -224,9 +225,19 @@ export class KhataService {
    * Log that a reminder was sent
    */
   static async logReminderSent(customerId: string): Promise<void> {
+    const nowIso = new Date().toISOString();
     await db.customers.update(customerId, {
-      last_reminder_sent_at: new Date().toISOString(),
+      last_reminder_sent_at: nowIso,
     });
+    await db.queueSync(
+      {
+        table_name: 'customers',
+        operation: 'UPDATE',
+        payload: { id: customerId, last_reminder_sent_at: nowIso },
+      },
+      db.sync_outbox
+    ).catch(() => {});
+    cloudSyncService.flushOutbox().catch(() => {});
   }
 
   /**
