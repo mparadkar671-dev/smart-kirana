@@ -150,6 +150,7 @@ export class LoanAccountService {
     });
 
     cloudSyncService.syncLoanAccount?.(loan);
+    cloudSyncService.flushOutbox().catch(() => {});
     return loan;
   }
 
@@ -185,7 +186,10 @@ export class LoanAccountService {
     });
 
     const updated = await db.loan_accounts.get(id);
-    if (updated) cloudSyncService.syncLoanAccount?.(updated);
+    if (updated) {
+      cloudSyncService.syncLoanAccount?.(updated);
+      cloudSyncService.flushOutbox().catch(() => {});
+    }
   }
 
   /**
@@ -212,10 +216,13 @@ export class LoanAccountService {
           table_name: 'loan_accounts',
           operation: 'DELETE',
           payload: { id },
+          shop_id: 'current_shop',
         },
         db.sync_outbox
       );
     });
+    cloudSyncService.deleteLoanAccount?.(id);
+    cloudSyncService.flushOutbox().catch(() => {});
   }
 
   /**

@@ -220,10 +220,11 @@ describe('Comprehensive Database Health, Schemas & Connections Checkup', () => {
     }
   });
 
-  it('7. Verifies all 11 Supabase Cloud tables sanitize payloads strictly to live PostgreSQL schema columns', () => {
+  it('7. Verifies all 12 Supabase Cloud tables sanitize payloads strictly to live PostgreSQL schema columns', () => {
     expect(Array.from(SUPABASE_CLOUD_TABLES)).toEqual([
       'shop_profile',
       'store_users',
+      'loan_accounts',
       'wholesalers',
       'products',
       'customers',
@@ -235,8 +236,23 @@ describe('Comprehensive Database Health, Schemas & Connections Checkup', () => {
       'expenses_and_drawings',
     ]);
 
-    // Verify local-only fields (business_type, loan_account_id, is_loan_funded, sale_rate_type, entry_type, approval_status)
-    // are stripped before sending to Supabase so PostgREST never throws 42703 / PGRST204
+    // Verify local-only fields (business_type, sale_rate_type, approval_status)
+    // are stripped, while valid Supabase columns (loan_account_id, is_loan_funded) are preserved
+    const loan = sanitizeTablePayloadForSupabase(
+      'loan_accounts',
+      {
+        id: 'loan-1',
+        name: 'Mudra Loan',
+        principal_amount: 50000,
+        lender_name: 'SBI',
+        business_type: 'KIRANA_RETAIL',
+      },
+      TEST_SHOP_ID
+    );
+    expect(loan).not.toHaveProperty('business_type');
+    expect(loan).toHaveProperty('principal_amount', 50000);
+    expect(loan).toHaveProperty('lender_name', 'SBI');
+
     const ws = sanitizeTablePayloadForSupabase(
       'wholesalers',
       { id: 'ws-1', name: 'Test Agency', phone: '9876543210', business_type: 'KIRANA_RETAIL' },
@@ -276,12 +292,16 @@ describe('Comprehensive Database Health, Schemas & Connections Checkup', () => {
         product_name_snapshot: 'Sugar 1kg',
         qty: 2,
         sale_rate_type: 'RETAIL',
+        loan_account_id: 'loan-1',
+        is_loan_funded: true,
         business_type: 'KIRANA_RETAIL',
       },
       TEST_SHOP_ID
     );
     expect(item).not.toHaveProperty('sale_rate_type');
     expect(item).not.toHaveProperty('business_type');
+    expect(item).toHaveProperty('loan_account_id', 'loan-1');
+    expect(item).toHaveProperty('is_loan_funded', true);
 
     const khata = sanitizeTablePayloadForSupabase(
       'khata_transactions',
@@ -313,8 +333,8 @@ describe('Comprehensive Database Health, Schemas & Connections Checkup', () => {
       },
       TEST_SHOP_ID
     );
-    expect(log).not.toHaveProperty('loan_account_id');
-    expect(log).not.toHaveProperty('is_loan_funded');
+    expect(log).toHaveProperty('loan_account_id', 'loan-1');
+    expect(log).toHaveProperty('is_loan_funded', true);
     expect(log).not.toHaveProperty('business_type');
 
     const galla = sanitizeTablePayloadForSupabase(
@@ -341,8 +361,8 @@ describe('Comprehensive Database Health, Schemas & Connections Checkup', () => {
       },
       TEST_SHOP_ID
     );
-    expect(exp).not.toHaveProperty('loan_account_id');
-    expect(exp).not.toHaveProperty('is_loan_funded');
+    expect(exp).toHaveProperty('loan_account_id', 'loan-1');
+    expect(exp).toHaveProperty('is_loan_funded', true);
     expect(exp).not.toHaveProperty('business_type');
   });
 });

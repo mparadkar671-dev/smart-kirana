@@ -82,6 +82,7 @@ export interface LoanAccount {
   emi_or_daily_target?: number; // Daily or monthly repayment target (optional)
   amount_repaid: number; // Cumulative principal/amount already set aside or repaid to lender
   is_active: boolean;
+  status?: 'ACTIVE' | 'CLOSED' | 'DEFAULTED';
   notes?: string;
   created_at: string; // ISO Timestamp
   updated_at?: string;

@@ -98,6 +98,8 @@ export function sanitizeProductForSupabase(
     is_quick_tap: Boolean(raw.is_quick_tap),
     updated_at: raw.updated_at || new Date().toISOString(),
   };
+  if (raw.loan_account_id !== undefined) sanitized.loan_account_id = raw.loan_account_id || null;
+  if (raw.is_loan_funded !== undefined) sanitized.is_loan_funded = Boolean(raw.is_loan_funded);
   if (raw.wholesaler_id !== undefined) sanitized.wholesaler_id = raw.wholesaler_id || null;
   if (raw.supplier_phone !== undefined) sanitized.supplier_phone = raw.supplier_phone || null;
   if (raw.image_url !== undefined) sanitized.image_url = raw.image_url || null;
@@ -106,9 +108,36 @@ export function sanitizeProductForSupabase(
   return sanitized;
 }
 
+export function sanitizeLoanAccountForSupabase(
+  loan: Partial<LoanAccount> | Record<string, unknown>,
+  shopId?: string,
+  userId?: string | null
+): Record<string, unknown> {
+  const raw = loan as any;
+  const now = new Date().toISOString();
+  const sanitized: Record<string, unknown> = {
+    id: raw.id,
+    shop_id: shopId || raw.shop_id || 'current_shop',
+    name: raw.name || 'Business Loan',
+    lender_name: raw.lender_name || 'Financier',
+    principal_amount: Number(raw.principal_amount ?? 0),
+    interest_rate_pct: Number(raw.interest_rate_pct ?? 0),
+    emi_or_daily_target: Number(raw.emi_or_daily_target ?? 0),
+    amount_repaid: Number(raw.amount_repaid ?? 0),
+    status: raw.status || 'ACTIVE',
+    notes: raw.notes || null,
+    created_at: raw.created_at || now,
+    updated_at: raw.updated_at || now,
+  };
+  if (userId) sanitized.user_id = userId;
+  else if (raw.user_id) sanitized.user_id = raw.user_id;
+  return sanitized;
+}
+
 export const SUPABASE_CLOUD_TABLES = new Set([
   'shop_profile',
   'store_users',
+  'loan_accounts',
   'wholesalers',
   'products',
   'customers',
@@ -123,15 +152,16 @@ export const SUPABASE_CLOUD_TABLES = new Set([
 export const TABLE_SYNC_PRIORITY: Record<string, number> = {
   shop_profile: 1,
   store_users: 2,
-  wholesalers: 3,
-  products: 4,
-  customers: 5,
-  sales_invoices: 6,
-  sale_items: 7,
-  khata_transactions: 8,
-  inventory_logs: 9,
-  daily_galla_sessions: 10,
-  expenses_and_drawings: 11,
+  loan_accounts: 3,
+  wholesalers: 4,
+  products: 5,
+  customers: 6,
+  sales_invoices: 7,
+  sale_items: 8,
+  khata_transactions: 9,
+  inventory_logs: 10,
+  daily_galla_sessions: 11,
+  expenses_and_drawings: 12,
 };
 
 export function sanitizeStoreUserForSupabase(
@@ -257,6 +287,8 @@ export function sanitizeSaleItemForSupabase(
     line_cogs: lineCogs,
     created_at: raw.created_at || new Date().toISOString(),
   };
+  if (raw.loan_account_id !== undefined) sanitized.loan_account_id = raw.loan_account_id || null;
+  if (raw.is_loan_funded !== undefined) sanitized.is_loan_funded = Boolean(raw.is_loan_funded);
   if (userId) sanitized.user_id = userId;
   else if (raw.user_id) sanitized.user_id = raw.user_id;
   return sanitized;
@@ -304,6 +336,8 @@ export function sanitizeInventoryLogForSupabase(
     notes: raw.notes || null,
     created_at: raw.created_at || new Date().toISOString(),
   };
+  if (raw.loan_account_id !== undefined) sanitized.loan_account_id = raw.loan_account_id || null;
+  if (raw.is_loan_funded !== undefined) sanitized.is_loan_funded = Boolean(raw.is_loan_funded);
   if (userId) sanitized.user_id = userId;
   else if (raw.user_id) sanitized.user_id = raw.user_id;
   return sanitized;
@@ -349,6 +383,8 @@ export function sanitizeExpenseForSupabase(
     description: raw.description || null,
     created_at: raw.created_at || new Date().toISOString(),
   };
+  if (raw.loan_account_id !== undefined) sanitized.loan_account_id = raw.loan_account_id || null;
+  if (raw.is_loan_funded !== undefined) sanitized.is_loan_funded = Boolean(raw.is_loan_funded);
   if (userId) sanitized.user_id = userId;
   else if (raw.user_id) sanitized.user_id = raw.user_id;
   return sanitized;
@@ -365,6 +401,8 @@ export function sanitizeTablePayloadForSupabase(
       return sanitizeShopProfileForSupabase(payload, shopId, userId);
     case 'store_users':
       return sanitizeStoreUserForSupabase(payload, shopId, userId);
+    case 'loan_accounts':
+      return sanitizeLoanAccountForSupabase(payload, shopId, userId);
     case 'wholesalers':
       return sanitizeWholesalerForSupabase(payload, shopId, userId);
     case 'products':
@@ -1049,10 +1087,22 @@ class CloudSyncService {
   }
 
   /**
-   * Syncs a single Loan Account (local-first; silently skips if loan_accounts table is not in cloud schema)
+   * Syncs a single Loan Account to Supabase cloud
    */
-  async syncLoanAccount(_loanAccount: LoanAccount): Promise<void> {
-    return;
+  async syncLoanAccount(loanAccount: LoanAccount): Promise<void> {
+    if (!supabase || this.isTestEnv) return;
+    try {
+      const userId = await this.getUserId();
+      const shopId = loanAccount.shop_id || 'current_shop';
+      const payload = sanitizeLoanAccountForSupabase(loanAccount, shopId, userId);
+
+      const { error } = await supabase.from('loan_accounts').upsert(payload, { onConflict: 'id' });
+      if (error) {
+        console.warn('Sync loan_accounts returned error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Background sync loan account to Supabase failed:', err);
+    }
   }
 
   /**
@@ -1277,6 +1327,21 @@ class CloudSyncService {
   }
 
   /**
+   * Deletes loan account from Supabase
+   */
+  async deleteLoanAccount(loanId: string): Promise<void> {
+    if (!supabase || this.isTestEnv) return;
+    try {
+      const { error } = await supabase.from('loan_accounts').delete().eq('id', loanId);
+      if (error) {
+        console.warn('Delete loan_accounts returned error:', error.message);
+      }
+    } catch (err) {
+      console.warn('Background delete loan account from Supabase failed:', err);
+    }
+  }
+
+  /**
    * Full bidirectional push: Pushes all local Dexie tables to Supabase cloud
    */
   async syncAllToCloud(): Promise<{ success: boolean; pushedCount: number; errors: string[] }> {
@@ -1352,6 +1417,22 @@ class CloudSyncService {
         }
       } catch (e: unknown) {
         errors.push(`Store Users: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      // 2b. Sync Loan Accounts (BEFORE products so loan_account_id foreign keys succeed)
+      try {
+        const loans = await db.loan_accounts.toArray();
+        if (loans.length > 0) {
+          const rows = loans.map((l) => sanitizeLoanAccountForSupabase(l, l.shop_id || primaryShopId, userId));
+          for (let i = 0; i < rows.length; i += 50) {
+            const chunk = rows.slice(i, i + 50);
+            const { error } = await supabase.from('loan_accounts').upsert(chunk, { onConflict: 'id' });
+            if (error) throw new Error(error.message);
+            pushedCount += chunk.length;
+          }
+        }
+      } catch (e: unknown) {
+        errors.push(`Loan Accounts: ${e instanceof Error ? e.message : String(e)}`);
       }
 
       // 3. Sync Wholesalers BEFORE Products (so foreign key wholesaler_id succeeds)
@@ -1732,7 +1813,41 @@ class CloudSyncService {
         console.warn('Pull products failed:', e);
       }
 
-      // 2b. Pull Wholesalers strictly scoped by shop_id
+      // 2b. Pull Loan Accounts strictly scoped by shop_id
+      try {
+        const { data: loans, error } = await supabase
+          .from('loan_accounts')
+          .select('*')
+          .in('shop_id', shopIdsToPull);
+
+        if (!error && loans && loans.length > 0) {
+          for (const l of loans) {
+            const loanRecord: LoanAccount = {
+              id: l.id,
+              shop_id: l.shop_id || shopId,
+              business_type: l.business_type || 'KIRANA_RETAIL',
+              name: l.name,
+              lender_name: l.lender_name,
+              principal_amount: Number(l.principal_amount ?? 0),
+              interest_rate_pct: Number(l.interest_rate_pct ?? 0),
+              emi_or_daily_target: Number(l.emi_or_daily_target ?? 0),
+              amount_repaid: Number(l.amount_repaid ?? 0),
+              is_active: l.status !== 'CLOSED' && l.status !== 'DEFAULTED',
+              status: l.status || 'ACTIVE',
+              notes: l.notes || undefined,
+              created_at: l.created_at || new Date().toISOString(),
+              updated_at: l.updated_at || undefined,
+            };
+            await kiranaDb.loan_accounts.put(loanRecord).catch(() => {});
+            await db.loan_accounts.put(loanRecord).catch(() => {});
+            pulledCount++;
+          }
+        }
+      } catch (e) {
+        console.warn('Pull loan_accounts failed:', e);
+      }
+
+      // 2c. Pull Wholesalers strictly scoped by shop_id
       try {
         const { data: wholesalers, error } = await supabase
           .from('wholesalers')
