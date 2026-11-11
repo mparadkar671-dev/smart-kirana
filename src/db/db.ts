@@ -351,16 +351,16 @@ export class KiranaDatabase extends Dexie {
           await this.customers.add(WALK_IN_CUSTOMER_RECORD);
         }
 
-        // 2. Ensure Shop Profile exists and is set to Laxmi Vatsalya Kirana & General Store
+        // 2. Ensure Shop Profile exists and is set to Laxmi Vatsalya General Store
         const profile = await this.shop_profile.get(DEFAULT_SHOP_PROFILE.id);
         if (!profile) {
           await this.shop_profile.add(DEFAULT_SHOP_PROFILE);
-        } else if (profile.business_type !== 'HOMEMADE_FOOD' && (profile.shop_name === 'Shree Ganesh Kirana' || profile.shop_name === 'Shree Ganesh Kirana & General Store')) {
+        } else if (profile.shop_name !== 'Laxmi Vatsalya General Store') {
           await this.shop_profile.update(DEFAULT_SHOP_PROFILE.id, {
-            shop_name: 'Laxmi Vatsalya Kirana & General Store',
+            shop_name: 'Laxmi Vatsalya General Store',
             owner_name: 'Pandurang Paradkar',
             phone: '9404380326',
-            upi_vpa: 'kirana@upi',
+            upi_vpa: '9404380326@upi',
             business_type: 'KIRANA_RETAIL',
             address: 'Laxmi Vatsalya General Store, Maharashtra',
             updated_at: new Date().toISOString(),
@@ -382,8 +382,8 @@ export class KiranaDatabase extends Dexie {
     const rawShopId =
       (typeof localStorage !== 'undefined'
         ? localStorage.getItem('kirana_active_shop_id') ||
-          localStorage.getItem('kirana_base_shop_id') ||
-          localStorage.getItem('smart_kirana_shop_id')
+        localStorage.getItem('kirana_base_shop_id') ||
+        localStorage.getItem('smart_kirana_shop_id')
         : null) || 'current_shop';
 
     const items = INITIAL_PRODUCTS.map((prod) => ({
@@ -420,7 +420,7 @@ export class KiranaDatabase extends Dexie {
           shop_id: rawShopId,
         },
         this.sync_outbox
-      ).catch(() => {});
+      ).catch(() => { });
     }
 
     // Seed initial demo customers if not already present
@@ -735,17 +735,17 @@ export class KiranaDatabase extends Dexie {
       const first = await this.shop_profile.toCollection().first();
       profile = first || DEFAULT_SHOP_PROFILE;
     }
-    if (profile && profile.business_type !== 'HOMEMADE_FOOD' && (profile.shop_name === 'Shree Ganesh Kirana' || profile.shop_name === 'Shree Ganesh Kirana & General Store')) {
+    if (profile && (profile.shop_name === 'Shree Ganesh Kirana' || profile.shop_name === 'Shree Ganesh Kirana & General Store' || profile.shop_name.includes('Gruh Udyog'))) {
       profile = {
         ...profile,
-        shop_name: 'Laxmi Vatsalya Kirana & General Store',
+        shop_name: 'Laxmi Vatsalya General Store',
         owner_name: 'Pandurang Paradkar',
         phone: '9404380326',
-        upi_vpa: 'kirana@upi',
+        upi_vpa: '9404380326@upi',
         business_type: 'KIRANA_RETAIL',
         address: 'Laxmi Vatsalya General Store, Maharashtra',
       };
-      this.shop_profile.put(profile).catch(() => {});
+      this.shop_profile.put(profile).catch(() => { });
     }
     return profile;
   }
@@ -1129,11 +1129,11 @@ export async function performCleanSlateV3IfNeeded(): Promise<void> {
   try {
     if (await Dexie.exists('SmartKiranaDB')) {
       const legacy = new Dexie('SmartKiranaDB');
-      await legacy.delete().catch(() => {});
+      await legacy.delete().catch(() => { });
     }
 
-    await kiranaDb.clearAllRecordsToEmpty().catch(() => {});
-    await kiranaDb.initializeDatabase({ seedDemo: true }).catch(() => {});
+    await kiranaDb.clearAllRecordsToEmpty().catch(() => { });
+    await kiranaDb.initializeDatabase({ seedDemo: true }).catch(() => { });
 
     localStorage.setItem('clean_slate_kirana_pure_done', 'true');
     console.log('Clean Slate: Standalone Pure Kirana Retail Database initialized.');

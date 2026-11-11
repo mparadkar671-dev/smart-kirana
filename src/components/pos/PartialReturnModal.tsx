@@ -21,8 +21,6 @@ export const PartialReturnModal: React.FC<PartialReturnModalProps> = ({
   customer,
   onSuccess,
 }) => {
-  if (!isOpen) return null;
-
   // Track return quantity per sale item
   const [returnQtys, setReturnQtys] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
@@ -38,6 +36,8 @@ export const PartialReturnModal: React.FC<PartialReturnModalProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  if (!isOpen) return null;
 
   const handleQtyChange = (itemId: string, maxQty: number, val: string) => {
     const num = parseFloat(val);

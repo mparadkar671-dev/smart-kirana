@@ -61,12 +61,9 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
       setErrorMsg(null);
       setTimeout(() => {
         searchInputRef.current?.focus();
-        searchInputRef.current?.select();
       }, 50);
     }
   }, [isOpen, initialCustomerId]);
-
-  if (!isOpen) return null;
 
   // Filter out system walk-in customer from Udhari list
   const filteredCustomers = customers
@@ -210,6 +207,8 @@ export const UdhariCheckoutModal: React.FC<UdhariCheckoutModalProps> = ({
     ownerOverrideApproved,
     onClose,
   ]);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">

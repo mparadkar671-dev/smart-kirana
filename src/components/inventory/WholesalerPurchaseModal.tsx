@@ -19,8 +19,6 @@ export const WholesalerPurchaseModal: React.FC<WholesalerPurchaseModalProps> = (
   wholesalers,
   onSuccess,
 }) => {
-  if (!isOpen) return null;
-
   const [selectedWholesalerId, setSelectedWholesalerId] = useState<string>(wholesalers[0]?.id || '');
   const [invoiceNumber, setInvoiceNumber] = useState<string>('');
   const [paymentMode, setPaymentMode] = useState<'CASH' | 'BANK_UPI' | 'CREDIT_UDHARI' | 'SPLIT'>('CREDIT_UDHARI');
@@ -50,6 +48,8 @@ export const WholesalerPurchaseModal: React.FC<WholesalerPurchaseModalProps> = (
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  if (!isOpen) return null;
 
   const handleAddRow = () => {
     const firstProd = products[0];
